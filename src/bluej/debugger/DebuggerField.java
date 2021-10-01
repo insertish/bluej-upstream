@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 2011  Michael Kolling and John Rosenberg 
+ Copyright (C) 2011,2018  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -35,6 +35,7 @@ public abstract class DebuggerField
     /**
      * Get the field name
      */
+    @OnThread(Tag.Any)
     public abstract String getName();
     
     /**
@@ -54,6 +55,7 @@ public abstract class DebuggerField
      * For a string, the return will be a quoted Java literal string expression.
      * For any other reference type, the return will be DebuggerObject.OBJECT_REFERENCE.
      */
+    @OnThread(Tag.Any)
     public abstract String getValueString();
     
     /**
@@ -63,6 +65,21 @@ public abstract class DebuggerField
      *                       May be null.
      */
     public abstract DebuggerObject getValueObject(JavaType expectedType);
+
+    /**
+     * If the field value is an object (or null), return it as a DebuggerObject.
+     * 
+     * JavaType is difficult to tag because its subclasses may use Parsed*Reflective
+     * classes, which are only safe for use on the FX thread.  However, when null is
+     * passed to the method it is thread-safe, so we make a delegate method here which
+     * we tag as Any, then suppress the thread checker.
+     */
+    @OnThread(Tag.Any)
+    @SuppressWarnings("threadchecker")
+    public DebuggerObject getValueObject()
+    {
+        return getValueObject(null);
+    }
 
     /**
      * Get the class which declares this field.

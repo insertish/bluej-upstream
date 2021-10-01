@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2010,2011,2012,2013,2014,2015,2016,2017  Michael Kolling and John Rosenberg
+ Copyright (C) 1999-2010,2011,2012,2013,2014,2015,2016,2017,2018  Michael Kolling and John Rosenberg
 
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -32,13 +32,11 @@ import bluej.parser.nodes.MethodNode;
 import bluej.parser.nodes.NodeTree.NodeAndPosition;
 import bluej.parser.nodes.ParsedNode;
 import bluej.prefmgr.PrefMgr;
-import bluej.prefmgr.PrefMgrDialog;
 import bluej.utility.Debug;
 import bluej.utility.Utility;
 import bluej.utility.javafx.FXAbstractAction;
 import bluej.utility.javafx.FXPlatformRunnable;
 import bluej.utility.javafx.JavaFXUtil;
-import javafx.application.Platform;
 import javafx.beans.binding.Bindings;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableMap;
@@ -48,7 +46,7 @@ import javafx.scene.input.KeyCodeCombination;
 import javafx.scene.input.KeyCombination;
 import javafx.scene.input.KeyCombination.Modifier;
 import javafx.scene.input.KeyCombination.ModifierValue;
-import org.fxmisc.richtext.model.NavigationActions.SelectionPolicy;
+import org.fxmisc.richtext.NavigationActions.SelectionPolicy;
 import org.fxmisc.richtext.model.TwoDimensional.Bias;
 import org.fxmisc.wellbehaved.event.EventPattern;
 import org.fxmisc.wellbehaved.event.InputMap;
@@ -405,9 +403,6 @@ public final class MoeActions
      * itself), and TAB characters at beginnings of lines in the template will
      * be converted to a spaced tab according to the current tabsize.
      *
-     * @param textPane
-     *            The editor pane to enter the text into
-     * @param editor
      * @param templateName
      *            The name of the template (without path or suffix)
      */
@@ -565,7 +560,7 @@ public final class MoeActions
             {
                 List<String> lines = Files.readAllLines(file.toPath(), Charset.forName("UTF-8")).stream()
                         .filter(l -> !l.startsWith("#") && !l.trim().isEmpty()).collect(Collectors.toList());
-                if (!lines.get(0).startsWith("version"))
+                if (lines.isEmpty() || !lines.get(0).startsWith("version"))
                     return false;
                 // Skip first line:
                 try
@@ -925,7 +920,7 @@ public final class MoeActions
      * Convert all tabs in this text to spaces, maintaining the current
      * indentation.
      *
-     * @param textPane The text pane to convert
+     * @param editor  Reference to the editor
      * @return  The number of tab characters converted
      */
     private static int convertTabsToSpaces(MoeEditor editor)
@@ -1536,7 +1531,6 @@ public final class MoeActions
     {
         return action("copy-line", Category.EDIT, () -> {
             boolean addToClipboard = lastActionWasCut;
-            int prevPos = editor.getSourcePane().getCaretPosition();
             editor.getSourcePane().paragraphStart(SelectionPolicy.CLEAR);
             editor.getSourcePane().paragraphEnd(SelectionPolicy.EXTEND);
             editor.getSourcePane().nextChar(SelectionPolicy.EXTEND);
@@ -1833,7 +1827,7 @@ public final class MoeActions
             int end = c.getCaretDot();
             prevWordAct.actionPerformed();
             int begin = c.getCaretDot();
-            c.replaceText(begin, end - begin, "");
+            c.replaceText(begin, end, "");
         });
     }
 

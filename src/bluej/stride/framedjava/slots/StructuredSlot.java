@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 2014,2015,2016,2017 Michael Kölling and John Rosenberg
+ Copyright (C) 2014,2015,2016,2017,2018 Michael Kölling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -42,7 +42,6 @@ import javafx.beans.binding.BooleanExpression;
 import javafx.beans.binding.StringExpression;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.ReadOnlyBooleanWrapper;
-import javafx.beans.property.ReadOnlyDoubleWrapper;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.beans.property.StringProperty;
@@ -88,7 +87,6 @@ import bluej.stride.slots.SuggestionList;
 import bluej.stride.slots.SuggestionList.SuggestionDetails;
 import bluej.stride.slots.SuggestionList.SuggestionDetailsWithCustomDoc;
 import bluej.stride.slots.SuggestionList.SuggestionListListener;
-import bluej.utility.Debug;
 import bluej.utility.Utility;
 import bluej.utility.javafx.ErrorUnderlineCanvas;
 import bluej.utility.javafx.FXBiConsumer;
@@ -538,9 +536,10 @@ public abstract class StructuredSlot<SLOT_FRAGMENT extends StructuredSlotFragmen
         return shownErrors.stream();
     }
 
+    @OnThread(Tag.FXPlatform)
     public void setText(String text)
     {
-        modification(token -> {
+        modificationPlatform(token -> {
             topLevel.blank(token);
             if (!"".equals(text))
             {
@@ -598,6 +597,7 @@ public abstract class StructuredSlot<SLOT_FRAGMENT extends StructuredSlotFragmen
         });
     }
 
+    @OnThread(Tag.FXPlatform)
     public void replace(int startPosInSlot, int endPosInSlot, boolean javaPos, String s)
     {
         if (javaPos)
@@ -652,16 +652,6 @@ public abstract class StructuredSlot<SLOT_FRAGMENT extends StructuredSlotFragmen
         JavaFXUtil.runNowOrLater(() -> editor.afterRegenerateAndReparse(null));
     }
     
-    private double overlayToSceneX(double overlayX)
-    {
-        return overlay.localToScene(overlayX, 0.0).getX();
-    }
-    
-    private double overlayToSceneY(double overlayY)
-    {
-        return overlay.localToScene(0.0, overlayY).getX();
-    }
-
     // package-visible
     double sceneToOverlayX(double sceneX)
     {
@@ -1116,6 +1106,7 @@ public abstract class StructuredSlot<SLOT_FRAGMENT extends StructuredSlotFragmen
         return false;
     }
     
+    @OnThread(Tag.FXPlatform)
     public boolean isShowingSuggestions()
     {
         return suggestionDisplay != null && suggestionDisplay.isShowing() && !suggestionDisplay.isInMiddleOfHiding();
@@ -1300,12 +1291,12 @@ public abstract class StructuredSlot<SLOT_FRAGMENT extends StructuredSlotFragmen
                     items.setAll(scanningItem);
 
                     CaretPos caretPos = getTopLevel().getCurrentPos();
-                    Debug.message("Scanning position: " + caretPos);
 
                     FXPlatformConsumer<Optional<LinkedIdentifier>> withLink = optLink -> {
                         removeScanning();
                         optLink.ifPresent(defLink -> {
-                            items.add(MenuItemOrder.GOTO_DEFINITION.item(JavaFXUtil.makeMenuItem("Go to definition of \"" + defLink.getName() + "\"", defLink.getOnClick(), null)));
+                            items.add(MenuItemOrder.GOTO_DEFINITION.item(JavaFXUtil.makeMenuItem(Config.getString("frame.slot.goto")
+                                    .replace("$", defLink.getName()), defLink.getOnClick(), null)));
                         });
                     };
 
@@ -1430,24 +1421,19 @@ public abstract class StructuredSlot<SLOT_FRAGMENT extends StructuredSlotFragmen
         modificationPlatform(token -> executeSuggestion(highlighted, token, suggestionList.getRecordingId()));
     }
     
-    
-
     @Override
     public void hidden() {
         fakeCaretShowing.set(false);
     }
 
-
-
-    // package visible
-    boolean suggestingFor(CaretPos fieldPos)
+    @OnThread(Tag.FXPlatform)
+    public boolean suggestingFor(CaretPos fieldPos)
     {
         return fieldPos != null && suggestionLocation != null && fieldPos.equals(suggestionLocation.init())
                 && suggestionDisplay != null && suggestionDisplay.isShowing();
     }
 
-
-
+    @OnThread(Tag.FXPlatform)
     public boolean deleteAtEnd()
     {
         if (row != null)
@@ -1457,13 +1443,12 @@ public abstract class StructuredSlot<SLOT_FRAGMENT extends StructuredSlotFragmen
         return false;
     }
 
-
-
+    @OnThread(Tag.FXPlatform)
     public void setSplitText(String beforeCursor, String afterCursor)
     {
-        modification(token -> {
+        modificationPlatform(token -> {
             topLevel.blank(token);
-            CaretPos p = topLevel.insert_(topLevel.getFirstField(), 0, beforeCursor, false, token);
+            CaretPos p = topLevel.insertImpl(topLevel.getFirstField(), 0, beforeCursor, false, token);
             topLevel.insertAtPos(p, afterCursor, token);
             token.after(() -> topLevel.positionCaret(p));
         });

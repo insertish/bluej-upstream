@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2015,2016,2017  Michael Kolling and John Rosenberg
+ Copyright (C) 1999-2015,2016,2017,2018  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -78,7 +78,6 @@ public final class MoeEditorManager extends bluej.editor.EditorManager
      * @param windowTitle  title of window (usually class name)
      * @param watcher      an watcher to be notified of edit events
      * @param compiled     true, if the class has been compiled
-     * @param bounds       the bounds of the window to appear on screen
      * @param projectResolver   A resolver for external symbols
      * 
      * @return          the new editor, or null if there was a problem
@@ -169,8 +168,6 @@ public final class MoeEditorManager extends bluej.editor.EditorManager
      * @param windowTitle  title of window (usually class name)
      * @param watcher      an object interested in editing events
      * @param compiled     true, if the class has been compiled
-     * @param bounds       bounds for the editor window. If the width and/or height are
-     *                     zero, then only the position (x,y) are to be used.
      * @param projectResolver   a resolver for external symbols
      * @returns       the new editor, or null if there was a problem
      */
@@ -178,7 +175,7 @@ public final class MoeEditorManager extends bluej.editor.EditorManager
             Charset charset,
             boolean isCode, String windowTitle,
             FXSupplier<FXTabbedEditor> fxTabbedEditor,
-            EditorWatcher watcher, boolean compiled, 
+            EditorWatcher watcher, boolean compiled,
             EntityResolver projectResolver,
             JavadocResolver javadocResolver,
             FXPlatformRunnable callbackOnOpen)

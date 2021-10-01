@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2011,2012,2014,2016,2017  Michael Kolling and John Rosenberg
+ Copyright (C) 1999-2009,2010,2011,2012,2014,2016,2017,2018  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -26,7 +26,6 @@ import java.net.URL;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -37,6 +36,7 @@ import bluej.BlueJEvent;
 import bluej.BlueJEventListener;
 import bluej.debugger.*;
 import bluej.utility.javafx.FXPlatformSupplier;
+import com.sun.jdi.*;
 import threadchecker.OnThread;
 import threadchecker.Tag;
 import bluej.Config;
@@ -44,17 +44,6 @@ import bluej.classmgr.BPClassLoader;
 import bluej.debugmgr.Invoker;
 import bluej.utility.Debug;
 import bluej.utility.JavaNames;
-
-import com.sun.jdi.ArrayReference;
-import com.sun.jdi.Field;
-import com.sun.jdi.InvocationException;
-import com.sun.jdi.ObjectReference;
-import com.sun.jdi.ReferenceType;
-import com.sun.jdi.StringReference;
-import com.sun.jdi.ThreadReference;
-import com.sun.jdi.VMDisconnectedException;
-import com.sun.jdi.VMOutOfMemoryException;
-import com.sun.jdi.Value;
 
 /**
  * A class implementing the execution and debugging primitives needed by BlueJ.
@@ -356,30 +345,48 @@ public class JdiDebugger extends Debugger
      * Create a class loader in the debugger.
      * @param bpClassLoader the class loader that should be used to load the user classes in the remote VM.
      */
-    public synchronized void newClassLoader(BPClassLoader bpClassLoader)
+    public void newClassLoader(BPClassLoader bpClassLoader)
     {
-        // lastProjectClassLoader is used if there is a VM restart
-        if (bpClassLoader != null) {
-            lastProjectClassLoader = bpClassLoader;
+        VMReference vmr = null;
+        synchronized (JdiDebugger.this)
+        {
+            // lastProjectClassLoader is used if there is a VM restart
+            if (bpClassLoader != null)
+            {
+                lastProjectClassLoader = bpClassLoader;
+            }
+            else
+            {
+                return;
+            }
+
+            vmr = getVMNoWait();
+            if (vmr != null)
+            {
+                usedNames.clear();
+            }
         }
-        else {
-            return;
-        }
-    
-        VMReference vmr = getVMNoWait();
-        if (vmr != null) {
-            usedNames.clear();
-            try {
+        // Do this outside the synchronized block, as otherwise we can deadlock if we wait
+        // for the worker thread to finish (which newClassLoader does) while holding the JdiDebugger
+        // monitor: the worker may be busy and hit a breakpoint, which requires the JdiDebugger monitor
+        // to handler before the worker thread can finish.
+        if (vmr != null)
+        {
+            try
+            {
                 vmr.clearAllBreakpoints();
                 vmr.newClassLoader(bpClassLoader.getURLs());
             }
-            catch (VMDisconnectedException vmde) {}
+            catch (VMDisconnectedException vmde)
+            {
+            }
         }
     }
 
     /**
      * Remove all breakpoints in the given class.
      */
+    @OnThread(Tag.Any)
     public void removeBreakpointsForClass(String className)
     {
         VMReference vmr = getVMNoWait();
@@ -454,7 +461,25 @@ public class JdiDebugger extends Debugger
         VMReference vmr = getVM();
         if (vmr != null) {
             try {
-                return JdiObject.getDebuggerObject(vmr.getMirror(value));
+                StringReference stringReference;
+                // When passed directly to getDebuggerObject, I've seen this collected
+                // before the point where we disable collection, so we do it in a loop here
+                // until we manage to disable collection before the item is collected:
+                do
+                {
+                    stringReference = vmr.getMirror(value);
+                    try
+                    {
+                        stringReference.disableCollection();
+                    }
+                    catch (ObjectCollectedException e)
+                    {
+                        // Try again...
+                    }
+                }
+                while (stringReference.isCollected());
+
+                return JdiObject.getDebuggerObject(stringReference);
             }
             catch (VMDisconnectedException vde) { }
             catch (VMOutOfMemoryException vmoome) { }
@@ -636,7 +661,7 @@ public class JdiDebugger extends Debugger
      */
     @Override
     @OnThread(Tag.Any)
-    public FXPlatformSupplier<DebuggerResult> runClassMain(String className)
+    public DebuggerResult runClassMain(String className)
         throws ClassNotFoundException
     {
         VMReference vmr = getVM();
@@ -645,7 +670,7 @@ public class JdiDebugger extends Debugger
                 return vmr.runShellClass(className);
             }
             else {
-                return null;
+                return new DebuggerResult(Debugger.TERMINATED);
             }
         }
     }
@@ -688,7 +713,7 @@ public class JdiDebugger extends Debugger
      */
     @Override
     @OnThread(Tag.Any)
-    public FXPlatformSupplier<DebuggerResult> instantiateClass(String className)
+    public DebuggerResult instantiateClass(String className)
     {
         VMReference vmr = getVM();
         if (vmr != null) {
@@ -697,7 +722,7 @@ public class JdiDebugger extends Debugger
             }
         }
         else {
-            return () -> new DebuggerResult(Debugger.TERMINATED);
+            return new DebuggerResult(Debugger.TERMINATED);
         }
     }
     
@@ -705,7 +730,8 @@ public class JdiDebugger extends Debugger
      * @see bluej.debugger.Debugger#instantiateClass(java.lang.String, java.lang.String[], bluej.debugger.DebuggerObject[])
      */
     @Override
-    public FXPlatformSupplier<DebuggerResult> instantiateClass(String className, String[] paramTypes, DebuggerObject[] args)
+    @OnThread(Tag.Any)
+    public DebuggerResult instantiateClass(String className, String[] paramTypes, DebuggerObject[] args)
     {
         // If there are no arguments, use the default constructor
         if (paramTypes == null || args == null || paramTypes.length == 0 || args.length == 0) {
@@ -726,7 +752,7 @@ public class JdiDebugger extends Debugger
             }
         }
         else {
-            return () -> new DebuggerResult(Debugger.TERMINATED);
+            return new DebuggerResult(Debugger.TERMINATED);
         }
     }
     
@@ -857,6 +883,7 @@ public class JdiDebugger extends Debugger
     /*
      * @see bluej.debugger.Debugger#toggleBreakpoint(java.lang.String, java.lang.String, boolean, java.util.Map)
      */
+    @OnThread(Tag.Any)
     public String toggleBreakpoint(String className, String method, boolean set, Map<String, String> properties)
     {
         VMReference vmr = getVM();
@@ -883,6 +910,7 @@ public class JdiDebugger extends Debugger
     /*
      * @see bluej.debugger.Debugger#toggleBreakpoint(bluej.debugger.DebuggerClass, java.lang.String, boolean, java.util.Map)
      */
+    @OnThread(Tag.Any)
     public String toggleBreakpoint(DebuggerClass debuggerClass, String method, boolean set, Map<String, String> properties)
     {
         VMReference vmr = getVM();
@@ -1069,7 +1097,7 @@ public class JdiDebugger extends Debugger
         MachineLoaderThread()
         {}
 
-        @OnThread(value = Tag.Unique, ignoreParent = true)
+        @OnThread(value = Tag.Worker, ignoreParent = true)
         public void run()
         {
             try {
@@ -1139,6 +1167,7 @@ public class JdiDebugger extends Debugger
     /**
      * Emit an event (to listeners) due to a thread being halted.
      */
+    @OnThread(Tag.Any)
     void emitThreadHaltEvent(JdiThread thread)
     {
         vmRef.emitThreadEvent(thread, true);
@@ -1147,6 +1176,7 @@ public class JdiDebugger extends Debugger
     /**
      * Emit an event (to listeners) due to a thread being resumed.
      */
+    @OnThread(Tag.Any)
     void emitThreadResumedEvent(JdiThread thread)
     {
         vmRef.emitThreadEvent(thread, false);

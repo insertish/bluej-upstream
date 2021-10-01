@@ -25,14 +25,14 @@ import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.Reader;
 import java.io.Writer;
-import java.util.BitSet;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import bluej.editor.moe.PrintDialog.PrintSize;
+import bluej.prefmgr.PrefMgr.PrintSize;
 import org.fxmisc.flowless.Cell;
 import org.fxmisc.flowless.VirtualFlow;
+import org.fxmisc.flowless.VirtualFlowHit;
+import org.fxmisc.richtext.Caret.CaretVisibility;
 import org.fxmisc.richtext.StyledTextArea;
-import org.fxmisc.richtext.model.StyledText;
 
 import com.google.common.collect.ImmutableSet;
 import com.google.common.io.CharStreams;
@@ -57,6 +57,8 @@ import javafx.scene.paint.ImagePattern;
 import threadchecker.OnThread;
 import threadchecker.Tag;
 
+import javax.swing.text.DefaultEditorKit;
+
 /**
  * MoeJEditorPane - an editor pane implementation based on StyledTextArea from the RichTextFX library.
  *
@@ -77,8 +79,8 @@ public final class MoeEditorPane extends StyledTextArea<ScopeInfo, ImmutableSet<
     // Disabled during printing if we don't want line numbers:
     private final BooleanProperty showLineNumbers = new SimpleBooleanProperty(true);
     private final AtomicBoolean queuedRecalculation = new AtomicBoolean(false);
-    // package-visible:
-    final BitSet visibleLines = new BitSet();
+    private int firstVisible = -1;
+    private int lastVisible = -1;
 
     public boolean isShowLineNumbers()
     {
@@ -93,7 +95,7 @@ public final class MoeEditorPane extends StyledTextArea<ScopeInfo, ImmutableSet<
     /**
      * Create an editor pane specifically for Moe.
      */
-    public MoeEditorPane(MoeEditor editor, org.fxmisc.richtext.model.EditableStyledDocument<ScopeInfo, StyledText<ImmutableSet<String>>, ImmutableSet<String>> doc, BlueJSyntaxView syntaxView, BooleanExpression compiledStatus)
+    public MoeEditorPane(MoeEditor editor, org.fxmisc.richtext.model.EditableStyledDocument<ScopeInfo, String, ImmutableSet<String>> doc, BlueJSyntaxView syntaxView, BooleanExpression compiledStatus)
     {
         super(null, (p, s) -> {
             if (s == null)
@@ -128,7 +130,11 @@ public final class MoeEditorPane extends StyledTextArea<ScopeInfo, ImmutableSet<
         }, doc, false);
         this.editor = editor;
         styleProperty().bind(PrefMgr.getEditorFontCSS(true));
-        setParagraphGraphicFactory(syntaxView::getParagraphicGraphic);
+        if (syntaxView != null)
+        {
+            syntaxView.setEditorPane(this);
+            setParagraphGraphicFactory(syntaxView::getParagraphicGraphic);
+        }
         JavaFXUtil.addStyleClass(this, "moe-editor-pane");
         showLineNumbers.bind(PrefMgr.flagProperty(PrefMgr.LINENUMBERS));
         JavaFXUtil.bindPseudoclass(this, "bj-line-numbers", showLineNumbers);
@@ -136,7 +142,6 @@ public final class MoeEditorPane extends StyledTextArea<ScopeInfo, ImmutableSet<
             JavaFXUtil.addChangeListenerPlatform(compiledStatus,
                     compiled -> JavaFXUtil.setPseudoclass("bj-uncompiled", !compiled, this));
         }
-        syntaxView.setEditorPane(this);
         setPrinting(false, null, false);
 
         JavaFXUtil.addChangeListenerPlatform(PrefMgr.getEditorFontSize(), sz -> {
@@ -148,6 +153,18 @@ public final class MoeEditorPane extends StyledTextArea<ScopeInfo, ImmutableSet<
         setupRedrawListener(virtualFlow);
     }
 
+    /**
+     * Check whether the specified line is currently visible on screen. If a line is
+     * is visible its character positions can be determined. 
+     * 
+     * @param line  the line number, starting at 0
+     * @return  true if the specified line is visible
+     */
+    public boolean lineIsVisible(int line)
+    {
+        return line >= firstVisible && line <= lastVisible;
+    }
+    
     /**
      * Set up a listener to calculate scope backgrounds for newly visible lines,
      * and schedule them to be painted if necessary.
@@ -168,18 +185,39 @@ public final class MoeEditorPane extends StyledTextArea<ScopeInfo, ImmutableSet<
                 {
                     queuedRecalculation.set(false);
                     int earliestIncomplete = -1, latestIncomplete = -1;
-                    visibleLines.clear();
-                    for (int i = 0; i < getParagraphs().size(); i++)
+                    firstVisible = -1;
+                    lastVisible = -1;
+                    
+                    VirtualFlowHit<C> vfh = virtualFlow.hit(0, 0);
+                    if (! vfh.isCellHit())
+                    {
+                        return;
+                    }
+                    
+                    firstVisible = vfh.getCellIndex();
+                    lastVisible = firstVisible + virtualFlow.visibleCells().size() - 1;
+                    
+                    for (int i = firstVisible; i <= lastVisible; i++)
                     {
                         ScopeInfo paragraphStyle = getDocument().getParagraphStyle(i);
-                        if (paragraphStyle != null && paragraphStyle.isIncomplete() && virtualFlow.getCellIfVisible(i).isPresent())
+                        boolean lineVisible = virtualFlow.getCellIfVisible(i).isPresent();
+                        if (lineVisible)
                         {
-                            if (earliestIncomplete == -1)
-                                earliestIncomplete = i;
-                            latestIncomplete = i;
+                            if (paragraphStyle != null && paragraphStyle.isIncomplete())
+                            {
+                                if (earliestIncomplete == -1)
+                                {
+                                    earliestIncomplete = i;
+                                }
+                                latestIncomplete = i;
+                            }
                         }
-                        visibleLines.set(i, virtualFlow.getCellIfVisible(i).isPresent());
+                        else
+                        {
+                            break;
+                        }
                     }
+                    
                     if (earliestIncomplete != -1)
                     {
                         editor.getSourceDocument().recalculateScopesForLinesInRange(earliestIncomplete, latestIncomplete);
@@ -205,17 +243,18 @@ public final class MoeEditorPane extends StyledTextArea<ScopeInfo, ImmutableSet<
         {
             styleProperty().unbind();
             // These sizes are picked by hand.  They are small because the Roboto Mono font
-            String fontSize = "9pt";
+            // is very large for its point size
+            String fontSize = "7pt";
             switch (printSize)
             {
                 case SMALL:
-                    fontSize = "7pt";
+                    fontSize = "5pt";
                     break;
                 case STANDARD:
-                    fontSize = "9pt";
+                    fontSize = "7pt";
                     break;
                 case LARGE:
-                    fontSize = "12pt";
+                    fontSize = "9pt";
                     break;
             }
             setStyle("-fx-font-size: " + fontSize + ";" + PrefMgr.getEditorFontFamilyCSS());
@@ -224,18 +263,6 @@ public final class MoeEditorPane extends StyledTextArea<ScopeInfo, ImmutableSet<
             this.showLineNumbers.set(showLineNumbers);
         }
     }
-
-    /*
-     * Make sure, when we are scrolling to follow the caret,
-     * that we can see the tag area as well.
-     */
-    /*
-    public void scrollRectToVisible(Rectangle rect)
-    {
-        super.scrollRectToVisible(new Rectangle(rect.x - (MoeSyntaxView.TAG_WIDTH + 4), rect.y,
-                                                rect.width + MoeSyntaxView.TAG_WIDTH + 4, rect.height));
-    }
-    */
 
     public void setText(String s)
     {
@@ -305,5 +332,20 @@ public final class MoeEditorPane extends StyledTextArea<ScopeInfo, ImmutableSet<
     public void setFakeCaret(boolean on)
     {
         setShowCaret(on ? CaretVisibility.ON : CaretVisibility.AUTO);
+    }
+
+    /**
+     * Select word using our rules. By default, RichTextFX doesn't count
+     * dots as word separator, so double-clicking "foo.bar" selects
+     * the whole lot.  We override to only select the part on our
+     * side of the dot.
+     */
+    @Override
+    @OnThread(value = Tag.FXPlatform, ignoreParent = true)
+    public void selectWord()
+    {
+        MoeActions actions = MoeActions.getActions(editor);
+        actions.getActionByName(DefaultEditorKit.beginWordAction).actionPerformed();
+        actions.getActionByName(DefaultEditorKit.selectionEndWordAction).actionPerformed();
     }
 }

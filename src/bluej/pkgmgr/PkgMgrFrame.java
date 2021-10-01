@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2010,2011,2012,2013,2014,2015,2016,2017  Michael Kolling and John Rosenberg
+ Copyright (C) 1999-2010,2011,2012,2013,2014,2015,2016,2017,2018  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -21,10 +21,8 @@
  */
 package bluej.pkgmgr;
 
-import bluej.BlueJEvent;
-import bluej.BlueJEventListener;
-import bluej.BlueJTheme;
-import bluej.Config;
+import bluej.*;
+import bluej.pkgmgr.AboutDialogTemplate;
 import bluej.classmgr.BPClassLoader;
 import bluej.collect.DataCollector;
 import bluej.compiler.CompileReason;
@@ -33,12 +31,12 @@ import bluej.debugger.Debugger;
 import bluej.debugger.DebuggerObject;
 import bluej.debugger.ExceptionDescription;
 import bluej.debugger.gentype.GenTypeClass;
-import bluej.debugmgr.ExecutionEvent;
 import bluej.debugmgr.ExpressionInformation;
 import bluej.debugmgr.Invoker;
 import bluej.debugmgr.LibraryCallDialog;
 import bluej.debugmgr.ResultWatcher;
 import bluej.debugmgr.codepad.CodePad;
+import bluej.debugmgr.objectbench.BluejResultWatcher;
 import bluej.debugmgr.objectbench.ObjectBench;
 import bluej.debugmgr.objectbench.ObjectWrapper;
 import bluej.editor.moe.PrintDialog;
@@ -67,6 +65,7 @@ import bluej.prefmgr.PrefMgr;
 import bluej.prefmgr.PrefMgrDialog;
 import bluej.testmgr.TestDisplayFrame;
 import bluej.testmgr.record.InvokerRecord;
+import bluej.utility.BlueJFileReader;
 import bluej.utility.Debug;
 import bluej.utility.DialogManager;
 import bluej.utility.FileUtility;
@@ -78,6 +77,7 @@ import bluej.utility.javafx.FXPlatformSupplier;
 import bluej.utility.javafx.JavaFXUtil;
 import bluej.utility.javafx.JavaFXUtil.FXOnlyMenu;
 import bluej.utility.javafx.TriangleArrow;
+import bluej.utility.javafx.UnfocusableScrollPane;
 import bluej.utility.javafx.UntitledCollapsiblePane;
 import bluej.utility.javafx.UntitledCollapsiblePane.ArrowLocation;
 import bluej.views.CallableView;
@@ -117,6 +117,7 @@ import javafx.scene.control.Menu;
 import javafx.scene.control.MenuBar;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.ScrollPane;
+import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
 import javafx.scene.image.WritableImage;
 import javafx.scene.input.Dragboard;
@@ -157,7 +158,7 @@ import java.util.stream.Collectors;
  * The main user interface frame which allows editing of packages
  */
 public class PkgMgrFrame
-    implements BlueJEventListener, PackageEditorListener
+    implements BlueJEventListener
 {
     /** Frame most recently having focus */
     @OnThread(Tag.Any)
@@ -343,16 +344,7 @@ public class PkgMgrFrame
             itemsToDisable.add(objbench);
 
             BorderPane topPane = new BorderPane();
-            pkgEditorScrollPane = new ScrollPane(null) {
-                @Override
-                @OnThread(Tag.FX)
-                public void requestFocus()
-                {
-                    // Override default behaviour (in which clicking on scroll pane
-                    // gives it focus).
-                    // Don't let the pane request focus.
-                }
-            };
+            pkgEditorScrollPane = new UnfocusableScrollPane(null);
             pkgEditorScrollPane.setVisible(false);
             pkgEditorScrollPane.visibleProperty().bind(pkgEditorScrollPane.contentProperty().isNotNull());
             pkgEditorScrollPane.setFitToWidth(true);
@@ -616,6 +608,18 @@ public class PkgMgrFrame
                     if (focused.booleanValue())
                     {
                         recentFrame = frame;
+                    }
+                    else
+                    {
+                        if (Config.isWinOS())
+                        {
+                            // We need to fire ESCAPE key-press and ESCAPE key-release events
+                            // because alt-tab triggers the menu and menu cannot be cancelled programmatically
+                            frame.getFXWindow().getScene().getRoot().fireEvent(
+                                    new KeyEvent(KeyEvent.KEY_PRESSED, "", "", KeyCode.ESCAPE, false, false, false, false));
+                            frame.getFXWindow().getScene().getRoot().fireEvent(
+                                    new KeyEvent(KeyEvent.KEY_RELEASED, "", "", KeyCode.ESCAPE, false, false, false, false));
+                        }
                     }
                 })
         );
@@ -972,27 +976,28 @@ public class PkgMgrFrame
     @OnThread(Tag.FXPlatform)
     public void openPackage(Package aPkg, PkgMgrFrame parentWindow)
     {
-        if (aPkg == null) {
-            throw new NullPointerException();
-        }
-
         // if we are already editing a package, close it and
         // open the new one
-        if (this.pkg.get() != null) {
+        if (this.pkg.get() != null)
+        {
             closePackage();
         }
 
         this.pkg.set(aPkg);
 
-        if(! Config.isGreenfoot()) {
-            this.editor = new PackageEditor(this, aPkg, this, showUsesProperty, showInheritsProperty, topOverlay);
+        if(! Config.isGreenfoot())
+        {
+            this.editor = new PackageEditor(this, aPkg, showUsesProperty, showInheritsProperty, topOverlay);
 
             pkgEditorScrollPane.setContent(editor);
             editor.setOnDragOver(event -> {
                 Dragboard db = event.getDragboard();
-                if (db.hasFiles()) {
+                if (db.hasFiles())
+                {
                     event.acceptTransferModes(TransferMode.COPY);
-                } else {
+                }
+                else
+                {
                     event.consume();
                 }
             });
@@ -1000,7 +1005,8 @@ public class PkgMgrFrame
             editor.setOnDragDropped(event -> {
                 Dragboard db = event.getDragboard();
                 boolean success = false;
-                if (db.hasFiles()) {
+                if (db.hasFiles())
+                {
                     success = true;
                     addFiles(db.getFiles());
                 }
@@ -1188,7 +1194,6 @@ public class PkgMgrFrame
             // Take a copy because we're about to null it:
             PackageEditor oldEd = editor;
             oldEd.removeEventFilter(javafx.scene.input.MouseEvent.MOUSE_PRESSED, editorMousePressed);
-            oldEd.graphClosed();
             pkgEditorScrollPane.setContent(null);
 
             // Disassociate from the project team actions, so that we don't inadvertently disable the
@@ -1358,7 +1363,9 @@ public class PkgMgrFrame
      */
     public void setWaitCursor(boolean wait)
     {
-        stageProperty.getValue().getScene().setCursor(wait ? Cursor.WAIT : null);
+        Stage stage = stageProperty.getValue();
+        if (stage != null)
+            stage.getScene().setCursor(wait ? Cursor.WAIT : null);
     }
 
     /**
@@ -1389,88 +1396,33 @@ public class PkgMgrFrame
 
     // --- non-interactive methods ---
 
-    /**
-     * Deal with an event generated by a target in the package we are currently
-     * editing.
-     * @param e The event to process
-     */
-    @Override
-    public void targetEvent(PackageEditorEvent e)
+    protected void putObjectOnBench(javafx.stage.Window srcWindow, DebuggerObject gotObj, GenTypeClass iType, InvokerRecord ir, boolean askForName, Optional<Point2D> animateFromScenePoint)
     {
-        int evtId = e.getID();
+        String name = getProject().getDebugger().guessNewName(gotObj);
 
-        switch(evtId) {
-            case PackageEditorEvent.TARGET_CALLABLE :
-                // user has initiated method call or constructor
-                callMethod(e.getCallable());
-                break;
+        boolean tryAgain = true;
+        do
+        {
+            String newObjectName = askForName ? DialogManager.askStringFX(srcWindow,
+                    "getobject-new-name", name) : name;
 
-            case PackageEditorEvent.TARGET_REMOVE :
-                // user has initiated target "remove" option
-                ((Target) e.getSource()).remove();
-                break;
-
-            case PackageEditorEvent.TARGET_OPEN :
-                // user has initiated a package open operation
-                openPackageTarget(e.getName());
-                break;
-
-            case PackageEditorEvent.TARGET_RUN :
-                // user has initiated a run operation
-                ClassTarget ct = (ClassTarget) e.getSource();
-                ct.getRole().run(this, ct, e.getName());
-                break;
-
-            case PackageEditorEvent.TARGET_BENCHTOFIXTURE :
-                // put objects on object bench into fixtures
-                objectBenchToTestFixture((ClassTarget) e.getSource());
-                break;
-
-            case PackageEditorEvent.TARGET_FIXTURETOBENCH :
-                // put objects on object bench into fixtures
-                testFixtureToObjectBench((ClassTarget) e.getSource());
-                break;
-
-            case PackageEditorEvent.TARGET_MAKETESTCASE :
-                // start recording a new test case
-                makeTestCase((ClassTarget) e.getSource());
-                break;
-
-            case PackageEditorEvent.OBJECT_PUTONBENCH :
-                // "Get" object from object inspector
-                DebuggerObject gotObj = e.getDebuggerObject();
-
-                String name = getProject().getDebugger().guessNewName(gotObj);
-
-                boolean tryAgain = true;
-                do
-                {
-                    String newObjectName = e.askForName() ? DialogManager.askStringFX((javafx.stage.Window)e.getSource(),
-                            "getobject-new-name", name) : name;
-
-                    if (newObjectName == null)
-                    {
-                        tryAgain = false; // cancelled
-                    }
-                    else if (JavaNames.isIdentifier(newObjectName))
-                    {
-                        DataCollector.benchGet(getPackage(), newObjectName, e.getDebuggerObject().getClassName(), getTestIdentifier());
-                        putObjectOnBench(newObjectName, e.getDebuggerObject(), e.getIType(), e.getInvokerRecord(), e.getAnimateFromScenePoint());
-                        tryAgain = false;
-                    }
-                    else
-                    {
-                        DialogManager.showErrorFX((javafx.stage.Window)e.getSource(), "must-be-identifier");
-                    }
-                } while (tryAgain);
-                break;
-        }
+            if (newObjectName == null)
+            {
+                tryAgain = false; // cancelled
+            }
+            else if (JavaNames.isIdentifier(newObjectName))
+            {
+                DataCollector.benchGet(getPackage(), newObjectName, gotObj.getClassName(), getTestIdentifier());
+                putObjectOnBench(newObjectName, gotObj, iType, ir, animateFromScenePoint);
+                tryAgain = false;
+            }
+            else
+            {
+                DialogManager.showErrorFX(srcWindow, "must-be-identifier");
+            }
+        } while (tryAgain);
     }
-    
-    /* (non-Javadoc)
-     * @see bluej.pkgmgr.PackageEditorListener#recordInteraction(bluej.testmgr.record.InvokerRecord)
-     */
-    @Override
+
     public void recordInteraction(InvokerRecord ir)
     {
         getObjectBench().addInteraction(ir);
@@ -1617,6 +1569,43 @@ public class PkgMgrFrame
     }
 
     /**
+     * Creates a duplicate for a class
+     *
+     * @param originalClassName the name of the class to be copied
+     * @param newClassName      the name of the new class
+     * @param originalFile      the source file of the class to be copied
+     * @param sourceType        the source of the classes. It is the same
+     *                          for the original and the new one
+     */
+    public void duplicateClass(String originalClassName, String newClassName, File originalFile, SourceType sourceType)
+    {
+        try
+        {
+            String extension = sourceType.getExtension();
+            File newFile = new File(originalFile.getParentFile(), newClassName + "." + extension);
+
+            Dictionary<String, String> translations = new Hashtable<>();
+            translations.put(originalClassName, newClassName);
+            BlueJFileReader.duplicateFile(originalFile, newFile, translations);
+
+            ClassTarget target = getPackage().addClass(newClassName);
+            getPackage().addTarget(target);
+            if (editor != null)
+            {
+                editor.findSpaceForVertex(target);
+                JavaFXUtil.scrollTo(pkgEditorScrollPane, target.getNode());
+            }
+            target.analyseSource();
+
+            DataCollector.addClass(getPackage(), target);
+        }
+        catch (IOException e)
+        {
+            Debug.reportError("Error in duplicating a class: ", e);
+        }
+    }
+
+    /**
      * Allow the user to select a directory into which we create a project.
      */
     public void doNewProject()
@@ -1661,26 +1650,33 @@ public class PkgMgrFrame
     }
 
     /**
-     * Open the project specified by 'projectPath'. Return false if not
-     * successful. Displays a warning dialog if the opened project resides in
-     * a read-only directory.
+     * Open the project specified by 'projectPath'. Displays an error dialog and returns false if
+     * not successful. Displays a warning dialog if the opened project resides in a read-only
+     * directory.
      */
     private boolean openProject(String projectPath)
     {
         Project openProj = Project.openProject(projectPath);
         if (openProj == null)
+        {
+            DialogManager.showErrorFX(getFXWindow(), "could-not-open-project");
             return false;
-        else {
+        }
+        else
+        {
             Package initialPkg = openProj.getPackage(openProj.getInitialPackageName());
 
             PkgMgrFrame pmf = findFrame(initialPkg);
 
-            if (pmf == null) {
-                if (isEmptyFrame()) {
+            if (pmf == null)
+            {
+                if (isEmptyFrame())
+                {
                     pmf = this;
                     openPackage(initialPkg, this);
                 }
-                else {
+                else
+                {
                     pmf = createFrame(initialPkg, this);
                 }
             }
@@ -1826,7 +1822,7 @@ public class PkgMgrFrame
         Properties p;
         if (pkg.get().isUnnamedPackage()) {
             // The unnamed package also contains project properties
-            p = getProject().getProjectProperties();
+            p = getProject().getProjectPropertiesCopy();
             getProject().saveEditorLocations(p);
             getProject().getImportScanner().saveCachedImports();
         }
@@ -1985,8 +1981,44 @@ public class PkgMgrFrame
      */
     public void aboutBlueJ()
     {
-        AboutBlueJ about = new AboutBlueJ(stageProperty.getValue(), bluej.Boot.BLUEJ_VERSION);
-        about.showAndWait();
+        String[] translatorNames = {
+                "Afrikaans",    "Petri Jooste",
+                "Arabic",       "Abdelkader Zitouni",
+                "Catalan",      "Santiago Manrique",
+                "Chinese",      "Ma Wing Ho and Biao Ma",
+                "Czech",        "Rudolf Pecinovský",
+                "Danish",       "Jacob Nordfalk",
+                "Dutch",        "Kris Coolsaet",
+                "French",       "Laurent Pierron",
+                "German",       "Michael Kolling, Stefan Mueller, Thomas Röfer, and Martin Schleyer",
+                "Greek",        "Ioannis G. Baltopoulos",
+                "Hindi",        "Tajvir Singh",
+                "Italian",      "Angelo Papadia and Luzio Menna",
+                "Montenegrin",  "Omer Djokic",
+                "Persian",      "M. Shahdoost",
+                "Portuguese",   "Fabio Hedayioglu and Fred Guedes Pereira",
+                "Russian",      "Sergey Zemlyannikov",
+                "Slovak",       "Roman Horváth",
+                "Spanish",      "Aldo Mettini, Viviana Marcela Alvarez Tomé, and José Ramón Puente Lerma",
+        };
+
+        String[] previousTeamMembers = {
+                "Damiano Bolla",
+                "Fabio Hedayioglu",
+                "Poul Henriksen",
+                "Clive Miller",
+                "Andrew Patterson",
+                "Bruce Quig",
+                "John Rosenberg",
+                "Phil Stevens",
+                "Ian Utting",
+                "Cecilia Vargas",
+                "Marion Zalk",
+        };
+
+        Image image = Config.getFixedImageAsFXImage("about-logo.png");
+        new AboutDialogTemplate(getFXWindow(), Boot.BLUEJ_VERSION,
+                "http://www.bluej.org/", image, translatorNames, previousTeamMembers).showAndWait();
     }
 
     /**
@@ -1994,17 +2026,19 @@ public class PkgMgrFrame
      */
     public void showCopyright()
     {
-        DialogManager.showTextFX(getFXWindow(), Arrays.asList(
-            Config.getString("menu.help.copyright.line0"), " ",
-            Config.getString("menu.help.copyright.line1"), Config.getString("menu.help.copyright.line2"),
-            Config.getString("menu.help.copyright.line3"), Config.getString("menu.help.copyright.line4")
-            ).stream().collect(Collectors.joining("\n")));
+        DialogManager.showTextFX(getFXWindow(), String.join("\n",
+                "BlueJ \u00a9 2000-2018 Michael K\u00F6lling, John Rosenberg.", "",
+                Config.getString("menu.help.copyright.line1"),
+                Config.getString("menu.help.copyright.line2"),
+                Config.getString("menu.help.copyright.line3"),
+                Config.getString("menu.help.copyright.line4")
+            ));
     }
 
     /**
      * Interactively call a class (ie static) method or a class constructor
      */
-    private void callMethod(final CallableView cv)
+    protected void callStaticMethodOrConstructor(final CallableView cv)
     {
         ResultWatcher watcher = null;
 
@@ -2012,83 +2046,52 @@ public class PkgMgrFrame
             // if we are constructing an object, create a watcher that waits for
             // completion of the call and then places the object on the object
             // bench
-            watcher = new ResultWatcher() {
+            watcher = new BluejResultWatcher(getPackage(), this, cv) {
                 @Override
                 public void beginCompile()
                 {
-                    setWaitCursor(true);
                     setStatus(Config.getString("pkgmgr.creating"));
+                    super.beginCompile();
                 }
                 
                 @Override
-                public void beginExecution(InvokerRecord ir)
+                protected void nonNullResult(DebuggerObject result, String name, InvokerRecord ir)
                 {
-                    BlueJEvent.raiseEvent(BlueJEvent.METHOD_CALL, ir);
-                    setWaitCursor(false);
-                }
-                
-                @Override
-                public void putResult(DebuggerObject result, String name, InvokerRecord ir)
-                {
-                    ExecutionEvent executionEvent = new ExecutionEvent(pkg.get(), cv.getClassName(), null);
-                    executionEvent.setParameters(cv.getParamTypes(false), ir.getArgumentValues());
-                    executionEvent.setResult(ExecutionEvent.NORMAL_EXIT);
-                    executionEvent.setResultObject(result);
-                    BlueJEvent.raiseEvent(BlueJEvent.EXECUTION_RESULT, executionEvent);
-
-                    Project proj = getPackage().getProject();
-                    proj.updateInspectors();
-                    setStatus(Config.getString("pkgmgr.createDone"));
+                    // Override the default behaviour (which would actually do nothing) to put the
+                    // object on the object bench:
                     
-                    // this shouldn't ever happen!! (ajp 5/12/02)
-                    if ((name == null) || (name.length() == 0))
-                        name = "result";
+                    ObjectWrapper wrapper = ObjectWrapper.getWrapper(PkgMgrFrame.this, getObjectBench(),
+                            result, result.getGenType(), name);
 
-                    if (result != null) {
-                        ObjectWrapper wrapper = ObjectWrapper.getWrapper(PkgMgrFrame.this, getObjectBench(), result,
-                                result.getGenType(), name);
-                        getObjectBench().addObject(wrapper);
-
-                        getPackage().getDebugger().addObject(pkg.get().getId(), wrapper.getName(), result);
-
-                        getObjectBench().addInteraction(ir);
-                    }
-                    else {
-                        // This shouldn't happen, but let's play it safe.
-                    }
+                    getObjectBench().addObject(wrapper);
+                    getPackage().getDebugger().addObject(pkg.get().getId(), wrapper.getName(), result);
                 }
 
                 @Override
                 public void putError(String msg, InvokerRecord ir)
                 {
                     setStatus("");
-                    setWaitCursor(false);
+                    super.putError(msg, ir);
                 }
                 
                 @Override
                 public void putException(ExceptionDescription exception, InvokerRecord ir)
                 {
-                    ExecutionEvent executionEvent = new ExecutionEvent(pkg.get(), cv.getClassName(), null);
-                    executionEvent.setParameters(cv.getParamTypes(false), ir.getArgumentValues());
-                    executionEvent.setResult(ExecutionEvent.EXCEPTION_EXIT);
-                    executionEvent.setException(exception);
-                    BlueJEvent.raiseEvent(BlueJEvent.EXECUTION_RESULT, executionEvent);
-                    
+                    super.putException(exception, ir);
                     setStatus("");
-                    getPackage().exceptionMessage(exception);
-                    Project proj = getPackage().getProject();
-                    proj.updateInspectors();
                 }
                 
                 @Override
                 public void putVMTerminated(InvokerRecord ir)
                 {
-                    ExecutionEvent executionEvent = new ExecutionEvent(pkg.get(), cv.getClassName(), null);
-                    executionEvent.setParameters(cv.getParamTypes(false), ir.getArgumentValues());
-                    executionEvent.setResult(ExecutionEvent.TERMINATED_EXIT);
-                    BlueJEvent.raiseEvent(BlueJEvent.EXECUTION_RESULT, executionEvent);
-                    
+                    super.putVMTerminated(ir);
                     setStatus("");
+                }
+                
+                @Override
+                protected void addInteraction(InvokerRecord ir)
+                {
+                    getObjectBench().addInteraction(ir);
                 }
             };
         }
@@ -2098,7 +2101,7 @@ public class PkgMgrFrame
             // create a watcher
             // that waits for completion of the call and then displays the
             // result (or does nothing if void)
-            watcher = new ResultWatcher() {
+            watcher = new BluejResultWatcher(getPackage(), this, cv) {
                 private final ExpressionInformation expressionInformation = new ExpressionInformation(mv, mv.getName());
 
                 @Override
@@ -2112,36 +2115,8 @@ public class PkgMgrFrame
                 }
                 
                 @Override
-                public void beginExecution(InvokerRecord ir)
+                protected void nonNullResult(DebuggerObject result, String name, InvokerRecord ir)
                 {
-                    BlueJEvent.raiseEvent(BlueJEvent.METHOD_CALL, ir);
-                    setWaitCursor(false);
-                }
-                
-                @Override
-                public void putResult(DebuggerObject result, String name, InvokerRecord ir)
-                {
-                    ExecutionEvent executionEvent = new ExecutionEvent(pkg.get(), cv.getClassName(), null);
-                    executionEvent.setMethodName(mv.getName());
-                    executionEvent.setParameters(cv.getParamTypes(false), ir.getArgumentValues());
-                    executionEvent.setResult(ExecutionEvent.NORMAL_EXIT);
-                    executionEvent.setResultObject(result);
-                    BlueJEvent.raiseEvent(BlueJEvent.EXECUTION_RESULT, executionEvent);
-
-                    Project proj = getPackage().getProject();
-                    proj.updateInspectors();
-                    expressionInformation.setArgumentValues(ir.getArgumentValues());
-                    getObjectBench().addInteraction(ir);
-
-                    // a void result returns a name of null
-                    if (name == null)
-                        return;
-
-                    //The result can be null when terminating the program while
-                    // at a breakpoint in a method that has a return value.
-                    if (result == null)
-                        return;
-
                     Project project = getProject();
                     Package pkg = getPackage();
 
@@ -2150,32 +2125,9 @@ public class PkgMgrFrame
                 }
 
                 @Override
-                public void putError(String msg, InvokerRecord ir)
+                protected void addInteraction(InvokerRecord ir)
                 {
-                    setWaitCursor(false);
-                }
-                
-                @Override
-                public void putException(ExceptionDescription exception, InvokerRecord ir)
-                {
-                    ExecutionEvent executionEvent = new ExecutionEvent(pkg.get(), cv.getClassName(), null);
-                    executionEvent.setParameters(cv.getParamTypes(false), ir.getArgumentValues());
-                    executionEvent.setResult(ExecutionEvent.EXCEPTION_EXIT);
-                    executionEvent.setException(exception);
-                    BlueJEvent.raiseEvent(BlueJEvent.EXECUTION_RESULT, executionEvent);
-
-                    Project proj = getPackage().getProject();
-                    proj.updateInspectors();
-                    getPackage().exceptionMessage(exception);
-                }
-                
-                @Override
-                public void putVMTerminated(InvokerRecord ir)
-                {
-                    ExecutionEvent executionEvent = new ExecutionEvent(pkg.get(), cv.getClassName(), null);
-                    executionEvent.setParameters(cv.getParamTypes(false), ir.getArgumentValues());
-                    executionEvent.setResult(ExecutionEvent.TERMINATED_EXIT);
-                    BlueJEvent.raiseEvent(BlueJEvent.EXECUTION_RESULT, executionEvent);
+                    getObjectBench().addInteraction(ir);
                 }
             };
         }
@@ -2189,7 +2141,7 @@ public class PkgMgrFrame
     /**
      * Open a package target.
      */
-    private void openPackageTarget(String newname)
+    protected void openPackageTarget(String newname)
     {
         PkgMgrFrame pmf;
         Package p = getPackage().getProject().getPackage(newname);
@@ -2204,7 +2156,7 @@ public class PkgMgrFrame
      * Create the text fixture method in the indicated target on from the
      * current objects on the object bench.
      */
-    private void objectBenchToTestFixture(ClassTarget target)
+    protected void objectBenchToTestFixture(ClassTarget target)
     {
         if (target.getRole() instanceof UnitTestClassRole) {
             UnitTestClassRole utcr = (UnitTestClassRole) target.getRole();
@@ -2217,7 +2169,7 @@ public class PkgMgrFrame
      * Build the text fixture specified in the indicated target on the object
      * bench.
      */
-    private void testFixtureToObjectBench(ClassTarget target)
+    protected void testFixtureToObjectBench(ClassTarget target)
     {
         if (target.getRole() instanceof UnitTestClassRole) {
             UnitTestClassRole utcr = (UnitTestClassRole) target.getRole();
@@ -2228,7 +2180,7 @@ public class PkgMgrFrame
     /**
      * Create a test method for the indicated target.
      */
-    private void makeTestCase(ClassTarget target)
+    protected void makeTestCase(ClassTarget target)
     {
         if (target.getRole() instanceof UnitTestClassRole) {
             UnitTestClassRole utcr = (UnitTestClassRole) target.getRole();
@@ -2641,7 +2593,7 @@ public class PkgMgrFrame
         libraryCallDialog.requestfocus();
         Optional<CallableView> result = libraryCallDialog.showAndWait();
         result.ifPresent(viewToCall -> {
-            pkgRef.getEditor().raiseMethodCallEvent(pkgRef, viewToCall);
+            pkgRef.callStaticMethodOrConstructor(viewToCall);
         });
     }
 
@@ -2667,19 +2619,7 @@ public class PkgMgrFrame
      */
     public boolean checkDebuggerState()
     {
-        Debugger debugger = getProject().getDebugger();
-        if (debugger.getStatus() == Debugger.SUSPENDED) {
-            setVisible(true);
-            DialogManager.showErrorFX(getFXWindow(), "stuck-at-breakpoint");
-            return false;
-        }
-        else if (debugger.getStatus() == Debugger.RUNNING) {
-            setVisible(true);
-            DialogManager.showErrorFX(getFXWindow(), "already-executing");
-            return false;
-        }
-        
-        return true;
+        return ProjectUtils.checkDebuggerState(getProject(), getFXWindow());
     }
 
     /**
@@ -3073,7 +3013,8 @@ public class PkgMgrFrame
 
             menu.getItems().add(printAction.makeMenuItem());
 
-            if (!Config.usingMacScreenMenubar()) { // no "Quit" here for Mac
+            if (!Config.isMacOS()) // no "Quit" here for Mac
+            {
                 menu.getItems().add(new SeparatorMenuItem());
                 menu.getItems().add(new QuitAction(this).makeMenuItem());
             }
@@ -3161,14 +3102,13 @@ public class PkgMgrFrame
             }
             mixedMenu.addFX(() -> teamMenu);
 
-            if (!Config.usingMacScreenMenubar()) { // no "Preferences" here for
-                                                   // Mac
+            if (!Config.isMacOS()) // no "Preferences" here for Mac
+            {
                 mixedMenu.addFX(SeparatorMenuItem::new);
                 mixedMenu.addFX(() -> new PreferencesAction(this).makeMenuItem());
             }
 
             // If this is the first frame create the extension tools menu now.
-            // (Otherwise, it will be created during project open.)
             // (Otherwise, it will be created during project open.)
             if (frameCount() <= 1)
             {
@@ -3225,7 +3165,8 @@ public class PkgMgrFrame
 
         {
             Menu menu = new Menu(Config.getString("menu.help"));
-            if (!Config.usingMacScreenMenubar()) { // no "About" here for Mac
+            if (!Config.isMacOS()) // no "About" here for Mac
+            {
                 menu.getItems().add(new HelpAboutAction(this).makeMenuItem());
             }
             menu.getItems().add(new CheckVersionAction(this).makeMenuItem());
@@ -3268,7 +3209,10 @@ public class PkgMgrFrame
             synchronized (this)
             {
                 PackageEditor pkgEd = pkg.get().getEditor();
-                pkgEd.clearState();
+                if (pkgEd != null)
+                {
+                    pkgEd.clearState();
+                }
             }
         }
         clearStatus();
@@ -3524,9 +3468,28 @@ public class PkgMgrFrame
         // It seems to print corrupted (though I don't know why),
         // so we thread hop to take a screenshot and print that;
         JavaFXUtil.runPlatformLater(() -> {
-            WritableImage image = new WritableImage((int)editor.getWidth(), (int)editor.getHeight());
-            this.editor.snapshot(null, image);
-            printJob.printPage(new ImageView(image));
+            WritableImage snapshotImage = new WritableImage((int)editor.getWidth(), (int)editor.getHeight());
+            this.editor.snapshot(null, snapshotImage);
+
+            // We want to print landscape so we need to rotate the snapshow.
+            // No amount of rotate transforms during snapshot or on ImageView seem to produce
+            // the right result layout-wise, so we just rotate the image ourselves:
+            int rotatedWidth = (int) snapshotImage.getHeight();
+            int rotatedHeight = (int) snapshotImage.getWidth();
+            WritableImage rotatedImage = new WritableImage(rotatedWidth, rotatedHeight);
+            for (int y = 0; y < rotatedHeight; y++)
+            {
+                for (int x = 0; x < rotatedWidth; x++)
+                {
+                    rotatedImage.getPixelWriter().setColor(x, y, snapshotImage.getPixelReader().getColor( rotatedHeight - 1 - y, x));
+                }
+            }
+
+            ImageView imageView = new ImageView(rotatedImage);
+            imageView.setPreserveRatio(true);
+            imageView.setFitWidth(printJob.getJobSettings().getPageLayout().getPrintableWidth());
+            imageView.setFitHeight(printJob.getJobSettings().getPageLayout().getPrintableHeight());
+            printJob.printPage(imageView);
             done.complete(true);
         });
         try

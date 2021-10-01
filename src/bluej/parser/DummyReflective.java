@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 2010,2014,2015  Michael Kolling and John Rosenberg
+ Copyright (C) 2010,2014,2015,2018  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -34,6 +34,8 @@ import bluej.debugger.gentype.GenTypeDeclTpar;
 import bluej.debugger.gentype.MethodReflective;
 import bluej.debugger.gentype.Reflective;
 import bluej.utility.JavaReflective;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 
 /**
  * This class acts as purely as an access source in TextAnalyzer. It
@@ -42,6 +44,7 @@ import bluej.utility.JavaReflective;
  * 
  * @author Davin McCall
  */
+@OnThread(Tag.Any)
 public class DummyReflective extends Reflective
 {
     private String name;
@@ -123,6 +126,12 @@ public class DummyReflective extends Reflective
 
     @Override
     public boolean isStatic()
+    {
+        return false;
+    }
+    
+    @Override
+    public boolean isFinal()
     {
         return false;
     }

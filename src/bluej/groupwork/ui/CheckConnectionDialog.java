@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2016,2017  Michael Kolling and John Rosenberg
+ Copyright (C) 1999-2009,2016,2017,2018  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -86,18 +86,20 @@ public class CheckConnectionDialog extends FXCustomizedDialog<Void>
         // we are modal - showAndWait will block.
         new Thread(new Runnable() {
             @Override
-            @OnThread(Tag.Unique)
+            @OnThread(Tag.Worker)
             public void run() {
                 final TeamworkCommandResult res = provider.checkConnection(settings);
                 Platform.runLater(() -> {
-                    if (!res.isError()) {
+                    if (!res.isError())
+                    {
                         connLabel.setText(Config.getString("team.checkconn.ok"));
-                    } else {
+                    }
+                    else
+                    {
                         connLabel.setText(Config.getString("team.checkconn.bad")
                                 + System.getProperty("line.separator") + System.getProperty("line.separator")
                                 + res.getErrorMessage());
                     }
-
                     activityIndicator.setProgress(1.0);
                 });
             }

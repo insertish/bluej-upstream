@@ -148,13 +148,11 @@ public final class Config
                                                        // command line
     private static Properties langProps;        // international labels
     private static Properties langVarProps;     // language label variables (APPNAME)
-    private static BlueJPropStringSource propSource; // source for properties
     private static File bluejLibDir;
     private static File userPrefDir;
     private static File templateDir;
     /** The greenfoot subdirectory of the "lib"-directory*/ 
     private static File greenfootLibDir;
-    private static boolean usingMacOSScreenMenubar;
     private static boolean initialised = false;
     private static boolean isGreenfoot = false;
     private static List<String> debugVMArgs = new ArrayList<>();
@@ -165,7 +163,9 @@ public final class Config
 
     /**
      * Initialisation of BlueJ configuration. Must be called at startup.
-     * This method finds and opens the configuration files.<p>
+     * This method finds and opens the configuration files.
+     * 
+     * This is only called from the main/server VM
      * 
      * See also initializeVMside().
      */
@@ -173,6 +173,8 @@ public final class Config
                                   boolean bootingGreenfoot)
     {
         initialise(bluejLibDir, tempCommandLineProps, bootingGreenfoot, true);
+        // Load any debug vm args (only needed on server VM):
+        initDebugVMArgs();
     }
     
     /**
@@ -248,15 +250,12 @@ public final class Config
         moeUserProps = new Properties(moeSystemProps);
         loadProperties("moe", moeUserProps);  // add user specific editor definitions
 
-        // Whether or not to use the screen menu bar on a Mac
+        // Whether or not to use the screen menu bar on a Mac. This only affects Swing, so should
+        // not have any effect on BlueJ/Greenfoot itself in current versions, but just in case
+        // extensions display Swing frames we'll still set it:
         String macOSscreenMenuBar = Config.getPropString("bluej.macos.screenmenubar", "true");
-        // The value of the BlueJ property overrides the system setting
         System.setProperty("apple.laf.useScreenMenuBar", macOSscreenMenuBar);      
 
-        usingMacOSScreenMenubar = isMacOS() && macOSscreenMenuBar.equals("true");
-
-        //read any debug vm args
-        initDebugVMArgs();
         Config.setVMLocale();
         
         // Create a property containing the BlueJ version string
@@ -370,11 +369,9 @@ public final class Config
      */    
     public static void initializeVMside(File bluejLibDir,
             File userConfigDir,
-            Properties tempCommandLineProps, boolean bootingGreenfoot,
             BlueJPropStringSource propSource)
     {
         isDebugVm = true;
-        Config.propSource = propSource;
         Config.userPrefDir = userConfigDir;
 
         // Set up the properties so that they use the properties from the
@@ -383,37 +380,37 @@ public final class Config
             @Override
             public String getProperty(String key)
             {
-                return Config.propSource.getBlueJPropertyString(key, null);
+                return propSource.getBlueJPropertyString(key, null);
             }
 
             @Override
             public String getProperty(String key, String def)
             {
-                return Config.propSource.getBlueJPropertyString(key, def);
+                return propSource.getBlueJPropertyString(key, def);
             }
         };
         userProps = new Properties(systemProps) {
             @Override
             public synchronized Object setProperty(String key, String val)
             {
-                String rval = getProperty(key);
-                Config.propSource.setUserProperty(key, val);
-                return rval;
+                // Debug VM should not be setting properties:
+                Debug.printCallStack("Internal error: setting user property on debug VM");
+                return null;
             }
             
             @Override
             public String getProperty(String key)
             {
-                return Config.propSource.getBlueJPropertyString(key, null);
+                return propSource.getBlueJPropertyString(key, null);
             }
 
             @Override
             public String getProperty(String key, String def)
             {
-                return Config.propSource.getBlueJPropertyString(key, def);
+                return propSource.getBlueJPropertyString(key, def);
             }
         };
-        initialise(bluejLibDir, tempCommandLineProps, bootingGreenfoot, false);
+        initialise(bluejLibDir, new Properties(), true, false);
     }
     
     /**
@@ -436,19 +433,18 @@ public final class Config
     
         initialised = true;
         Config.isGreenfoot = true;
-        Config.propSource = propSource;
         
         langProps =  new Properties() {
             @Override
             public String getProperty(String key)
             {
-                return Config.propSource.getLabel(key);
+                return propSource.getLabel(key);
             }
             
             @Override
             public String getProperty(String key, String def)
             {
-                return Config.propSource.getLabel(key);
+                return propSource.getLabel(key);
             }
         };
         commandProps = langProps;
@@ -653,14 +649,6 @@ public final class Config
         return "BlueJ";
     }
     
-    /**
-     * Tell us whether we are using a Mac screen menubar
-     */
-    public static boolean usingMacScreenMenubar()
-    {
-        return usingMacOSScreenMenubar;
-    }
-
     /**
      * Get the screen size information
      */
@@ -1477,7 +1465,7 @@ public final class Config
     public static File getTemplateDir()
     {
     	if (templateDir == null) {
-    		String path = commandProps.getProperty("bluej.templatePath" , "");
+    		String path = getPropString("bluej.templatePath", "");
     		if(path.length() == 0) {
     			templateDir = getLanguageFile("templates");
     			if (! templateDir.exists()) {
@@ -1506,7 +1494,7 @@ public final class Config
      */
     public static File getClassTemplateDir()
     {
-        return new File(getTemplateDir().getPath() + "/newclass");
+        return new File(getTemplateDir(), "newclass");
     }
 
     /**
@@ -1906,6 +1894,13 @@ public final class Config
     {
         addStylesheet(scene.getStylesheets(), "pkgmgrframe");
     }
+
+    @OnThread(Tag.FX)
+    public static void addGreenfootStylesheets(Scene scene)
+    {
+        addStylesheet(scene.getStylesheets(), "greenfoot");
+    }
+
 
     @OnThread(Tag.FX)
     private static void addStylesheet(ObservableList<String> sheetList, String stem)

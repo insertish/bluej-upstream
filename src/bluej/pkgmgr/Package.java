@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2010,2011,2012,2013,2014,2015,2016,2017  Michael Kolling and John Rosenberg
+ Copyright (C) 1999-2010,2011,2012,2013,2014,2015,2016,2017,2018  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -29,20 +29,10 @@ import java.lang.reflect.Modifier;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-import java.util.Properties;
-import java.util.Set;
-import java.util.TreeSet;
+import java.util.*;
 
 import bluej.extensions.event.DependencyEvent;
+import bluej.views.CallableView;
 import javafx.application.Platform;
 
 import bluej.compiler.CompileInputFile;
@@ -216,7 +206,12 @@ public final class Package
     public static final int HISTORY_LENGTH = 6;
     
     @OnThread(value = Tag.Any, requireSynchronized = true)
-    private PackageEditor editor;
+    private PackageListener editor;
+
+    private PackageUI ui;
+    
+    @OnThread(Tag.FXPlatform)    
+    private List<PackageListener> listeners = new ArrayList<>();
 
     //package-visible
     List<UsesDependency> getUsesArrows()
@@ -246,6 +241,8 @@ public final class Package
     /** Whether a compilation has been queued (behind the current compile job). Only one compile can be queued. */
     private boolean queuedCompile = false;
     private CompileReason queuedReason;
+    
+    private final List<FXCompileObserver> compileObservers = new ArrayList<>();
     
     /** File pointing at the directory for this package */
     @OnThread(Tag.Any)
@@ -518,11 +515,25 @@ public final class Package
      * @param ed The PackageEditor.  Non-null when opening, null when
      *           closing.
      */
+    @OnThread(Tag.FXPlatform)
     void setEditor(PackageEditor ed)
     {
+        setUI(ed);
         synchronized (this)
         {
+            if (this.editor != null)
+            {
+                removeListener(ed);
+            }
             this.editor = ed;
+            if (ed != null)
+            {
+                addListener(ed);
+            }
+        }
+        
+        if (ed == null) {
+            fireClosedEvent();
         }
 
         // Note we use ed here, not editor, as editor needs synchronized access
@@ -549,12 +560,76 @@ public final class Package
         }
     }
     
+    /**
+     * Get the editor for this package, as a PackageEditor. This should be considered deprecated;
+     * use getUI() instead if possible. May return null.
+     */
     @OnThread(Tag.Any)
     public synchronized PackageEditor getEditor()
     {
-        return editor;
+        return (PackageEditor) editor;
+    }
+    
+    /**
+     * Set the UI controller for this package.
+     */
+    public void setUI(PackageUI ui)
+    {
+        this.ui = ui;
+    }
+    
+    /**
+     * Retrieve the UI controller for this package. (May return null if no UI has been set; however,
+     * most operations requiring the UI should be performed in contexts where the UI has been set, so
+     * it should normally be safe to assume non-null return).
+     */
+    public PackageUI getUI()
+    {
+        return ui;
     }
 
+    /**
+     * Add a listener for this package.
+     */
+    public synchronized void addListener(PackageListener pl)
+    {
+        listeners.add(pl);
+    }
+    
+    /**
+     * Remove a listener for this package.
+     */
+    public synchronized void removeListener(PackageListener pl)
+    {
+        listeners.remove(pl);
+    }
+    
+    /**
+     * Fire a "package closed" event to listeners.
+     */
+    @OnThread(Tag.FXPlatform)
+    private void fireClosedEvent()
+    {
+        // Note we take a copy of the listener list as listeners will probably be removed during processing.
+        List<PackageListener> listenersCopy = new ArrayList<PackageListener>(listeners);
+        for (PackageListener l : listenersCopy)
+        {
+            l.graphClosed();
+        }
+    }
+    
+    /**
+     * Fire a "graph changed" event to listeners.
+     */
+    @OnThread(Tag.FXPlatform)
+    private void fireChangedEvent()
+    {
+        for (PackageListener l : listeners)
+        {
+            l.graphChanged();
+        }
+    }
+    
     /**
      * Get the package properties, as most recently saved. The returned Properties set should be considered
      * immutable.
@@ -1007,7 +1082,10 @@ public final class Package
 
             if (target == null) {
                 Target newtarget = addClass(targetName);
-                getEditor().findSpaceForVertex(newtarget);
+                if (getEditor() != null)
+                {
+                    getEditor().findSpaceForVertex(newtarget);
+                }
             }
         }
 
@@ -1293,7 +1371,7 @@ public final class Package
      *                  methods may not be called if the compilation is aborted
      *                  (sources cannot be saved etc).
      */
-    public void compile(CompileObserver compObserver, CompileReason reason, CompileType type)
+    public void compile(FXCompileObserver compObserver, CompileReason reason, CompileType type)
     {
         Set<ClassTarget> toCompile = new HashSet<ClassTarget>();
 
@@ -1322,7 +1400,12 @@ public final class Package
                     project.removeClassLoader();
                     project.newRemoteClassLoaderLeavingBreakpoints();
                 }
-                doCompile(toCompile, new PackageCompileObserver(compObserver), reason, type);
+                ArrayList<FXCompileObserver> observers = new ArrayList<>(compileObservers);
+                if (compObserver != null)
+                {
+                    observers.add(compObserver);
+                }
+                doCompile(toCompile, new PackageCompileObserver(observers), reason, type);
             }
             else {
                 if (compObserver != null) {
@@ -1354,23 +1437,30 @@ public final class Package
     {
         if (! currentlyCompiling) { 
             currentlyCompiling = true;
-            compile(new CompileObserver() {
-                    @Override
-                    public void compilerMessage(Diagnostic diagnostic, CompileType type) {  }
-                    @Override
-                    public void startCompile(CompileInputFile[] sources, CompileReason reason, CompileType type, int compilationSequence) { }
-                    @Override
-                    public void endCompile(CompileInputFile[] sources, boolean succesful, CompileType type2, int compilationSequence)
-                    {
-                        // This will be called on the Swing thread.
-                        currentlyCompiling = false;
-                        if (queuedCompile) {
-                            queuedCompile = false;
-                            compile(queuedReason, type);
-                            queuedReason = null;
-                        }
+            compile(new FXCompileObserver() {
+                // The return of this method will be ignored,
+                // as PackageCompileObserver which chains to us, ignores it
+                @Override
+                @OnThread(Tag.FXPlatform)
+                public boolean compilerMessage(Diagnostic diagnostic, CompileType type) { return false; }
+                
+                @Override
+                @OnThread(Tag.FXPlatform)
+                public void startCompile(CompileInputFile[] sources, CompileReason reason, CompileType type, int compilationSequence) { }
+                
+                @Override
+                @OnThread(Tag.FXPlatform)
+                public void endCompile(CompileInputFile[] sources, boolean succesful, CompileType type2, int compilationSequence)
+                {
+                    // This will be called on the Swing thread.
+                    currentlyCompiling = false;
+                    if (queuedCompile) {
+                        queuedCompile = false;
+                        compile(queuedReason, type);
+                        queuedReason = null;
                     }
-                }, reason, type);
+                }
+            }, reason, type);
         }
         else {
             queuedCompile = true;
@@ -1389,7 +1479,7 @@ public final class Package
     /**
      * Compile a single class.
      */
-    public void compile(ClassTarget ct, boolean forceQuiet, CompileObserver compObserver, CompileReason reason, CompileType type)
+    public void compile(ClassTarget ct, boolean forceQuiet, FXCompileObserver compObserver, CompileReason reason, CompileType type)
     {
         if (!checkCompile()) {
             return;
@@ -1414,11 +1504,16 @@ public final class Package
             }
 
             if (ct != null) {
+                ArrayList<FXCompileObserver> chainedObservers = new ArrayList<>(compileObservers);
+                if (compObserver != null)
+                {
+                    chainedObservers.add(compObserver);
+                }
                 FXCompileObserver observer;
                 if (forceQuiet) {
-                    observer = new QuietPackageCompileObserver(compObserver);
+                    observer = new QuietPackageCompileObserver(chainedObservers);
                 } else {
-                    observer = new PackageCompileObserver(compObserver);
+                    observer = new PackageCompileObserver(chainedObservers);
                 }
                 searchCompile(ct, observer, reason, type);
             }
@@ -1438,7 +1533,7 @@ public final class Package
             return;
         }
 
-        searchCompile(ct, new QuietPackageCompileObserver(null), reason, type);
+        searchCompile(ct, new QuietPackageCompileObserver(Collections.emptyList()), reason, type);
     }
 
     /**
@@ -1484,7 +1579,7 @@ public final class Package
                 project.removeClassLoader();
                 project.newRemoteClassLoader();
 
-                doCompile(compileTargets, new PackageCompileObserver(null), CompileReason.REBUILD, CompileType.EXPLICIT_USER_COMPILE);
+                doCompile(compileTargets, new PackageCompileObserver(compileObservers), CompileReason.REBUILD, CompileType.EXPLICIT_USER_COMPILE);
             }
         }
         catch (IOException ioe) {
@@ -1726,16 +1821,14 @@ public final class Package
             throw new IllegalArgumentException();
 
         targets.add(t.getIdentifierName(), t);
-        if (editor != null)
-            editor.graphChanged();
+        fireChangedEvent();
     }
 
     public synchronized void removeTarget(Target t)
     {
         targets.remove(t.getIdentifierName());
         t.setRemoved();
-        if (editor != null)
-            editor.graphChanged();
+        fireChangedEvent();
     }
 
     /**
@@ -2147,19 +2240,25 @@ public final class Package
     }
     
     /**
-     * Display an error message associated with a specific line in a class. This
-     * is done by opening the class's source, highlighting the line and showing
-     * the message in the editor's information area.
+     * Attempt to display (in the corresponding editor) an error message associated with a
+     * specific line in a class. This is done by opening the class's source, highlighting the line
+     * and showing the message in the editor's information area. If the filename specified does
+     * not exist, the message is not shown.
+     * 
+     * @return true if the message was displayed; false if there was no suitable class.
      */
-    private boolean showEditorMessage(String filename, int lineNo, final String message, boolean beep, boolean bringToFront)
+    private boolean showEditorMessage(String filename, int lineNo, final String message,
+            boolean beep, boolean bringToFront)
     {
         Editor targetEditor = editorForTarget(filename, bringToFront);
-        if (targetEditor != null) {
-            targetEditor.displayMessage(message, lineNo, 0);
+        if (targetEditor == null)
+        {
+            Debug.message("Error or exception for source not in project: " + filename + ", line " +
+                    lineNo + ": " + message);
+            return false;
         }
-        else {
-            Debug.message(filename + ", line" + lineNo + ": " + message);
-        }
+
+        targetEditor.displayMessage(message, lineNo, 0);
         return true;
     }
 
@@ -2234,9 +2333,13 @@ public final class Package
         return t;
     }
     
-    // Reminds me of http://thedailywtf.com/Articles/What_Is_Truth_0x3f_.aspx :-)
+    /**
+     * An enumeration for indicating whether a compilation diagnostic was actually displayed to the
+     * user.
+     */
     private static enum ErrorShown
     {
+        // Reminds me of http://thedailywtf.com/Articles/What_Is_Truth_0x3f_.aspx :-)
         ERROR_SHOWN, ERROR_NOT_SHOWN, EDITOR_NOT_FOUND
     }
     
@@ -2272,8 +2375,7 @@ public final class Package
             if (project.isClosing()) {
                 return ErrorShown.ERROR_NOT_SHOWN;
             }
-            t.markKnownError(compileType.keepClasses());
-            boolean shown = targetEditor.displayDiagnostic(diagnostic, errorIndex, compileType);
+            boolean shown = t.showDiagnostic(diagnostic, errorIndex, compileType);
             return shown ? ErrorShown.ERROR_SHOWN : ErrorShown.ERROR_NOT_SHOWN;
         }
         else {
@@ -2297,7 +2399,7 @@ public final class Package
         if (!showSource(thread, thread.getClassSourceName(0), thread.getLineNumber(0), ShowSourceReason.BREAKPOINT_HIT, msg))
         {
             getProject().getExecControls().show();
-            getProject().getExecControls().makeSureThreadIsSelected(thread);
+            getProject().getExecControls().selectThread(thread);
         }
     }
 
@@ -2319,7 +2421,7 @@ public final class Package
         if (!showSource(thread, thread.getClassSourceName(frame), thread.getLineNumber(frame), reason, msg))
         {
             getProject().getExecControls().show();
-            getProject().getExecControls().makeSureThreadIsSelected(thread);
+            getProject().getExecControls().selectThread(thread);
         }
     }
 
@@ -2485,18 +2587,18 @@ public final class Package
     private class QuietPackageCompileObserver
         implements FXCompileObserver
     {
-        protected CompileObserver chainObserver;
+        protected List<FXCompileObserver> chainedObservers;
         
         /**
-         * Construct a new QuietPackageCompileObserver. The chained observer (if
-         * specified) is notified when the compilation ends.
+         * Construct a new QuietPackageCompileObserver. The chained observers (if
+         * non-empty list) are notified about each event.
          */
-        public QuietPackageCompileObserver(CompileObserver chainObserver)
+        public QuietPackageCompileObserver(List<FXCompileObserver> chainedObservers)
         {
-            this.chainObserver = chainObserver;
+            this.chainedObservers = new ArrayList<>(chainedObservers);
         }
         
-        private void markAsCompiling(CompileInputFile[] sources, boolean clearErrorState, int compilationSequence)
+        private void markAsCompiling(CompileInputFile[] sources, int compilationSequence)
         {
             for (int i = 0; i < sources.length; i++) {
                 String fileName = sources[i].getJavaCompileInputFile().getPath();
@@ -2507,7 +2609,7 @@ public final class Package
 
                     if (t instanceof ClassTarget) {
                         ClassTarget ct = (ClassTarget) t;
-                        ct.markCompiling(clearErrorState, compilationSequence);
+                        ct.markCompiling(compilationSequence);
                     }
                 }
             }
@@ -2547,7 +2649,12 @@ public final class Package
             }
 
             // Change view of source classes.
-            markAsCompiling(sources, true, compilationSequence);
+            markAsCompiling(sources, compilationSequence);
+
+            for (FXCompileObserver chainedObserver : chainedObservers)
+            {
+                chainedObserver.startCompile(sources, reason, type, compilationSequence);
+            }
         }
 
         @Override
@@ -2564,7 +2671,17 @@ public final class Package
             else {
                 warningMessage(diagnostic.getFileName(), errorPosition, diagnostic.getMessage(), type);
             }
-            return false;
+
+            boolean shown = false;
+            for (FXCompileObserver chainedObserver : chainedObservers)
+            {
+                // Don't inline the next two lines, as we
+                // always want to call compilerMessage even if
+                // a previous observer showed the method:
+                boolean s = chainedObserver.compilerMessage(diagnostic, type);
+                shown = shown || s;
+            }
+            return shown;
         }
         
         private void errorMessage(String filename, int [] errorPosition, String message, CompileType type)
@@ -2600,57 +2717,37 @@ public final class Package
                     continue;
                 }
 
-                boolean newCompiledState = successful;
-
-                if (type.keepClasses()) {
-                    if (successful) {
-                        t.endCompile();
-
-                        //check if there already exists a class in a library with that name 
-                        Class<?> c = loadClass(getQualifiedName(t.getIdentifierName()));
-                        if (c!=null){
-                            if (! checkClassMatchesFile(c, t.getClassFile())) {
-                                String conflict=Package.getResourcePath(c);
-                                String ident = t.getIdentifierName()+":";
-                                DialogManager.showMessageWithPrefixTextFX(null, "compile-class-library-conflict", ident, conflict);
-                            }
-                        }
-
-                        /*
-                         * compute ctxt files (files with comments and parameters
-                         * names)
-                         */
-                        try {
-                            ClassInfo info = t.getSourceInfo().getInfo(t.getJavaSourceFile(), t.getPackage());
-
-                            if (info != null) {
-                                OutputStream out = new FileOutputStream(t.getContextFile());
-                                info.getComments().store(out, "BlueJ class context");
-                                out.close();
-                            }
-                        }
-                        catch (Exception ex) {
-                            ex.printStackTrace();
-                        }
-                        // If the src file has last-modified date in the future, fix the date.
-                        // this will remove uncompiled strips on the class
-                        t.fixSourceModificationDate();
-                        // Empty class files should not be marked compiled,
-                        // even though compilation is "successful".
-                        newCompiledState &= t.upToDate();
-                        newCompiledState &= !t.hasKnownError();
-
-                        t.markCompiled(newCompiledState);
-                    }
-                }
-
+                t.markCompiled(successful, type);
                 t.setQueued(false);
-                if (t.editorOpen())
+                
+                if (t.isCompiled())
                 {
-                    t.getEditor().compileFinished(successful, type.keepClasses());
-                }
-                if (successful && t.editorOpen()) {
-                    t.getEditor().setCompiled(true);
+                    //check if there already exists a class in a library with that name 
+                    Class<?> c = loadClass(getQualifiedName(t.getIdentifierName()));
+                    if (c!=null){
+                        if (! checkClassMatchesFile(c, t.getClassFile())) {
+                            String conflict=Package.getResourcePath(c);
+                            String ident = t.getIdentifierName()+":";
+                            DialogManager.showMessageWithPrefixTextFX(null, "compile-class-library-conflict", ident, conflict);
+                        }
+                    }
+
+                    /*
+                     * compute ctxt files (files with comments and parameters
+                     * names)
+                     */
+                    try {
+                        ClassInfo info = t.getSourceInfo().getInfo(t.getJavaSourceFile(), t.getPackage());
+
+                        if (info != null) {
+                            OutputStream out = new FileOutputStream(t.getContextFile());
+                            info.getComments().store(out, "BlueJ class context");
+                            out.close();
+                        }
+                    }
+                    catch (Exception ex) {
+                        ex.printStackTrace();
+                    }
                 }
             }
             
@@ -2658,17 +2755,16 @@ public final class Package
             {
                 setStatus(compileDone);
             }
-            if (editor != null) {
-                editor.graphChanged();
-            }
+            fireChangedEvent();
             
             // Send a compilation done event to extensions.
             int eventId = successful ? CompileEvent.COMPILE_DONE_EVENT : CompileEvent.COMPILE_FAILED_EVENT;
             CompileEvent aCompileEvent = new CompileEvent(eventId, type.keepClasses(), Utility.mapList(Arrays.asList(sources), CompileInputFile::getJavaCompileInputFile).toArray(new File[0]));
             ExtensionsManager.getInstance().delegateEvent(aCompileEvent);
-            
-            if (chainObserver != null) {
-                chainObserver.endCompile(sources, successful, type, compilationSequence);
+
+            for (FXCompileObserver chainedObserver : chainedObservers)
+            {
+                chainedObserver.endCompile(sources, successful, type, compilationSequence);
             }
         }
     }
@@ -2790,9 +2886,9 @@ public final class Package
          * Construct a new PackageCompileObserver. The chained observer (if specified)
          * is notified when the compilation ends.
          */
-        public PackageCompileObserver(CompileObserver chainObserver)
+        public PackageCompileObserver(List<FXCompileObserver> chainedObservers)
         {
-            super(chainObserver);
+            super(chainedObservers);
         }
         
         @Override
@@ -2822,37 +2918,40 @@ public final class Package
          */
         private boolean errorMessage(Diagnostic diagnostic, CompileType type)
         {
-                numErrors += 1;
-                ErrorShown messageShown;
+            numErrors += 1;
+            ErrorShown messageShown;
 
-                if (diagnostic.getFileName() == null) {
-                    showMessageWithText("compiler-error", diagnostic.getMessage());
-                    return true;
-                }
+            if (diagnostic.getFileName() == null)
+            {
+                showMessageWithText("compiler-error", diagnostic.getMessage());
+                return true;
+            }
                 
-                String message = diagnostic.getMessage();
-                // See if we can help the user a bit more if they've mis-spelt a method:
+            String message = diagnostic.getMessage();
+            // See if we can help the user a bit more if they've mis-spelt a method:
             if (message.contains("cannot find symbol") && message.contains("method")) {
-                    messageShown = showEditorDiagnostic(diagnostic,
-                            new MisspeltMethodChecker(message,
-                                    (int) diagnostic.getStartColumn(),
-                                    (int) diagnostic.getStartLine(),
-                                    project), numErrors - 1, type);
-                } else {
-                    messageShown = showEditorDiagnostic(diagnostic, null, numErrors - 1, type);
-                }
-                // Display the error message in the source editor
-                switch (messageShown)
-                {
-                case EDITOR_NOT_FOUND:
-                    showMessageWithText("error-in-file", diagnostic.getFileName() + ":" +
-                            diagnostic.getStartLine() + "\n" + message);
-                    return true;
-                case ERROR_SHOWN:
-                    return true;
-                default:
-                    return false;
-                }
+                messageShown = showEditorDiagnostic(diagnostic,
+                        new MisspeltMethodChecker(message,
+                                (int) diagnostic.getStartColumn(),
+                                (int) diagnostic.getStartLine(),
+                                project), numErrors - 1, type);
+            }
+            else
+            {
+                messageShown = showEditorDiagnostic(diagnostic, null, numErrors - 1, type);
+            }
+            // Display the error message in the source editor
+            switch (messageShown)
+            {
+            case EDITOR_NOT_FOUND:
+                showMessageWithText("error-in-file", diagnostic.getFileName() + ":" +
+                        diagnostic.getStartLine() + "\n" + message);
+                return true;
+            case ERROR_SHOWN:
+                return true;
+            default:
+                return false;
+            }
         }
 
         /**
@@ -2995,5 +3094,21 @@ public final class Package
         // Inform all listeners about the removed dependency
         DependencyEvent event = new DependencyEvent(dependency, this, DependencyEvent.Type.DEPENDENCY_REMOVED);
         ExtensionsManager.getInstance().delegateEvent(event);
+    }
+
+    /**
+     * Call the given method or constructor.
+     */
+    public void callStaticMethodOrConstructor(CallableView view)
+    {
+        ui.callStaticMethodOrConstructor(view);
+    }
+
+    /**
+     * Add an observer to listen to all compilations of this package.
+     */
+    public void addCompileObserver(FXCompileObserver fxCompileObserver)
+    {
+        compileObservers.add(fxCompileObserver);
     }
 }

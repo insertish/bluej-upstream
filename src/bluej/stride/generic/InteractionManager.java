@@ -40,6 +40,7 @@ import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.ReadOnlyObjectProperty;
 import javafx.beans.value.ObservableStringValue;
 import javafx.scene.Node;
+import javafx.scene.image.ImageView;
 import javafx.scene.input.KeyCode;
 import javafx.scene.layout.Pane;
 import javafx.scene.paint.Paint;
@@ -120,19 +121,7 @@ public interface InteractionManager extends SuggestionListParent
     ObservableStringValue nameProperty();
 
     FrameDictionary<StrideCategory> getDictionary();
-/*
-    // The openAction will always be called, even if it's with an empty list
-    void checkVar(String name, CodeElement el, int startPosition, int endPosition, UnderlineContainer slot,
-                  FXConsumer<List<StringSlotFragment.LinkedIdentifier>> openAction);
-
-    // The openAction will always be called, even if it's with an empty list
-    void checkType(String typeName, int startPosition, int endPosition, UnderlineContainer slot, FXConsumer<List<StringSlotFragment.LinkedIdentifier>> openAction);
-
-    // The openAction will always be called, even if it's with an empty list
-    void checkMethod(String qualClassName, String methodName,
-                     List<String> paramTypes, int startPosition, int endPosition,
-                     UnderlineContainer slot, FXConsumer<List<StringSlotFragment.LinkedIdentifier>> openAction);
-*/
+    
     @OnThread(Tag.FXPlatform)
     public void searchLink(PossibleLink link, FXPlatformConsumer<Optional<LinkedIdentifier>> callback);
 
@@ -144,6 +133,7 @@ public interface InteractionManager extends SuggestionListParent
     @OnThread(Tag.FXPlatform)
     void updateCatalog(FrameCursor f);
 
+    @OnThread(Tag.FXPlatform)
     void updateErrorOverviewBar();
 
     Paint getHighlightColor();
@@ -181,6 +171,13 @@ public interface InteractionManager extends SuggestionListParent
      */
     @OnThread(Tag.FXPlatform)
     void recordShowHideFrameCatalogue(boolean show, FrameCatalogue.ShowReason reason);
+
+    /**
+     * Gets an image for the class, suitable for displaying as an overlay in the class
+     * body.  Return null if there's no such available image.
+     */
+    @OnThread(Tag.FX)
+    ImageView makeClassImageView();
 
     public static enum ShortcutKey
     {

@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2011,2012,2013,2014,2015,2016,2017  Michael Kolling and John Rosenberg
+ Copyright (C) 1999-2009,2011,2012,2013,2014,2015,2016,2017,2018  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -23,9 +23,7 @@ package bluej.editor.moe;
 
 import java.util.*;
 import java.util.Map.Entry;
-import java.util.function.Function;
 
-import javax.swing.event.DocumentEvent;
 import javax.swing.text.Segment;
 
 import bluej.editor.moe.BlueJSyntaxView.ParagraphAttribute;
@@ -43,7 +41,6 @@ import threadchecker.OnThread;
 import threadchecker.Tag;
 import bluej.Config;
 import bluej.parser.entity.EntityResolver;
-import bluej.parser.nodes.NodeStructureListener;
 import bluej.parser.nodes.NodeTree;
 import bluej.parser.nodes.NodeTree.NodeAndPosition;
 import bluej.parser.nodes.ParsedCUNode;
@@ -93,6 +90,7 @@ public class MoeSyntaxDocument
      * method)
      */
     private final Map<Integer, ScopeInfo> pendingScopeBackgrounds = new HashMap<>();
+    private final Set<Integer> pendingStyleUpdates = new HashSet<>();
     private boolean applyingScopeBackgrounds = false;
 
     // Can be null if we are not being used for an editor pane:
@@ -111,7 +109,82 @@ public class MoeSyntaxDocument
      */
     private boolean thisDocIsForPrinting = false;
 
+    /**
+     * Create an empty MoeSyntaxDocument.
+     */
+    @OnThread(Tag.FXPlatform)
+    public MoeSyntaxDocument(ScopeColors scopeColors)
+    {
+        // defaults to 4 if cannot read property
+        tabSize = Config.getPropInteger("bluej.editor.tabsize", 4);
+        document = new SimpleEditableStyledDocument<>(null, ImmutableSet.of());
+        if (scopeColors != null)
+        {
+            syntaxView = new BlueJSyntaxView(this, scopeColors);
+        }
+        else
+        {
+            syntaxView = null;
+        }
 
+        document.plainChanges().subscribe(c -> {
+            invalidateCache();
+            // Must fire remove before insert:
+            if (!c.getRemoved().isEmpty())
+            {
+                fireRemoveUpdate(c.getPosition(), c.getRemovalEnd() - c.getPosition());
+            }
+            if (!c.getInserted().isEmpty())
+            {
+                fireInsertUpdate(c.getPosition(), c.getInsertionEnd() - c.getPosition());
+            }
+            // Don't attempt a run-later when printing as we'll be on a different thread, and we don't
+            // print the scopes anyway:
+            if (!thisDocIsForPrinting)
+            {
+                // Apply backgrounds from simple update, as it may not even
+                // trigger a reparse.  This must be done later, after the document has finished
+                // doing all the updates to the content, before we can mess with paragraph styles:
+                JavaFXUtil.runAfterCurrent(() -> {
+                    invalidateCache();
+                    applyPendingScopeBackgrounds();
+                });
+            }
+        });
+    }
+    
+    /**
+     * Create an empty MoeSyntaxDocument, which uses the given entity resolver
+     * to resolve symbols.
+     */
+    @OnThread(Tag.FXPlatform)
+    public MoeSyntaxDocument(EntityResolver parentResolver, ScopeColors scopeColors)
+    {
+        this(scopeColors);
+        // parsedNode = new ParsedCUNode(this);
+        this.parentResolver = parentResolver;
+        if (parentResolver != null)
+        {
+            reparseRecordTree = new NodeTree<ReparseRecord>();
+        }
+    }
+
+    /**
+     * Create an empty MoeSyntaxDocument, which uses the given entity resolver
+     * to resolve symbols.
+     */
+    @OnThread(Tag.FXPlatform)
+    public MoeSyntaxDocument(EntityResolver parentResolver)
+    {
+        this((ScopeColors) null);
+        // parsedNode = new ParsedCUNode(this);
+        this.parentResolver = parentResolver;
+        if (parentResolver != null)
+        {
+            reparseRecordTree = new NodeTree<ReparseRecord>();
+        }
+    }
+    
     public Position createPosition(int initialPos)
     {
         return new Position(initialPos);
@@ -139,10 +212,10 @@ public class MoeSyntaxDocument
     public void removeStyleThroughout(String spanStyle)
     {
         // Goes paragraph by paragraph, and only alters the style if necessary.
-        LiveList<Paragraph<ScopeInfo, StyledText<ImmutableSet<String>>, ImmutableSet<String>>> paragraphs = document.getParagraphs();
+        LiveList<Paragraph<ScopeInfo, String, ImmutableSet<String>>> paragraphs = document.getParagraphs();
         for (int i = 0; i < paragraphs.size(); i++)
         {
-            Paragraph<ScopeInfo, StyledText<ImmutableSet<String>>, ImmutableSet<String>> para = paragraphs.get(i);
+            Paragraph<ScopeInfo, String, ImmutableSet<String>> para = paragraphs.get(i);
             StyleSpans<ImmutableSet<String>> styleSpans = para.getStyleSpans();
             boolean present = styleSpans.stream().anyMatch(s -> s.getStyle().contains(spanStyle));
             if (present)
@@ -274,16 +347,19 @@ public class MoeSyntaxDocument
     
     private List<EditEvent> recentEdits = new LinkedList<EditEvent>();
     
-    private void recordEvent(DocumentEvent event)
+    private void recordEvent(MoeSyntaxEvent event)
     {
         int type;
-        if (event.getType() == DocumentEvent.EventType.INSERT) {
+        if (event.isInsert())
+        {
             type = EDIT_INSERT;
         }
-        else if (event.getType() == DocumentEvent.EventType.REMOVE) {
+        else if (event.isRemove())
+        {
             type = EDIT_DELETE;
         }
-        else {
+        else
+        {
             return;
         }
         
@@ -293,44 +369,10 @@ public class MoeSyntaxDocument
         eevent.length = event.getLength();
         recentEdits.add(eevent);
         
-        if (recentEdits.size() > 10) {
+        if (recentEdits.size() > 10)
+        {
             recentEdits.remove(0);
         }
-    }
-
-    // Have to pass construction function because "this" isn't
-    // available to other constructor callers:
-    private MoeSyntaxDocument(Function<MoeSyntaxDocument, BlueJSyntaxView> makeSyntaxView)
-    {
-        // defaults to 4 if cannot read property
-        tabSize = Config.getPropInteger("bluej.editor.tabsize", 4);
-        document = new SimpleEditableStyledDocument<>(null, ImmutableSet.of());
-        this.syntaxView = makeSyntaxView.apply(this);
-
-        document.plainChanges().subscribe(c -> {
-            invalidateCache();
-            // Must fire remove before insert:
-            if (!c.getRemoved().isEmpty())
-            {
-                fireRemoveUpdate(c.getPosition(), c.getRemovalEnd() - c.getPosition());
-            }
-            if (!c.getInserted().isEmpty())
-            {
-                fireInsertUpdate(c.getPosition(), c.getInsertionEnd() - c.getPosition());
-            }
-            // Don't attempt a run-later when printing as we'll be on a different thread, and we don't
-            // print the scopes anyway:
-            if (!thisDocIsForPrinting)
-            {
-                // Apply backgrounds from simple update, as it may not even
-                // trigger a reparse.  This must be done later, after the document has finished
-                // doing all the updates to the content, before we can mess with paragraph styles:
-                JavaFXUtil.runAfterCurrent(() -> {
-                    invalidateCache();
-                    applyPendingScopeBackgrounds();
-                });
-            }
-        });
     }
 
     private void invalidateCache()
@@ -358,51 +400,7 @@ public class MoeSyntaxDocument
             }
         }
     }
-
-    public MoeSyntaxDocument()
-    {
-        this(d -> null);
-    }
     
-    /**
-     * Create an empty MoeSyntaxDocument.
-     */
-    @OnThread(Tag.FXPlatform)
-    public MoeSyntaxDocument(ScopeColors scopeColors)
-    {
-        this(d -> new BlueJSyntaxView(d, scopeColors));
-    }
-    
-    /**
-     * Create an empty MoeSyntaxDocument, which uses the given entity resolver
-     * to resolve symbols.
-     */
-    @OnThread(Tag.FXPlatform)
-    public MoeSyntaxDocument(EntityResolver parentResolver, ScopeColors scopeColors)
-    {
-        this(scopeColors);
-        // parsedNode = new ParsedCUNode(this);
-        this.parentResolver = parentResolver;
-        if (parentResolver != null) {
-            reparseRecordTree = new NodeTree<ReparseRecord>();
-        }
-    }
-
-    /**
-     * Create an empty MoeSyntaxDocument, which uses the given entity resolver
-     * to resolve symbols.
-     */
-    @OnThread(Tag.FXPlatform)
-    public MoeSyntaxDocument(EntityResolver parentResolver)
-    {
-        this();
-        // parsedNode = new ParsedCUNode(this);
-        this.parentResolver = parentResolver;
-        if (parentResolver != null) {
-            reparseRecordTree = new NodeTree<ReparseRecord>();
-        }
-    }
-
     /**
      * Access the parsed node structure of this document.
      */
@@ -433,11 +431,9 @@ public class MoeSyntaxDocument
             parsedNode = new ParsedCUNode(this);
             parsedNode.setParentResolver(parentResolver);
             reparseRecordTree = new NodeTree<ReparseRecord>();
-            parsedNode.textInserted(this, 0, 0, getLength(), new NodeStructureListener() {
-                public void nodeRemoved(NodeAndPosition<ParsedNode> node) { }
-                public void nodeChangedLength(NodeAndPosition<ParsedNode> node,
-                        int oldPos, int oldSize) { }
-            });
+            parsedNode.textInserted(this, 0, 0, getLength(),
+                    new MoeSyntaxEvent(this, 0, getLength(), true, false));
+            // We can discard the MoeSyntaxEvent: the reparse will update scopes/syntax
         }
     }
 
@@ -538,10 +534,19 @@ public class MoeSyntaxDocument
         }
     }
 
-    void fireChangedUpdate(MoeSyntaxEvent mse)
+    /**
+     * Issue a change update to listeners.
+     * 
+     * @param mse the event with the details of the change, or null if the the change is a resize
+     *            of the viewport (which requires re-drawing scope backgrounds to match).
+     */
+    public void fireChangedUpdate(MoeSyntaxEvent mse)
     {
         if (syntaxView != null)
+        {
             syntaxView.updateDamage(mse);
+        }
+        
         if (mse == null)
         {
             // Width change, so apply new backgrounds:
@@ -549,7 +554,10 @@ public class MoeSyntaxDocument
         }
     }
 
-    void recalculateAllScopes()
+    /**
+     * Re-calculate scope position/colour for all lines.
+     */
+    public void recalculateAllScopes()
     {
         if (notYetShown)
             return;
@@ -559,34 +567,54 @@ public class MoeSyntaxDocument
         applyPendingScopeBackgrounds();
     }
 
-    void recalculateScopesForLinesInRange(int firstLineIncl, int lastLineIncl)
+    /**
+     * Recalculate (and schedule for re-drawing) scope margins for lines in the given range.
+     * 
+     * @param firstLineIncl  the first line in the range, inclusive; 0-based.
+     * @param lastLineIncl   the last line in the range, inclusive; 0-based.
+     */
+    public void recalculateScopesForLinesInRange(int firstLineIncl, int lastLineIncl)
     {
         if (syntaxView == null)
-            return;
-        cacheContent();
-        List<ScopeInfo> paragraphScopeInfo = syntaxView.recalculateScopes(firstLineIncl, lastLineIncl);
-        if (paragraphScopeInfo.isEmpty())
-            return; // Not initialised yet
-        for (int i = 0; i < paragraphScopeInfo.size(); i++)
         {
-            pendingScopeBackgrounds.put(i + firstLineIncl, paragraphScopeInfo.get(i));
+            return;
         }
+        
+        cacheContent();
+        syntaxView.recalculateScopes(pendingScopeBackgrounds, firstLineIncl, lastLineIncl);
     }
 
-    // Called if the reparse queue is empty:
+    /**
+     * Apply pending scope background updates. Must not be called from a document update
+     * event.
+     */
     public void applyPendingScopeBackgrounds()
     {
+        // Don't try to apply styles if parser is not enabled:
+        if (parsedNode == null)
+        {
+            return;
+        }
+
         // Prevent re-entry, which can it seems can occur when applying
         // token highlight styles:
         if (applyingScopeBackgrounds)
+        {
             return;
+        }
+        
+        MoeEditorPane editorPane = (syntaxView != null) ? syntaxView.getEditorPane() : null;
+            
         // No point doing scopes (in fact, not possible) if there's no editor involved:
-        if (syntaxView == null || syntaxView.editorPane == null)
+        if (editorPane == null)
+        {
             return;
+        }
+        
         applyingScopeBackgrounds = true;
         // Setting paragraph styles can cause RichTextFX to scroll the window, which we
         // don't want.  So we save and restore the scroll Y:
-        double scrollY = syntaxView.editorPane.getEstimatedScrollY();
+        double scrollY = editorPane.getEstimatedScrollY();
 
         // Take a copy of backgrounds to avoid concurrent modification:
         Set<Entry<Integer, ScopeInfo>> pendingBackgrounds = new HashMap<>(pendingScopeBackgrounds).entrySet();
@@ -595,32 +623,35 @@ public class MoeSyntaxDocument
         for (Entry<Integer, ScopeInfo> pending : pendingBackgrounds)
         {
             if (pending.getKey() >= document.getParagraphs().size())
-                continue; // Line doesn't exist any more
-
-            ScopeInfo old = document.getParagraphStyle(pending.getKey());
-            ScopeInfo newStyle = pending.getValue();
-            if (((old == null) != (newStyle == null)) || !old.equals(newStyle))
             {
-                setParagraphStyle(pending.getKey(), newStyle);
-
+                continue; // Line doesn't exist any more
             }
 
-            StyleSpans<ImmutableSet<String>> styleSpans = syntaxView.getTokenStylesFor(pending.getKey(), this);
+            ScopeInfo newStyle = pending.getValue();
+            setParagraphStyle(pending.getKey(), newStyle);
+        }
+        
+        for (Integer pending : pendingStyleUpdates)
+        {
+            StyleSpans<ImmutableSet<String>> styleSpans = syntaxView.getTokenStylesFor(pending, this);
             // Applying style spans is expensive, so don't do it if they're already correct:
-            if (styleSpans != null && !styleSpans.equals(document.getStyleSpans(pending.getKey())))
+            if (styleSpans != null && !styleSpans.equals(document.getStyleSpans(pending)))
             {
-                document.setStyleSpans(pending.getKey(), 0, document.getStyleSpans(pending.getKey()).overlay(styleSpans, MoeSyntaxDocument::setTokenStyles));
+                document.setStyleSpans(pending, 0, document.getStyleSpans(pending)
+                        .overlay(styleSpans, MoeSyntaxDocument::setTokenStyles));
             }
         }
+        
+        pendingStyleUpdates.clear();
 
         // The setParagraphStyle causes a layout-request with request-follow-caret.  We have to
         // purge that layout request by executing it, before we restore the scroll Y:
-        syntaxView.editorPane.layout();
-        syntaxView.editorPane.setEstimatedScrollY(scrollY);
+        editorPane.layout();
+        editorPane.estimatedScrollYProperty().setValue(scrollY);
         // Setting the estimated scroll Y requests a layout but does not perform it.  This seemed
         // to lead to occasional scroll jumps, I think involving delayed layout passes.  So although
         // it is getting silly, we enforce another layout to *actually* set the scroll position:
-        syntaxView.editorPane.layout();
+        editorPane.layout();
 
         applyingScopeBackgrounds = false;
     }
@@ -688,7 +719,7 @@ public class MoeSyntaxDocument
      */
     public void markSectionParsed(int pos, int size)
     {
-        repaintLines(pos, size);
+        repaintLines(pos, size, true);
 
         NodeAndPosition<ReparseRecord> existing = reparseRecordTree.findNodeAtOrAfter(pos);
         while (existing != null && existing.getPosition() <= pos) {
@@ -803,6 +834,7 @@ public class MoeSyntaxDocument
         {
             syntaxView.setDuringUpdate(true);
         }
+        
         if (reparseRecordTree != null) {
             NodeAndPosition<ReparseRecord> napRr = reparseRecordTree.findNodeAtOrAfter(offset);
             if (napRr != null) {
@@ -814,28 +846,21 @@ public class MoeSyntaxDocument
                 }
             }
         }
+        
+        int firstLine = offsetToPosition(offset).getMajor();
+        int lastLine = offsetToPosition(offset + length).getMajor();
+        for (int i = firstLine; i <= lastLine; i++)
+        {
+            pendingStyleUpdates.add(i);
+        }
 
         MoeSyntaxEvent mse = new MoeSyntaxEvent(this, offset, length, true, false);
         if (parsedNode != null) {
-            parsedNode.textInserted(this, 0, offset, length, new NodeStructureListener()
-            {
-                @Override
-                public void nodeRemoved(NodeAndPosition<ParsedNode> node)
-                {
-
-                }
-
-                @Override
-                public void nodeChangedLength(NodeAndPosition<ParsedNode> node, int oldPos, int oldSize)
-                {
-
-                }
-            });
+            parsedNode.textInserted(this, 0, offset, length, mse);
         }
         fireChangedUpdate(mse);
-        int startLine = document.offsetToPosition(offset, Bias.Forward).getMajor();
-        int endLine = document.offsetToPosition(offset + length, Bias.Forward).getMajor();
-        recalculateScopesForLinesInRange(startLine, endLine);
+        recordEvent(mse);
+        
         if (syntaxView != null)
         {
             syntaxView.setDuringUpdate(false);
@@ -852,9 +877,9 @@ public class MoeSyntaxDocument
         {
             syntaxView.setDuringUpdate(true);
         }
+        
         NodeAndPosition<ReparseRecord> napRr = (reparseRecordTree != null) ?
-                reparseRecordTree.findNodeAtOrAfter(offset) :
-                    null;
+                reparseRecordTree.findNodeAtOrAfter(offset) : null;
         int rpos = offset;
         int rlen = length;
         if (napRr != null && napRr.getEnd() == rpos) {
@@ -912,27 +937,16 @@ public class MoeSyntaxDocument
                 }
             }
         }
+        
+        pendingStyleUpdates.add(offsetToPosition(offset).getMajor());
 
         MoeSyntaxEvent mse = new MoeSyntaxEvent(this, offset, length, false, true);
         if (parsedNode != null) {
-            parsedNode.textRemoved(this, 0, offset, length, new NodeStructureListener()
-            {
-                @Override
-                public void nodeRemoved(NodeAndPosition<ParsedNode> node)
-                {
-
-                }
-
-                @Override
-                public void nodeChangedLength(NodeAndPosition<ParsedNode> node, int oldPos, int oldSize)
-                {
-
-                }
-            });
+            parsedNode.textRemoved(this, 0, offset, length, mse);
         }
         fireChangedUpdate(mse);
-        int line = document.offsetToPosition(offset, Bias.Forward).getMajor();
-        recalculateScopesForLinesInRange(line, line);
+        recordEvent(mse);
+
         if (syntaxView != null)
         {
             syntaxView.setDuringUpdate(false);
@@ -966,9 +980,34 @@ public class MoeSyntaxDocument
      */
     public void repaintLines(int offset, int length)
     {
+        repaintLines(offset, length, false);
+    }
+    
+    /**
+     * Notify that a certain area of the document needs repainting (re-drawing of scope background
+     * and optionally syntax).
+     * 
+     * @param offset   the offset of the region to be repainted
+     * @param length   the length of the region to be repainted
+     * @param reStyle  true if the syntax highlighting should be adjusted 
+     */
+    public void repaintLines(int offset, int length, boolean reStyle)
+    {
         int startLine = offsetToPosition(offset).getMajor();
         int endLine = offsetToPosition(offset + length).getMajor();
         recalculateScopesForLinesInRange(startLine, endLine);
+        restyleLines(startLine, endLine);
+    }
+    
+    /**
+     * Mark all lines between start and end (inclusive) as needing to be re-styled.
+     */
+    public void restyleLines(int start, int end)
+    {
+        for (int i = start; i <= end; i++)
+        {
+            pendingStyleUpdates.add(i);
+        }
     }
 
     public int getLength()
@@ -1003,7 +1042,7 @@ public class MoeSyntaxDocument
 
     public void replace(int start, int length, String text)
     {
-        document.replace(start, start + length, ReadOnlyStyledDocument.fromString(text, null, ImmutableSet.of(), StyledText.textOps()));
+        document.replace(start, start + length, ReadOnlyStyledDocument.fromString(text, null, ImmutableSet.of(), SegmentOps.styledTextOps()));
     }
 
     public void remove(int start, int length)

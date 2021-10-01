@@ -15,12 +15,12 @@
      After changing the version number the target "update-version-number" should be run -->
     <property name="bluej.version.major" value="4" />
     <property name="bluej.version.minor" value="1" />
-    <property name="bluej.version.release" value="2" />
+    <property name="bluej.version.release" value="3" />
     <property name="bluej.version.suffix" value="" />
     <!-- suffix with no spaces, eg "pre2" -->
     <property name="bluej.version.nonspace.suffix" value="" />
     <!-- Suffix added after version number in output files -->
-    <property name="bluej.rcsuffix" value="-rc3"/>
+    <property name="bluej.rcsuffix" value=""/>
     
     <property name="bluej.version" value="${bluej.version.major}.${bluej.version.minor}.${bluej.version.release}${bluej.version.suffix}" />
     <property name="bluej.version.nosuffix" value="${bluej.version.major}.${bluej.version.minor}.${bluej.version.release}" />
@@ -35,6 +35,7 @@
     <property name="core.src" value="src"/>
     <property name="core.build" value="classes"/>
     <property name="boot.src" value="boot/src"/>
+    <property name="boot.resources" value="boot/resources"/>
     <property name="boot.build" value="boot/classes"/>
     <property name="threadchecker.src" value="threadchecker/src"/>
     <property name="threadchecker.build" value="threadchecker/classes"/>
@@ -60,7 +61,9 @@
         <pathelement location="${bluej_home}/lib/hamcrest-core-1.3.jar"/>
         <pathelement location="${bluej_home}/lib/svnkit.jar"/>
         <pathelement location="${bluej_home}/lib/svnkit-javahl.jar"/>
-        <pathelement location="${bluej_home}/lib/trilead.jar"/>
+        <pathelement location="${bluej_home}/lib/eddsa-0.2.0.jar"/>
+        <pathelement location="${bluej_home}/lib/jbcrypt-1.0.0.jar"/>
+        <pathelement location="${bluej_home}/lib/trilead-ssh2-build-217-jenkins-11.jar"/>
         <pathelement location="${bluej_home}/lib/antlr-runtime-3.4.jar"/>
         <pathelement location="${bluej_home}/lib/sequence-library-1.0.3.jar"/>
         <pathelement location="${bluej_home}/lib/sqljet-1.1.10.jar"/>
@@ -76,8 +79,8 @@
         <pathelement location="${bluej_home}/lib/jsch-0.1.53.jar"/>
         <pathelement location="${bluej_home}/lib/org.eclipse.jgit-4.9.0.jar"/>
         <pathelement location="${bluej_home}/lib/nsmenufx-2.1.4.jar"/>
-        <pathelement location="${bluej_home}/lib/richtextfx-fat-0.7-M5n.jar"/>
-        <pathelement location="${build_java_home}/jre/lib/jfxrt.jar"/>
+        <pathelement location="${bluej_home}/lib/richtextfx-fat-0.9.0.jar"/>
+        <pathelement location="${build_java_home}/jre/lib/ext/jfxrt.jar"/>
     </path>
 
     <import file="shared.xml"/>
@@ -100,7 +103,9 @@
             <compilerarg value="-Xmaxerrs"/><compilerarg value="100"/>
             <compilerarg value="-Xplugin:threadchecker.TCPlugin org.reflections"/>
         </compile>
-
+    	<copy todir="${boot.build}">
+    	    <fileset dir="${boot.resources}" />
+        </copy>
     </target>
 
     <target name="compile-threadchecker">
@@ -177,9 +182,9 @@
                 <include name="bluej/Boot*.class"/>
                 <include name="bluej/Splash*.class"/>
             </fileset>
-            <fileset dir="${boot.src}">
+            <fileset dir="${boot.resources}">
                 <include name="bluej/gen-bluej-splash*.png"/>
-                <include name="bluej/gen-greenfoot-splash*.png"/>
+                <include name="bluej/greenfoot-splash*.png"/>
             </fileset>
             <manifest>
                 <attribute name="Main-Class" value="bluej.Boot"/>
@@ -305,6 +310,12 @@
     </target>
 
     <target name="test" depends="compile-core, compile-test">
+        <!-- Need to turn verbosity back on to see the test output: -->
+        <script language="javascript">
+            var logger = project.getBuildListeners().firstElement();
+            logger.setMessageOutputLevel(2);
+        </script>
+        
         <junit printsummary="yes" haltonfailure="yes">
             <classpath>
                 <path refid="bluej.class.path"/>
@@ -313,16 +324,17 @@
                 <pathelement location="${extension.jar}"/>
                 <pathelement location="${run_java_home}/lib/tools.jar"/>
                 <pathelement location="${editor.jar}"/>
+                <pathelement location="${lang-stride.jar}"/>
                 <pathelement location="${test.build}"/>
+                <!-- Needed to access the test data files: -->
+                <pathelement location="${test.src}"/>
             </classpath>
 
-            <formatter type="plain"/>
+            <formatter type="brief" usefile="false"/>
 
-            <batchtest fork="yes" todir="${test.report}">
+            <batchtest fork="yes" skipnontests="true">
                 <fileset dir="${test.src}">
-                    <include name="**/*Test*.java"/>
-                    <exclude name="bluej/debugger/gentype/TestReflective.java"/>
-                    <exclude name="**/AllTests.java"/>
+                    <include name="**/*.java"/>
                 </fileset>
             </batchtest>
         </junit>
@@ -423,21 +435,22 @@
 
         <mkdir dir="util/classes"/>
         <compile srcdir="util/src" destdir="util/classes"/>
+        <mkdir dir="boot/resources/bluej"/>
         <java classname="DrawVersionOnSplash" classpath="util/classes">
-            <arg value="boot/src/bluej/unversioned-bluej-splash.png"/> <!-- original -->
+            <arg value="resources/unversioned-bluej-splash.png"/> <!-- original -->
             <arg value="Version ${bluej.version}"/> <!-- text -->
             <arg value="16"/> <!-- font size -->
             <arg value="237"/> <!-- X position -->
             <arg value="130"/> <!-- Y position -->
-            <arg value="boot/src/bluej/gen-bluej-splash.png"/> <!-- destination -->
+            <arg value="boot/resources/bluej/gen-bluej-splash.png"/> <!-- destination -->
         </java>
         <java classname="DrawVersionOnSplash" classpath="util/classes">
-            <arg value="boot/src/bluej/unversioned-bluej-splash@2x.png"/> <!-- original -->
+            <arg value="resources/unversioned-bluej-splash@2x.png"/> <!-- original -->
             <arg value="Version ${bluej.version}"/> <!-- text -->
             <arg value="32"/> <!-- font size -->
             <arg value="470"/> <!-- X position -->
             <arg value="260"/> <!-- Y position -->
-            <arg value="boot/src/bluej/gen-bluej-splash@2x.png"/> <!-- destination -->
+            <arg value="boot/resources/bluej/gen-bluej-splash@2x.png"/> <!-- destination -->
         </java>
     </target>
     
@@ -449,7 +462,6 @@
     <target name="clean-greenfoot" description="clean up greenfoot related stuff" >
         <!-- Used by jar installer: greenfoot-splash.png -->
         <delete file="package/greenfoot-splash.png" />
-        <delete file="boot/src/bluej/greenfoot-splash.png" />
         <delete dir="lib/greenfoot" />
         <delete quiet="false" file="${greenfoot-native.jar}" />
         <delete dir="package/scenarios" />
@@ -523,27 +535,27 @@
                 <exclude name="commons-logging-api-1.1.2.jar"/>
                 <exclude name="commons-vfs2-2.0.jar"/>
                 <exclude name="diffutils-1.2.1.jar"/>
+                <exclude name="eddsa-0.2.0.jar"/>
                 <exclude name="guava-17.0.jar"/>
                 <exclude name="hamcrest-core-1.3.jar"/>
                 <exclude name="httpclient-4.1.1.jar"/>
                 <exclude name="httpcore-4.1.jar"/>
                 <exclude name="httpmime-4.1.1.jar"/>
                 <exclude name="javassist-3.18.0.jar"/>
-                <exclude name="jna-4.2.0.jar"/>
-                <exclude name="jna-platform-4.2.0.jar"/>
+                <exclude name="jbcrypt-1.0.0.jar"/>
                 <exclude name="junit-4.11.jar"/>
                 <exclude name="nsmenufx-2.1.4.jar"/>
-                <exclude name="richtextfx-fat-0.7-M5n.jar"/>
+                <exclude name="richtextfx-fat-0.9.0.jar"/>
                 <exclude name="sequence-library-1.0.3.jar"/>
                 <exclude name="svnkit.jar"/>
                 <exclude name="svnkit-javahl.jar"/>
                 <exclude name="sqljet-1.1.10.jar"/>
-                <exclude name="trilead.jar"/>
                 <exclude name="xom-1.2.9.jar"/>
                 <exclude name="jsch-0.1.53.jar"/>
                 <exclude name="org.eclipse.jgit-4.9.0.jar"/>
                 <exclude name="slf4j-api-1.7.2.jar"/>
                 <exclude name="slf4j-jdk14-1.7.2.jar"/>
+                <exclude name="trilead-ssh2-build-217-jenkins-11.jar"/>
 
                 <!-- Greenfoot libraries: -->
                 <exclude name="jl1.0.1.jar"/>

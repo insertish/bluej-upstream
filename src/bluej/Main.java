@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2011,2012,2013,2014,2015,2016,2017  Michael Kolling and John Rosenberg
+ Copyright (C) 1999-2009,2010,2011,2012,2013,2014,2015,2016,2017,2018  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -25,14 +25,10 @@ import bluej.collect.DataCollector;
 import bluej.extensions.event.ApplicationEvent;
 import bluej.extmgr.ExtensionWrapper;
 import bluej.extmgr.ExtensionsManager;
-import bluej.pkgmgr.Package;
 import bluej.pkgmgr.PkgMgrFrame;
 import bluej.pkgmgr.Project;
-import bluej.pkgmgr.target.ClassTarget;
-import bluej.pkgmgr.target.Target;
 import bluej.utility.Debug;
 import bluej.utility.DialogManager;
-import bluej.utility.javafx.FXPlatformRunnable;
 import bluej.utility.javafx.JavaFXUtil;
 import com.apple.eawt.AppEvent;
 import com.apple.eawt.Application;
@@ -66,9 +62,6 @@ import java.util.UUID;
  */
 public class Main
 {
-    private static final int FIRST_X_LOCATION = 20;
-    private static final int FIRST_Y_LOCATION = 20;
-    
     /** 
      * Whether we've officially launched yet. While false "open file" requests only
      * set initialProject.
@@ -92,6 +85,9 @@ public class Main
      * later on the FX thread).
      */
     private static ClassLoader storedContextClassLoader;
+    
+    /** The mechanism to show the initial GUI */
+    private static GuiHandler guiHandler = null;
 
     /**
      * Entry point to starting up the system. Initialise the system and start
@@ -107,6 +103,10 @@ public class Main
 
         Config.initialise(bluejLibDir, commandLineProps, boot.isGreenfoot());
         
+        if (guiHandler == null) {
+            guiHandler = new BlueJGuiHandler();
+        }
+        
         // Note we must do this OFF the AWT dispatch thread. On MacOS X, if the
         // application was started by double-clicking a project file, an "open file"
         // event will be generated once we add a listener and will be delivered on
@@ -115,18 +115,11 @@ public class Main
         if (Config.isMacOS()) {
             prepareMacOSApp();
         }
-
-        if (Config.isGreenfoot()) {
-            // Avoid having to put the Greenfoot classes on the system classpath:
-            // (only an issue with JDK 7u21, 6u45, and later).
-            System.setProperty("java.rmi.server.useCodebaseOnly", "false");
-        }
         
         // process command line arguments, start BlueJ!
         SwingUtilities.invokeLater(() -> {
             List<ExtensionWrapper> loadedExtensions = ExtensionsManager.getInstance().getLoadedExtensions(null);
             Platform.runLater(() -> {
-
                 DataCollector.bluejOpened(getOperatingSystem(), getJavaVersion(), getBlueJVersion(), getInterfaceLanguage(), loadedExtensions);
                 processArgs(args);
             });
@@ -157,11 +150,8 @@ public class Main
         // Open any projects specified on the command line
         if (args.length > 0) {
             for (String arg : args) {
-                // To avoid a wrong FileNotFound Exception when running from IntelliJ
-                if (!arg.startsWith("-") && !arg.contains("intellij")  ) {
-                    if (PkgMgrFrame.doOpen(new File(arg), null)) {
-                        oneOpened = true;
-                    }
+                if (!arg.startsWith("-")) {
+                    oneOpened |= guiHandler.tryOpen(new File(arg), true);
                 }
             }
         }
@@ -169,10 +159,7 @@ public class Main
         // Open a project if requested by the OS (Mac OS)
         if (initialProjects != null) {
             for (File initialProject : initialProjects) {
-                // To avoid a wrong FileNotFound Exception when running from IntelliJ
-                if (!initialProject.getName().contains("intellij")) {
-                    oneOpened |= (PkgMgrFrame.doOpen(initialProject, null));
-                }
+                oneOpened |= guiHandler.tryOpen(initialProject, true);
             }
         }
 
@@ -186,52 +173,15 @@ public class Main
                 for (int i = 1; exists != null; i++) {
                     exists = Config.getPropString(Config.BLUEJ_OPENPACKAGE + i, null);
                     if (exists != null) {
-                        Project openProj;
-                        // checking all is well (project exists)
-                        if ((openProj = Project.openProject(exists)) != null) {
-                            Package pkg = openProj.getPackage(openProj.getInitialPackageName());
-                            PkgMgrFrame.createFrame(pkg, null);
-                            oneOpened = true;
-                        }
+                        oneOpened |= guiHandler.tryOpen(new File(exists), false);
                     }
                 }
             }
         }
 
-        // Make sure at least one frame exists
-        if (!oneOpened) {
-            if (Config.isGreenfoot()) {
-                // Handled by Greenfoot
-            }
-            else {
-                openEmptyFrame();
-            }
-        }
-        else
-        {
-            // Follow open-class arg if there is one:
-            String targetName = Config.getPropString("bluej.class.open", null);
-            if (targetName != null && !targetName.equals(""))
-            {
-                boolean foundTarget = false;
-                for (Project proj : Project.getProjects())
-                {
-                    Target tgt = proj.getTarget(targetName);
-                    if (tgt != null && tgt instanceof ClassTarget)
-                    {
-                        ((ClassTarget)tgt).open();
-                        foundTarget = true;
-                    }
-                }
-                if (!foundTarget)
-                    Debug.message("Did not find target class in opened project: \"" + targetName + "\"");
-            }
-        }
-
-        if (!Config.isGreenfoot())
-        {
-            Boot.getInstance().disposeSplashWindow();
-        }
+        guiHandler.initialOpenComplete(oneOpened);
+        
+        Boot.getInstance().disposeSplashWindow();
         ExtensionsManager.getInstance().delegateEvent(new ApplicationEvent(ApplicationEvent.APP_READY_EVENT));
     }
 
@@ -252,16 +202,11 @@ public class Main
         // open files handling issue:
         prepareMacOSMenuSwing(macApp);
 
-        // We are using the NSMenuFX library to fix Mac Application menu
-        // only when it is a FX menu. This is now only needed for BlueJ,
-        // as Greenfoot is still on Swing. When Greenfoot menu is moved to FX,
-        // both should use the workaround in prepareMacOSMenuFX().
-        // But when the JDK APIs (i.e. handleAbout() etc) are fixed,
-        // both should go back to the way as in prepareMacOSMenuSwing().
-        if (!Config.isGreenfoot()) {
-            if (macApp != null) {
-                prepareMacOSMenuFX();
-            }
+        // We are using the NSMenuFX library to fix Mac Application menu only when it is a FX
+        // menu. When the JDK APIs (i.e. handleAbout() etc) are fixed, both should go back to
+        // the way as in prepareMacOSMenuSwing().
+        if (macApp != null) {
+            prepareMacOSMenuFX();
         }
 
         // This is not included in the above condition to avoid future bugs,
@@ -300,7 +245,7 @@ public class Main
             menuToolkit.setApplicationMenu(defaultApplicationMenu);
 
             // About
-            defaultApplicationMenu.getItems().get(0).setOnAction(event -> PkgMgrFrame.handleAbout());
+            defaultApplicationMenu.getItems().get(0).setOnAction(event -> guiHandler.handleAbout());
 
             // Preferences
             // It has been added without a separator due to a bug in the library used
@@ -308,12 +253,12 @@ public class Main
             if (Config.hasAcceleratorKey("menu.tools.preferences")) {
                 preferences.setAccelerator(Config.getAcceleratorKeyFX("menu.tools.preferences"));
             }
-            preferences.setOnAction(event -> PkgMgrFrame.handlePreferences());
+            preferences.setOnAction(event -> guiHandler.handlePreferences());
             defaultApplicationMenu.getItems().add(1, preferences);
 
             // Quit
             defaultApplicationMenu.getItems().get(defaultApplicationMenu.getItems().size()-1).
-                    setOnAction(event -> PkgMgrFrame.handleQuit());
+                    setOnAction(event -> guiHandler.handleQuit());
         });
     }
 
@@ -327,7 +272,7 @@ public class Main
                 @Override
                 public void handleAbout(AppEvent.AboutEvent e)
                 {
-                    Platform.runLater(() -> PkgMgrFrame.handleAbout());
+                    Platform.runLater(() -> guiHandler.handleAbout());
                 }
             });
 
@@ -335,7 +280,7 @@ public class Main
                 @Override
                 public void handlePreferences(AppEvent.PreferencesEvent e)
                 {
-                    Platform.runLater(() -> PkgMgrFrame.handlePreferences());
+                    Platform.runLater(() -> guiHandler.handlePreferences());
                 }
             });
 
@@ -344,7 +289,7 @@ public class Main
                 public void handleQuitRequestWith(AppEvent.QuitEvent e, QuitResponse response)
                 {
                     macEventResponse = response;
-                    Platform.runLater(() -> PkgMgrFrame.handleQuit());
+                    Platform.runLater(() -> guiHandler.handleQuit());
                     // response.confirmQuit() does not need to be called, since System.exit(0) is called explcitly
                     // response.cancelQuit() is called to cancel (in wantToQuit())
                 }
@@ -371,11 +316,12 @@ public class Main
             });
         }
 
-        Boot.getInstance().setQuitHandler(() -> Platform.runLater(PkgMgrFrame::handleQuit));
+        Boot.getInstance().setQuitHandler(() -> Platform.runLater(() -> guiHandler.handleQuit()));
     }
 
     /**
-     * Quit menu item was chosen.
+     * Handle the "quit" command: if any projects are open, prompt user to make sure, and quit if
+     * confirmed.
      */
     @OnThread(Tag.FXPlatform)
     public static void wantToQuit()
@@ -401,56 +347,20 @@ public class Main
         }
     }
 
-
     /**
-     * perform the closing down and quitting of BlueJ. Note that the order of
-     * the events is relevant - Extensions should be unloaded after package
-     * close
+     * Perform the closing down and quitting of BlueJ, including unloading
+     * extensions.
      */
     @OnThread(Tag.FXPlatform)
     public static void doQuit()
     {
-        PkgMgrFrame[] pkgFrames = PkgMgrFrame.getAllFrames();
-
-        // handle open packages so they are re-opened on startup
-        handleOrphanPackages(pkgFrames);
-
-        int i = pkgFrames.length - 1;
-        // We replicate some of the behaviour of doClose() here
-        // rather than call it to avoid a nasty recursion
-        while (i >= 0) {
-            PkgMgrFrame aFrame = pkgFrames[i--];
-            aFrame.doSave();
-            aFrame.closePackage();
-            PkgMgrFrame.closeFrame(aFrame);
-        }
+        guiHandler.doExitCleanup();
 
         SwingUtilities.invokeLater(() -> {
             ExtensionsManager extMgr = ExtensionsManager.getInstance();
             extMgr.unloadExtensions();
             Platform.runLater(() -> bluej.Main.exit());
         });
-    }
-
-    /**
-     * When bluej is exited with open packages we want it to open these the next
-     * time that is started (this is default action, can be changed by setting
-     *
-     * @param openFrames
-     */
-    @OnThread(Tag.FXPlatform)
-    private static void handleOrphanPackages(PkgMgrFrame[] openFrames)
-    {
-        // if there was a previous list, delete it
-        if (hadOrphanPackages())
-            removeOrphanPackageList();
-        // add an entry for each open package
-        for (int i = 0; i < openFrames.length; i++) {
-            PkgMgrFrame aFrame = openFrames[i];
-            if (!aFrame.isEmptyFrame()) {
-                Config.putPropString(Config.BLUEJ_OPENPACKAGE + (i + 1), aFrame.getPackage().getPath().toString());
-            }
-        }
     }
 
     /**
@@ -475,29 +385,6 @@ public class Main
         return false;
     }
 
-    /**
-     * removes previously listed orphan packages from bluej properties
-     */
-    private static void removeOrphanPackageList()
-    {
-        String exists = "";
-        for (int i = 1; exists != null; i++) {
-            exists = Config.removeProperty(Config.BLUEJ_OPENPACKAGE + i);
-        }
-    }
-
-    /**
-     * Open a single empty bluej window.
-     */
-    @OnThread(Tag.FXPlatform)
-    private static void openEmptyFrame()
-    {
-        PkgMgrFrame frame = PkgMgrFrame.createFrame();
-        frame.getFXWindow().setX(FIRST_X_LOCATION);
-        frame.getFXWindow().setY(FIRST_Y_LOCATION);
-        frame.setVisible(true);
-    }
-    
     /**
      * Send statistics of use back to bluej.org
      */
@@ -617,10 +504,6 @@ public class Main
     @OnThread(Tag.FXPlatform)
     private static void exit()
     {
-        if (PkgMgrFrame.frameCount() > 0) {
-            Debug.reportError("Frame count was not zero when exiting. Work may not have been saved");
-        }
-
         DataCollector.bluejClosed();
         
         // save configuration properties
@@ -636,5 +519,14 @@ public class Main
     public static ClassLoader getStoredContextClassLoader()
     {
         return storedContextClassLoader;
+    }
+    
+    /**
+     * Set the inital GUI, created after the initial project is opened.
+     * @param initialGUI  A consume which displays the GUI for the initial project.
+     */
+    public static void setGuiHandler(GuiHandler initialGUI)
+    {
+        Main.guiHandler = initialGUI;
     }
 }

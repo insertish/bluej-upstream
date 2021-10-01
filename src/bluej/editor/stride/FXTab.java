@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program.
- Copyright (C) 2015,2016  Michael Kolling and John Rosenberg
+ Copyright (C) 2015,2016,2018  Michael Kolling and John Rosenberg
 
  This program is free software; you can redistribute it and/or
  modify it under the terms of the GNU General Public License
@@ -22,6 +22,10 @@
 package bluej.editor.stride;
 
 import java.util.List;
+
+import bluej.utility.javafx.FXConsumer;
+import bluej.utility.javafx.JavaFXUtil;
+import javafx.beans.binding.ObjectExpression;
 import javafx.beans.binding.StringExpression;
 import javafx.beans.property.ReadOnlyStringProperty;
 import javafx.beans.value.ObservableStringValue;
@@ -29,6 +33,8 @@ import javafx.scene.Scene;
 import javafx.scene.control.Menu;
 import javafx.scene.control.Tab;
 
+import javafx.scene.image.Image;
+import javafx.scene.image.ImageView;
 import threadchecker.OnThread;
 import threadchecker.Tag;
 
@@ -47,6 +53,44 @@ abstract class FXTab extends Tab
     public FXTab(boolean showCatalogue)
     {
         this.showCatalogue = showCatalogue;
+    }
+
+    /**
+     * A helper method used by subclasses to create an ImageView for a given 
+     * observable image expression (which may have a null Image in it)
+     * @param imageExpression The image expression to watch for changes
+     * @param maxSize The maximum width and height of the image
+     * @param scaleUp If true, scale the image up to the max image width/height (while preserving aspect ratio).
+     *                If false and the image is smaller than max size, do not scale it up.
+     * @return An imageView which displays the latest image.
+     */
+    @OnThread(Tag.FX)
+    protected static ImageView makeClassGraphicIcon(ObjectExpression<Image> imageExpression, int maxSize, boolean scaleUp)
+    {
+        ImageView imageView = new ImageView();
+        FXConsumer<Image> imageChanged = image -> {
+            if (image == null)
+            {
+                imageView.setFitWidth(0);
+                imageView.setFitHeight(0);
+            }
+            else if (scaleUp)
+            {
+                imageView.setFitHeight(maxSize);
+                imageView.setFitWidth(maxSize);
+            }
+            else
+            {
+                imageView.setFitHeight(Math.min(image.getHeight(), maxSize));
+                imageView.setFitWidth(Math.min(image.getWidth(), maxSize));
+            }
+            
+            imageView.setImage(image);
+        };
+        imageView.setPreserveRatio(true);
+        imageChanged.accept(imageExpression.get());
+        JavaFXUtil.addChangeListener(imageExpression, imageChanged);
+        return imageView;
     }
 
     /**

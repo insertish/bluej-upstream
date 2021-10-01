@@ -1,6 +1,6 @@
 /*
  This file is part of the Greenfoot program. 
- Copyright (C) 2012,2013,2014,2015,2016,2017  Michael Kolling and John Rosenberg
+ Copyright (C) 2012,2013,2014,2015,2016,2017,2018  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -75,7 +75,6 @@ import bluej.utility.BackgroundConsumer;
 import bluej.utility.Debug;
 import bluej.utility.Utility;
 import bluej.utility.javafx.CircleCountdown;
-import bluej.utility.javafx.FXConsumer;
 import bluej.utility.javafx.FXPlatformConsumer;
 import bluej.utility.javafx.FXPlatformRunnable;
 import bluej.utility.javafx.FXRunnable;
@@ -90,6 +89,7 @@ import javafx.application.Platform;
 import javafx.beans.Observable;
 import javafx.beans.binding.Bindings;
 import javafx.beans.binding.DoubleExpression;
+import javafx.beans.binding.ObjectExpression;
 import javafx.beans.binding.StringBinding;
 import javafx.beans.binding.StringExpression;
 import javafx.beans.property.*;
@@ -112,6 +112,7 @@ import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
 import javafx.scene.control.Menu;
 import javafx.scene.control.ScrollPane;
+import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
@@ -154,7 +155,8 @@ import java.util.stream.Stream;
  * (frames, slots, etc) via the InteractionManager interface, so that class is a good place
  * to understand the public interface of this class.
  */
-public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements InteractionManager, SuggestionListParent
+@OnThread(Tag.FX)
+public class FrameEditorTab extends FXTab implements InteractionManager, SuggestionListParent
 {
     @OnThread(Tag.Any)
     private final static List<Future<List<AssistContentThreadSafe>>> popularImports = new ArrayList<>();
@@ -235,6 +237,7 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
     private List<HighlightedBreakpoint> latestExecHistory;
     private StringBinding strideFontSizeAsString;
     private StringExpression strideFontCSS;
+    private final SimpleObjectProperty<Image> imageProperty = new SimpleObjectProperty<>(null);
 
     public FrameEditorTab(Project project, EntityResolver resolver, FrameEditor editor, TopLevelCodeElement initialSource)
     {
@@ -348,7 +351,7 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
         setText("");
         Label titleLabel = new Label(initialSource.getName());
         titleLabel.textProperty().bind(nameProperty);
-        HBox tabHeader = new HBox(titleLabel);
+        HBox tabHeader = new HBox(titleLabel, makeClassGraphicIcon(imageProperty, 16, false));
         tabHeader.setAlignment(Pos.CENTER);
         tabHeader.setSpacing(3.0);
         tabHeader.addEventHandler(MouseEvent.MOUSE_CLICKED, e -> {
@@ -780,8 +783,8 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
         return topLevelFrameProperty.getValue();
     }
 
-    //package-visible
-    void withTopLevelFrame(FXConsumer<TopLevelFrame<? extends TopLevelCodeElement>> action)
+    @OnThread(Tag.FXPlatform)
+    public void withTopLevelFrame(FXPlatformConsumer<TopLevelFrame<? extends TopLevelCodeElement>> action)
     {
         JavaFXUtil.onceNotNull(topLevelFrameProperty, action);
     }
@@ -901,6 +904,7 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
         return debugVarVisibleProperty;
     }
 
+    @OnThread(Tag.FXPlatform)
     public void addExtends(String className)
     {
         withTopLevelFrame(f -> {
@@ -909,6 +913,7 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
         });
     }
 
+    @OnThread(Tag.FXPlatform)
     public void removeExtendsClass()
     {
         withTopLevelFrame(f -> {
@@ -917,6 +922,7 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
         });
     }
 
+    @OnThread(Tag.FXPlatform)
     public void addImplements(String className)
     {
         withTopLevelFrame(f -> {
@@ -925,6 +931,7 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
         });
     }
 
+    @OnThread(Tag.FXPlatform)
     public void removeExtendsOrImplementsInterface(String interfaceName)
     {
         withTopLevelFrame(f -> {
@@ -933,6 +940,7 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
         });
     }
 
+    @OnThread(Tag.FXPlatform)
     private void saveAfterAutomatedEdit()
     {
         modifiedFrame(null, true);
@@ -1348,13 +1356,14 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
         return getParent().catalogueShowingProperty();
     }
 
-    @OnThread(Tag.FXPlatform)
     @Override
+    @OnThread(Tag.FXPlatform)
     public void focusWhenShown()
     {
         withTopLevelFrame(f -> f.focusOnBody(TopLevelFrame.BodyFocus.BEST_PICK));
     }
 
+    @OnThread(Tag.FXPlatform)
     public void cancelFreshState()
     {
         withTopLevelFrame(f -> f.getAllFrames().forEach(Frame::markNonFresh));
@@ -1835,6 +1844,7 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
     }
 
     @Override
+    @OnThread(Tag.FXPlatform)
     public void withCompletions(PosInSourceDoc pos, ExpressionSlot<?> completing, CodeElement codeEl, FXPlatformConsumer<List<AssistContentThreadSafe>> handler)
     {
         withTopLevelFrame(_frame -> JavaFXUtil.runNowOrLater(() -> {
@@ -1846,10 +1856,13 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
     }
 
     @Override
+    @OnThread(Tag.FXPlatform)
     public void withSuperConstructors(FXPlatformConsumer<List<AssistContentThreadSafe>> handler)
     {
         TopLevelCodeElement codeEl = getSource();
-        JavaFXUtil.runNowOrLater(() -> handler.accept(Utility.mapList(codeEl.getSuperConstructors(), c -> new AssistContentThreadSafe(new ConstructorCompletion(c, Collections.emptyMap(), editor.getJavadocResolver())))));
+        handler.accept(Utility.mapList(codeEl.getSuperConstructors(),
+                c -> new AssistContentThreadSafe(new ConstructorCompletion(c, Collections.emptyMap(),
+                        editor.getJavadocResolver()))));
     }
 
     @Override
@@ -1983,13 +1996,13 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
     }
 
     @Override
+    @OnThread(Tag.FXPlatform)
     public void withAccessibleMembers(PosInSourceDoc pos,
             Set<CompletionKind> kinds, boolean includeOverriden, FXPlatformConsumer<List<AssistContentThreadSafe>> handler)
     {
         TopLevelCodeElement allCode = getSource();
-        JavaFXUtil.runNowOrLater(() -> handler.accept(Utility.mapList(
-                editor.getAvailableMembers(allCode, pos, kinds, includeOverriden)
-                , AssistContentThreadSafe::copy)));
+        handler.accept(Utility.mapList(editor.getAvailableMembers(allCode, pos, kinds, includeOverriden)
+                , AssistContentThreadSafe::copy));
     }
 
     @OnThread(Tag.FXPlatform)
@@ -2006,14 +2019,15 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
     }
 
     @Override
+    @OnThread(Tag.FXPlatform)
     public void afterRegenerateAndReparse(FXPlatformRunnable action)
     {
         withTopLevelFrame(f -> {
-            JavaFXUtil.runNowOrLater(() -> {
-                regenerateAndReparse();
-                if (action != null)
-                    action.run();
-            });
+            regenerateAndReparse();
+            if (action != null)
+            {
+                action.run();
+            }
         });
     }
 
@@ -2124,6 +2138,7 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
         withTypes(null, true, Kind.all(), handler);
     }
     
+    @OnThread(Tag.FXPlatform)
     public void removeImports(List<String> importTargets)
     {
         withTopLevelFrame(topLevelFrame -> JavaFXUtil.runNowOrLater(() -> {
@@ -2145,35 +2160,36 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
         }));
     }
     
-    public void insertAppendMethod(NormalMethodElement method, Consumer<Boolean> after)
+    @OnThread(Tag.FXPlatform)
+    public void insertAppendMethod(NormalMethodElement method, FXPlatformConsumer<Boolean> after)
     {
-        // TODO maybe we have to insert it into the element not the frames.
-        withTopLevelFrame(topLevelFrame -> JavaFXUtil.runNowOrLater(() -> {
+        withTopLevelFrame(topLevelFrame -> {
             for (NormalMethodFrame normalMethodFrame : (List<NormalMethodFrame>) topLevelFrame.getMethods()) {
                 // Check if it already exists
                 if (normalMethodFrame.getName().equals(method.getName())) {
                     insertMethodContentsIntoMethodFrame(method, normalMethodFrame);
-                    after.accept(true);
+                    after.accept(false);
                     return;
                 }
             }
             // method not found, create it
             insertMethodElementAtTheEnd(method);
-            after.accept(false);
-        }));
+            after.accept(true);
+        });
     }
     
-    public void insertMethodCallInConstructor(String className, CallElement methodCall, Consumer<Boolean> after)
+    @OnThread(Tag.FXPlatform)
+    public void insertMethodCallInConstructor(CallElement methodCall, FXPlatformConsumer<Boolean> after)
     {
         // TODO maybe we have to insert it into the element not the frames.
-        withTopLevelFrame(topLevelFrame -> JavaFXUtil.runNowOrLater(() -> {
+        withTopLevelFrame(topLevelFrame -> {
             if (topLevelFrame.getConstructors().isEmpty())
             {
                 topLevelFrame.addDefaultConstructor();
             }
             for (ConstructorFrame constructorFrame : topLevelFrame.getConstructors())
             {
-                for (CodeFrame innerFrame : constructorFrame.getMembersFrames())
+                for (CodeFrame<?> innerFrame : constructorFrame.getMembersFrames())
                 {
                     if (innerFrame instanceof CallFrame)
                     {
@@ -2189,7 +2205,7 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
                 insertElementIntoMethod(methodCall, constructorFrame);
             }
             after.accept(false);
-        }));
+        });
     }
 
     @OnThread(Tag.FXPlatform)
@@ -2240,7 +2256,7 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
     @OnThread(Tag.Any)
     public Map<SuggestionList.SuggestionShown, Collection<AssistContentThreadSafe>> getImportSuggestions()
     {
-        HashMap<String, Pair<SuggestionList.SuggestionShown, AssistContentThreadSafe>> imports = new HashMap();
+        HashMap<String, Pair<SuggestionList.SuggestionShown, AssistContentThreadSafe>> imports = new HashMap<>();
         // Add popular:
         Stream.<Pair<SuggestionShown, AssistContentThreadSafe>>concat(
             popularImports.stream().flatMap(imps -> getFutureList(imps).stream().map(ac -> new Pair<>(SuggestionList.SuggestionShown.COMMON, ac))),
@@ -2692,14 +2708,13 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
     }
 
     @Override
+    @OnThread(Tag.FXPlatform)
     public void updateErrorOverviewBar()
     {
         // This method is called as a canvas begins to unfold/fold.  So we add a delay
         // before we recalculate the positions, to make sure the canvas has reached
         // its final size.  At worst, we recalculate twice; no big deal:
-        JavaFXUtil.runNowOrLater(() ->
-            JavaFXUtil.runAfter(Duration.millis(500), () -> updateErrorOverviewBar(false))
-        );
+        JavaFXUtil.runAfter(Duration.millis(500), () -> updateErrorOverviewBar(false));
     }
 
     @Override
@@ -2708,10 +2723,13 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
         return contentRoot.cssHighlightColorProperty().get();
     }
 
+    @SuppressWarnings("unchecked")
     public void focusMethod(String methodName)
     {
         if (getTopLevelFrame() != null) {
-            for (NormalMethodFrame normalMethodFrame : (List<NormalMethodFrame>) getTopLevelFrame().getMethods()) {
+            for (NormalMethodFrame normalMethodFrame :
+                    (List<NormalMethodFrame>) getTopLevelFrame().getMethods())
+            {
                 // TODO include the params no etc to increase accuracy
                 if (normalMethodFrame.getName().equals(methodName)) {
                     normalMethodFrame.focusName();
@@ -2773,6 +2791,7 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
     }
 
     @Override
+    @OnThread(Tag.FXPlatform)
     public void notifyUnselected()
     {
         cancelFreshState();
@@ -2830,6 +2849,13 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
                 focusedCursor != null ? focusedCursor.getCursorIndex() : -1,
                 show,
                 reason);
+    }
+
+    @Override
+    @OnThread(Tag.FX)
+    public ImageView makeClassImageView()
+    {
+        return makeClassGraphicIcon(imageProperty, 48, true);
     }
 
     /**
@@ -2924,6 +2950,7 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
      * @return      If the frame is a code frame, an XPath String identifying the location of that frame.
      *              Otherwise, null.
      */
+    @SuppressWarnings("unchecked")
     private String getXPath(Frame frame)
     {
         return (frame instanceof CodeFrame)
@@ -2940,5 +2967,14 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
     private LocationMap getLocationMap()
     {
         return getTopLevelFrame().getCode().toXML().buildLocationMap();
+    }
+
+    /**
+     * Set the header image (in the tab header)
+     * @param image The image to use (any size).
+     */
+    protected void setHeaderImage(Image image)
+    {
+        imageProperty.set(image);
     }
 }

@@ -38,6 +38,7 @@ import bluej.views.ConstructorView;
 import bluej.views.MethodView;
 import bluej.views.View;
 import bluej.views.ViewFilter;
+import bluej.views.ViewFilter.StaticOrInstance;
 import javafx.collections.ObservableList;
 import javafx.scene.control.Menu;
 import javafx.scene.control.MenuItem;
@@ -205,15 +206,15 @@ public abstract class ClassRole
      *            the popup menu to add the class menu items to
      * @param cl
      *            Class object associated with this class target
+     * @return true if any menu items were added to the menu
      */
     @OnThread(Tag.FXPlatform)
     public boolean createClassConstructorMenu(ObservableList<MenuItem> menu, ClassTarget ct, Class<?> cl)
     {
-        ViewFilter filter;
         View view = View.getView(cl);
 
         if (!java.lang.reflect.Modifier.isAbstract(cl.getModifiers())) {
-            filter = new ViewFilter(ViewFilter.INSTANCE | ViewFilter.PACKAGE);
+            ViewFilter filter = new ViewFilter(StaticOrInstance.INSTANCE, ct.getPackage().getQualifiedName());
             ConstructorView[] constructors = view.getConstructors();
 
             if (createMenuItems(menu, constructors, filter, 0, constructors.length, "new ", ct))
@@ -223,13 +224,21 @@ public abstract class ClassRole
         return false;
     }
 
+    /**
+     * If the given class has any static methods visible from the class target's package,
+     * add actions to invoke them to the menu.
+     * 
+     * @param menu The menu to add any static methods to.
+     * @param ct The class target for this ClassRole
+     * @param cl The class for this ClassRole
+     * @return true if any menu items were added to the menu
+     */
     @OnThread(Tag.FXPlatform)
-    public boolean createClassStaticMenu(ObservableList<MenuItem> menu, ClassTarget ct, boolean hasSource, Class<?> cl)
+    public boolean createClassStaticMenu(ObservableList<MenuItem> menu, ClassTarget ct, Class<?> cl)
     {
-        ViewFilter filter;
         View view = View.getView(cl);
 
-        filter = new ViewFilter(ViewFilter.STATIC | ViewFilter.PACKAGE);
+        ViewFilter filter = new ViewFilter(StaticOrInstance.STATIC, ct.getPackage().getQualifiedName());
         MethodView[] allMethods = view.getAllMethods();
         if (createMenuItems(menu, allMethods, filter, 0, allMethods.length, "", ct))
             return true;
@@ -256,7 +265,7 @@ public abstract class ClassRole
         for (int i = first; i < last; i++) {
             try {
                 CallableView m = members[last - i - 1];
-                if (!filter.accept(m))
+                if (!filter.test(m))
                     continue;
                 // Debug.message("createSubMenu - creating MenuItem");
 
@@ -308,7 +317,7 @@ public abstract class ClassRole
         for (int i = first; i < last; i++) {
             try {
                 CallableView m = members[last - i - 1];
-                if (!filter.accept(m))
+                if (!filter.test(m))
                     continue;
                 // Debug.message("createSubMenu - creating MenuItem");
 

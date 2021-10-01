@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2011,2012,2013,2014,2016  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2011,2012,2013,2014,2016,2018  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -53,9 +53,11 @@ class JdiThread extends DebuggerThread
     static final String statusZombie = Config.getString("debugger.threadstatus.zombie");
 
     /** a list of classes to exclude from source display */
+    @OnThread(value = Tag.Any, requireSynchronized = true)
     private static List<String> excludes;
 
-    private static List<String> getExcludes()
+    @OnThread(Tag.Any)
+    private static synchronized List<String> getExcludes()
     {
         if (excludes == null) {
             setExcludes("java.*, javax.*, sun.*, com.sun.*");
@@ -63,7 +65,8 @@ class JdiThread extends DebuggerThread
         return excludes;
     }
 
-    private static void setExcludes(String excludeString)
+    @OnThread(Tag.Any)
+    private static synchronized void setExcludes(String excludeString)
     {
         StringTokenizer t = new StringTokenizer(excludeString, " ,;");
         List<String> list = new ArrayList<String>();
@@ -73,6 +76,7 @@ class JdiThread extends DebuggerThread
         excludes = list;
     }
 
+    @OnThread(Tag.Any)
     static void addExcludesToRequest(StepRequest request)
     {
         Iterator<String> iter = getExcludes().iterator();
@@ -108,7 +112,8 @@ class JdiThread extends DebuggerThread
     @OnThread(Tag.Any)
     private EventRequestManager eventReqMgr;
     
-    private JdiDebugger debugger;
+    @OnThread(Tag.Any)
+    private final JdiDebugger debugger;
 
     // ---- instance: ----
 
@@ -308,6 +313,7 @@ class JdiThread extends DebuggerThread
      *
      * @return  A List of SourceLocations
      */
+    @OnThread(Tag.Any)
     public List<SourceLocation> getStack()
     {
         return getStack(rt);
@@ -322,6 +328,7 @@ class JdiThread extends DebuggerThread
      * 
      * @return  A List of SourceLocations
      */
+    @OnThread(Tag.Any)
     public static List<SourceLocation> getStack(ThreadReference thr)
     {
         try {
@@ -369,7 +376,8 @@ class JdiThread extends DebuggerThread
      * The thread must be suspended to do this. Otherwise an empty List
      * is returned.
      */
-    @OnThread(Tag.FXPlatform)
+    @OnThread(Tag.Any)
+    @SuppressWarnings("threadchecker")
     public List<VarDisplayInfo> getLocalVariables(int frameNo)
     {
         try {
@@ -414,7 +422,7 @@ class JdiThread extends DebuggerThread
                     int iFinal = i;
                     localVars.add(new VarDisplayInfo(vartype, var, localVals.get(i),
                         varIsObject(frameNo, i) ?
-                            (() -> getStackObject(frameNo, iFinal))
+                            () -> getStackObject(frameNo, iFinal)
                             : null
                     ));
                 }
@@ -443,8 +451,10 @@ class JdiThread extends DebuggerThread
      */
     public boolean varIsObject(int frameNo, int index)
     {
-        try {
-            if(rt.isSuspended()) {
+        try
+        {
+            if(rt.isSuspended())
+            {
                 StackFrame frame = rt.frame(frameNo);
                 List<LocalVariable> vars = frame.visibleVariables();
                 LocalVariable var = vars.get(index);
@@ -452,11 +462,19 @@ class JdiThread extends DebuggerThread
                 return (val instanceof ObjectReference);
             }
             else
+            {
                 return false;
+            }
         }
-        catch(Exception e) {
+        catch (IncompatibleThreadStateException | InvalidStackFrameException itse)
+        {
+            // Don't need to report this; thread must have been resumed already.
+        }
+        catch(Exception e)
+        {
             // nothing can be done...
             Debug.reportError("could not get local variable info: " + e);
+            e.printStackTrace(System.out);
         }
         return false;
     }
@@ -465,6 +483,8 @@ class JdiThread extends DebuggerThread
      * Return an object from this thread's stack. The variable must contain
      * an object.
      */
+    @OnThread(Tag.Any)
+    @SuppressWarnings("threadchecker")
     public DebuggerObject getStackObject(int frameNo, int index)
     {
         try {
@@ -482,11 +502,13 @@ class JdiThread extends DebuggerThread
         catch(Exception e) {
             // nothing can be done...
             Debug.reportError("could not get local variable info: " + e);
+            e.printStackTrace(System.out);
         }
         return null;
     }
 
     @Override
+    @OnThread(Tag.Any)
     public DebuggerObject getCurrentObject(int frameNo)
     {
         try {
@@ -535,6 +557,7 @@ class JdiThread extends DebuggerThread
     /**
      * Halt this thread.
      */
+    @OnThread(Tag.Any)
     public synchronized void halt()
     {
         try {
@@ -550,6 +573,7 @@ class JdiThread extends DebuggerThread
     /**
      * Continue a previously halted thread.
      */
+    @OnThread(Tag.Any)
     public synchronized void cont()
     {
         try {
@@ -595,6 +619,7 @@ class JdiThread extends DebuggerThread
         doStep(doStepOver ? StepRequest.STEP_OVER : StepRequest.STEP_OUT);
     }
 
+    @OnThread(Tag.Any)
     public void stepInto()
     {
         doStep(StepRequest.STEP_INTO);
@@ -603,11 +628,13 @@ class JdiThread extends DebuggerThread
     /**
      * Return the JDI ThreadReference which this JdiThread wraps.
      */
+    @OnThread(Tag.Any)
     public ThreadReference getThreadReference()
     {
         return rt;
     }
     
+    @OnThread(Tag.Any)
     private void doStep(int depth)
     {
         clearPreviousStep(rt);
@@ -663,6 +690,7 @@ class JdiThread extends DebuggerThread
         }
     }
     
+    @OnThread(Tag.Any)
     public boolean sameThread(DebuggerThread dt)
     {
         if (dt != null && dt instanceof JdiThread) {

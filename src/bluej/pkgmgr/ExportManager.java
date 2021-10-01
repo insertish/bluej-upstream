@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2014,2015,2016  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2014,2015,2016,2018  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -42,6 +42,9 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipException;
 import java.util.zip.ZipFile;
 
+import bluej.pkgmgr.target.ClassTarget;
+import javafx.scene.control.Alert;
+import javafx.scene.control.ButtonType;
 import javafx.stage.FileChooser.ExtensionFilter;
 import javafx.stage.Window;
 
@@ -66,6 +69,7 @@ final class ExportManager
     private static final String sourceSuffix = "." + SourceType.Java.toString().toLowerCase();
     private static final String contextSuffix = ".ctxt";
     private static final String packageFilePrefix = "bluej.pk";
+    private static final String packageFileSuffix = ".bluej";
     private static final String packageFileBackup = "bluej.pkh";
 
     private final PkgMgrFrame frame;
@@ -100,6 +104,20 @@ final class ExportManager
         if (!result.isPresent())
             return;
         ExportDialog.ExportInfo info = result.get();
+        if (!info.mainClassName.equals(""))
+        {
+            for (Package p : proj.getProjectPackages())
+            {
+                for (ClassTarget c : p.getClassTargets())
+                {
+                    if (!c.isCompiled())
+                    {
+                        DialogManager.showErrorFX(parent,"jar-executable-uncompiled-project");
+                        return;
+                    }
+                }
+            }
+        }
 
         File fileName = FileUtility.getSaveFileFX(parent, specifyJar, Arrays.asList(new ExtensionFilter("JAR file", "*.jar")), false);
         if (fileName == null)
@@ -124,7 +142,7 @@ final class ExportManager
             fileName = fileName + ".jar";
 
         File jarFile = new File(fileName);
-            
+
         OutputStream oStream = null;
         JarOutputStream jStream = null;
 
@@ -260,10 +278,10 @@ final class ExportManager
         if(fileName.equals(packageFileBackup))
             return true;
         
-        if(fileName.endsWith(sourceSuffix))
+        if(fileName.endsWith(sourceSuffix) || fileName.endsWith(sourceSuffix + "~"))
             return skipSource;
-
-        if(fileName.startsWith(packageFilePrefix) || fileName.endsWith(contextSuffix))
+        if(fileName.startsWith(packageFilePrefix) || fileName.endsWith(packageFileSuffix) ||
+                fileName.endsWith(contextSuffix))
             return skipPkg;
 
         return false;

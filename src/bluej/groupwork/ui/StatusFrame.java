@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program.
- Copyright (C) 1999-2009,2012,2014,2016,2017  Michael Kolling and John Rosenberg
+ Copyright (C) 1999-2009,2012,2014,2016,2017,2018  Michael Kolling and John Rosenberg
 
  This program is free software; you can redistribute it and/or
  modify it under the terms of the GNU General Public License
@@ -38,7 +38,6 @@ import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableColumn.SortType;
 import javafx.scene.control.TableView;
 import javafx.scene.layout.BorderPane;
-import javafx.stage.Window;
 
 import bluej.Config;
 import bluej.collect.DataCollector;
@@ -51,7 +50,6 @@ import bluej.groupwork.TeamViewFilter;
 import bluej.groupwork.TeamworkCommand;
 import bluej.groupwork.TeamworkCommandResult;
 import bluej.pkgmgr.Project;
-import bluej.utility.DialogManager;
 import bluej.utility.FXWorker;
 import bluej.utility.javafx.FXCustomizedDialog;
 import bluej.utility.javafx.JavaFXUtil;
@@ -86,14 +84,13 @@ public class StatusFrame extends FXCustomizedDialog<Void>
      * Creates a new instance of StatusFrame. Called via factory method
      * getStatusWindow.
      */
-    public StatusFrame(Project project, Window owner)
+    public StatusFrame(Project project)
     {
-        super(owner, "team.status", "team-status");
+        super(null, "team.status", "team-status");
         this.project = project;
         isDVCS = project.getTeamSettingsController().isDVCS();
         getDialogPane().setContent(makeMainPane());
         prepareButtonPane();
-        DialogManager.centreDialog(this);
     }
 
     @Override

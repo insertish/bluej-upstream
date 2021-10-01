@@ -29,10 +29,9 @@
         <include name="lib/jl1.0.1.jar" />
         <include name="lib/opencsv-2.3.jar" />
         <include name="lib/commons-vfs2-2.0.jar" />
+        <include name="lib/nsmenufx-2.1.4.jar"/>
         <include name="lib/guava-17.0.jar" />
-        <include name="lib/jna-4.2.0.jar" />
-        <include name="lib/jna-platform-4.2.0.jar" />
-        <include name="lib/greenfoot-native.jar" />
+        <include name="lib/richtextfx-fat-0.9.0.jar"/>
         <include name="lib/javassist-3.18.0.jar" />
         <include name="lib/xom-1.2.9.jar" />
         <include name="lib/bluej.defs" />
@@ -49,6 +48,7 @@
         <include name="lib/images/*.jpg" />
         <include name="lib/images/*.icns" />
         <include name="lib/afrikaans/" />
+        <include name="lib/arabic/" />
         <include name="lib/catalan/" />
         <include name="lib/chinese/" />
         <include name="lib/czech/" />
@@ -95,7 +95,6 @@
 		<include name="*" />
 		<!-- exclude licenses only applicable to files not distributed with Greenfoot --> 
 		<exclude name="antlr-BSD.txt" />
-		<exclude name="CDDL-v1.0.txt" />
 		<exclude name="EDL-v1.0.txt" />
 		<exclude name="jsch-BSD.txt" />
 		<exclude name="slf4j-MIT.txt" />
@@ -278,6 +277,12 @@
         <copy todir="${zip_dir}/Greenfoot.app" preservelastmodified="true">
             <fileset dir="macfiles/Greenfoot.app"/>
         </copy>
+
+        <!-- build the native launcher -->
+        <exec dir="macfiles/nativelauncher/" executable="/bin/bash">
+            <arg value="compile.sh"/>
+            <env key="JAVA_HOME" value="${build_java_home}"/>
+        </exec>
     	
     	<!-- copy the native launcher into place -->
     	<copy file="macfiles/nativelauncher/JavaAppLauncher" todir="${zip_dir}/Greenfoot.app/Contents/MacOS" />

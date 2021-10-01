@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2012  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2012,2018  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -35,6 +35,7 @@ public class DebuggerEvent extends EventObject
 {
     public static interface BreakpointProperties
     {
+        @OnThread(Tag.Any)
         public Object get(Object key);
     }
 
@@ -67,25 +68,18 @@ public class DebuggerEvent extends EventObject
     private int oldState, newState;
     private BreakpointProperties props;
 
-    public DebuggerEvent(Object source, int id)
-    {
-        super(source);
-
-        this.id = id;
-    }
-
     public DebuggerEvent(Debugger source, int id, DebuggerThread thr, BreakpointProperties props)
     {
-        this(source, id);
-
+        super(source);
+        this.id = id;
         this.thr = thr;
         this.props = props;
     }
 
     public DebuggerEvent(Object source, int id, int oldState, int newState)
     {
-        this(source, id);
-
+        super(source);
+        this.id = id;
         this.oldState = oldState;
         this.newState = newState;
     }
@@ -100,6 +94,9 @@ public class DebuggerEvent extends EventObject
         return id == THREAD_BREAKPOINT || id == THREAD_HALT_STEP_INTO || id == THREAD_HALT_STEP_OVER || id == THREAD_HALT_UNKNOWN;
     }
 
+    /**
+     * Get the thread involved in the event.  This is null for event DebuggerEvent.DEBUGGER_STATECHANGED
+     */
     public DebuggerThread getThread()
     {
         return thr;

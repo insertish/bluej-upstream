@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 2014,2015,2016,2017 Michael Kölling and John Rosenberg
+ Copyright (C) 2014,2015,2016,2017,2018 Michael Kölling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -26,6 +26,7 @@ import java.awt.event.MouseListener;
 import java.awt.image.RenderedImage;
 import java.io.File;
 import java.io.IOException;
+import java.net.MalformedURLException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -95,6 +96,7 @@ import javafx.scene.control.SeparatorMenuItem;
 import javafx.scene.control.TextField;
 import javafx.scene.control.TextInputControl;
 import javafx.scene.image.Image;
+import javafx.scene.image.ImageView;
 import javafx.scene.image.WritableImage;
 import javafx.scene.input.InputEvent;
 import javafx.scene.input.KeyCode;
@@ -111,6 +113,7 @@ import javafx.scene.text.Font;
 import javafx.scene.text.Text;
 import javafx.stage.Modality;
 import javafx.stage.Stage;
+import javafx.stage.Window;
 import javafx.stage.WindowEvent;
 import javafx.util.Duration;
 
@@ -149,8 +152,8 @@ public class JavaFXUtil
      */
     public static void setPseudoclass(String pseudoClassName, boolean enabled, Node... nodes)
     {
-        if (!pseudoClassName.startsWith("bj-"))
-            throw new IllegalArgumentException("Our pseudoclasses should begin with bj- to avoid confusion with JavaFX's pseudo classes");
+        if (!pseudoClassName.startsWith("bj-") && !pseudoClassName.startsWith("gf-"))
+            throw new IllegalArgumentException("Our pseudoclasses should begin with bj- or gf- to avoid confusion with JavaFX's pseudo classes");
         
         for (Node node : nodes)
             node.pseudoClassStateChanged(PseudoClass.getPseudoClass(pseudoClassName), enabled);        
@@ -573,14 +576,32 @@ public class JavaFXUtil
                 ((FXConsumer<Boolean>)listener::accept).accept(newVal));
     }
 
+    /**
+     * Run an action on the FX platform thread - either now (if called on the platform thread) or
+     * at some indeterminate time (if called from a different thread).
+     * <p>
+     * This method is inherently dangerous and its use should usually be avoided.
+     * <p>
+     * Calling this from a method tagged with @OnThread(Tag.FX) will potentially run the action
+     * simultaneously with the calling thread, which may well cause concurrency bugs. Furthermore
+     * if on the "FX" (loading) thread then the design should generally not require swapping to the
+     * FX platform thread at all.
+     * <p>
+     * Calling this from a method tagged with @OnThread(Tag.FXPlatform) is redundant. Instead, just
+     * run the action directly. 
+     */
     @OnThread(Tag.Any)
+    @SuppressWarnings("threadchecker")
     public static void runNowOrLater(FXPlatformRunnable action)
     {
         if (Platform.isFxApplicationThread())
-            // Circumvent thread checker (nasty!)
-            ((Runnable)action::run).run();
+        {
+            action.run();
+        }
         else
+        {
             Platform.runLater(action::run);
+        }
     }
 
     /**
@@ -588,11 +609,12 @@ public class JavaFXUtil
      * 
      * @param titleLabel The string to look up in the labels file for the title of the dialog
      * @param messageLabel The string to look up in the labels file for the message of the dialog
+     * @param parent The parent window to block with the modal dialog.  Can be null.
      * @param bringToFront If true, should specially execute code to bring app and window to front.
      * @return True if the user clicked OK, false if the user clicked Cancel or otherwise closed the dialog.
      */
     @OnThread(Tag.FXPlatform)
-    public static boolean confirmDialog(String titleLabel, String messageLabel, Stage parent, boolean bringToFront)
+    public static boolean confirmDialog(String titleLabel, String messageLabel, Window parent, boolean bringToFront)
     {
         Alert alert = new Alert(Alert.AlertType.CONFIRMATION, Config.getString(messageLabel), ButtonType.OK, ButtonType.CANCEL);
         alert.setTitle(Config.getString(titleLabel));
@@ -601,7 +623,7 @@ public class JavaFXUtil
         alert.initModality(Modality.WINDOW_MODAL);
         if (bringToFront)
         {
-            addSelfRemovingListener(alert.showingProperty(), showing -> {
+            listenOnce(alert.showingProperty(), showing -> {
                     if (showing) {
                         Utility.bringToFrontFX(alert.getDialogPane().getScene().getWindow());
                     }
@@ -719,6 +741,109 @@ public class JavaFXUtil
             }
         }
         return job;
+    }
+
+    /**
+     * By default, scroll panes leave their content at its preferred size, and then add scroll bars
+     * if that is bigger than the scroll pane size.  But often, what we want is twofold:
+     *  - If the preferred size is bigger than the scroll pane, add scroll bars
+     *  - BUT if the preferred size is smaller than the scroll pane, resize to fit the whole scroll pane.
+     *  This method makes the scroll pane have that behaviour.
+     */
+    @OnThread(Tag.FX)
+    public static void expandScrollPaneContent(ScrollPane scrollPane)
+    {
+        // Make content expand to fill when smaller than viewport, but scroll once larger than viewport:
+        // Taken from https://reportmill.wordpress.com/2014/06/03/make-scrollpane-content-fill-viewport-bounds/
+        addChangeListener(scrollPane.viewportBoundsProperty(), bounds -> {
+            boolean oldFitToWidth = scrollPane.isFitToWidth();
+            boolean oldFitToHeight = scrollPane.isFitToHeight();
+            scrollPane.setFitToWidth(scrollPane.getContent().prefWidth(-1) < bounds.getWidth());
+            scrollPane.setFitToHeight(scrollPane.getContent().prefHeight(-1) < bounds.getHeight());
+            // It seems that the layout of the scroll pane content isn't always updated by just changing
+            // the fit-to flags, so we also request a layout of the content if applicable:
+            if (scrollPane.getContent() instanceof Region && (oldFitToWidth != scrollPane.isFitToWidth() || oldFitToHeight != scrollPane.isFitToHeight()))
+            {
+                ((Region) scrollPane.getContent()).requestLayout();
+            }
+        });
+    }
+
+    /**
+     * Loads the given file as a JavaFX Image.
+     *
+     * @param image  The system file of the image to load.
+     *               If null, null will definitely be returned.
+     * @return       The image if successfully loaded, null otherwise.
+     */
+    public static Image loadImage(File image)
+    {
+        if (image != null)
+        {
+            try
+            {
+                return new Image(image.toURI().toURL().toExternalForm());
+            }
+            catch (MalformedURLException e)
+            {
+                Debug.reportError(e);
+            }
+        }
+        
+        return null;
+    }
+
+    /**
+     * Loads a JavaFX Image from the path given
+     *
+     * @param path  The path of the image to load.
+     *              If null, null will definitely be returned.
+     * @return      The image if successfully loaded, null otherwise.
+     */
+    public static Image loadImage(String path)
+    {
+        return path == null ? null : loadImage(new File(path));
+    }
+
+    /**
+     * Make a single menu item with a graphics node.
+     * 
+     * @param nameKey The key to lookup via Config.getString for the name
+     * @param icon The node which has the icon of the menu item. It has to be
+     *             an ImageView to get the icons working (at least on Mac).
+     * @param accelerator The accelerator if any (null if none)
+     * @param action The action to perform when the menu item is activated
+     * @param binding  The binding for disabling the menu item (may be null).
+     * 
+     * @return The MenuItem combining all these items.
+     */
+    public static MenuItem makeMenuItem(String nameKey, ImageView icon, KeyCombination accelerator,
+                                        FXPlatformRunnable action, ObservableValue<Boolean> binding)
+    {
+        MenuItem item = makeMenuItem(nameKey, accelerator, action, binding);
+        item.setGraphic(icon);
+        return item;
+    }
+
+    /**
+     * Make a single menu item.
+     * 
+     * @param nameKey The key to lookup via Config.getString for the name
+     * @param accelerator The accelerator if any (null if none)
+     * @param action The action to perform when the menu item is activated
+     * @param binding  The binding for disabling the menu item (may be null).
+     * 
+     * @return The MenuItem combining all these items.
+     */
+    public static MenuItem makeMenuItem(String nameKey, KeyCombination accelerator,
+                                        FXPlatformRunnable action, ObservableValue<Boolean> binding)
+    {
+        MenuItem item = makeMenuItem(Config.getString(nameKey), action, accelerator);
+        if (binding != null)
+        {
+            item.disableProperty().bind(binding);
+        }
+        return item;
     }
 
     /**
@@ -1131,23 +1256,23 @@ public class JavaFXUtil
 
     /**
      * Runs the given action (on the FX Platform thread) once the given node
-     * gets added to the scene.
+     * gets added to a scene.
      */
     public static void onceInScene(Node node, FXPlatformRunnable action)
     {
-        // Fairly sure scene property can only change on FX thread, but no
-        // harm using runNowOrLater:
-        onceNotNull(node.sceneProperty(), s -> runNowOrLater(action));
+        onceBecomesNotNull(node.sceneProperty(), s -> action.run());
     }
 
     /** 
-     * Waits for the observable value to become non-null, then calls the given function on the value once.
+     * Waits for the observable value to become non-null (if it is not already), then calls the
+     * given function on the value once.
      *
      * @param observable The value to wait to become non-null.
      * @param callback The callback to call with the non-null value.  If
      *                 observable's value is already non-null, called immediately before returning
      */
-    public static <T6> void onceNotNull(ObservableValue<T6> observable, FXConsumer<T6> callback)
+    @OnThread(Tag.FXPlatform)
+    public static <T6> void onceNotNull(ObservableValue<T6> observable, FXPlatformConsumer<T6> callback)
     {
         T6 t = observable.getValue();
         
@@ -1157,12 +1282,25 @@ public class JavaFXUtil
             return;
         }
         
-        // Can't be a lambda because we need a reference to ourselves to self-remove:
-        ChangeListener<? super T6> listener = new ChangeListener<T6>() {
+        onceBecomesNotNull(observable, callback);
+    }
     
+    /** 
+     * Waits for the observable value to become non-null, then calls the given function on the
+     * value once.
+     *
+     * @param observable The value to wait to become non-null.
+     * @param callback The callback to call with the non-null value.
+     */
+    @OnThread(Tag.FX)
+    public static <T> void onceBecomesNotNull(ObservableValue<T> observable, FXPlatformConsumer<T> callback)
+    {
+        // Can't be a lambda because we need a reference to ourselves to self-remove:
+        ChangeListener<? super T> listener = new ChangeListener<T>() {
             @Override
-            public void changed(ObservableValue<? extends T6> observable,
-                    T6 oldValue, T6 newVal)
+            @OnThread(value = Tag.FXPlatform, ignoreParent = true)
+            public void changed(ObservableValue<? extends T> observable,
+                    T oldValue, T newVal)
             {
                 if (newVal != null)
                 {
@@ -1181,7 +1319,8 @@ public class JavaFXUtil
      * @param callback The callback to call with the true value.
      *                 If observable's value is already true, call immediately before returning
      */
-    public static void onceTrue(ObservableValue<Boolean> observable, FXConsumer<Boolean> callback)
+    @OnThread(Tag.FXPlatform)
+    public static void onceTrue(ObservableValue<Boolean> observable, FXPlatformConsumer<Boolean> callback)
     {
         boolean value = observable.getValue();
 
@@ -1193,8 +1332,8 @@ public class JavaFXUtil
 
         // Can't be a lambda because we need a reference to ourselves to self-remove:
         ChangeListener<Boolean> listener = new ChangeListener<Boolean>() {
-
             @Override
+            @OnThread(value = Tag.FXPlatform, ignoreParent = true)
             public void changed(ObservableValue<? extends Boolean> observable,
                                 Boolean oldValue, Boolean newVal)
             {
@@ -1308,6 +1447,36 @@ public class JavaFXUtil
         prop.addListener(l);
         return () -> prop.removeListener(l);
     }
+
+    /**
+     * Creates a ChangeListener that will execute the given action (with the new value)
+     * once, on the first change, and then remove itself as a listener. The observable should
+     * only be changed on the FX Platform thread.
+     * 
+     * Also returns an action that can remove the listener earlier.
+     * 
+     * @param prop The observable value
+     * @param callback A listener, to be called at most once, on the first change of "prop"
+     * @return An action which, if run, removes this listener.  If the listener has already
+     *         been run once, has no effect.
+     */
+    @OnThread(Tag.FXPlatform)
+    public static <T> FXPlatformRunnable listenOnce(ObservableValue<T> prop,
+            FXPlatformConsumer<T> callback)
+    {
+        ChangeListener<T> l = new ChangeListener<T>() {
+            @Override
+            @OnThread(value = Tag.FXPlatform, ignoreParent = true)
+            public void changed(ObservableValue<? extends T> observable,
+                    T oldValue, T newValue)
+            {
+                callback.accept(newValue);
+                prop.removeListener(this);
+            }
+        };
+        prop.addListener(l);
+        return () -> prop.removeListener(l);
+    }
     
     /**
      * Makes one list (dest) always contain the contents of the other (src) until the returned
@@ -1349,12 +1518,15 @@ public class JavaFXUtil
         return () -> property.removeListener(wrapped);
     }
 
-    /** Like addChangeListener, but for when the item will definitely only be changed on the platform thread */
-    @OnThread(Tag.FXPlatform)
-    public static <T> FXPlatformRunnable addChangeListenerPlatform(ObservableValue<T> property, FXPlatformConsumer<T> listener)
+    /**
+     * Like addChangeListener, but for when the item will definitely only be changed on the platform thread
+     */
+    @OnThread(Tag.FX)
+    @SuppressWarnings("threadchecker")
+    public static <T> FXPlatformRunnable addChangeListenerPlatform(ObservableValue<T> property,
+            FXPlatformConsumer<T> listener)
     {
-        // Defeat thread checker:
-        ChangeListener<T> wrapped = (a, b, newVal) -> ((FXConsumer<T>)listener::accept).accept(newVal);
+        ChangeListener<T> wrapped = (a, b, newVal) -> listener.accept(newVal);
         property.addListener(wrapped);
         return () -> property.removeListener(wrapped);
     }
@@ -1417,7 +1589,7 @@ public class JavaFXUtil
      * @param task     The task to run (on the FX thread)
      * @return An action which, if executed, will cancel all future executions of the task.
      */
-    public static FXRunnable runRegular(Duration interval, FXRunnable task)
+    public static FXRunnable runRegular(Duration interval, FXPlatformRunnable task)
     {
         if (interval.lessThanOrEqualTo(Duration.ZERO))
         {

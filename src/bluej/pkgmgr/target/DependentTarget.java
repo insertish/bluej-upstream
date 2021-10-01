@@ -28,6 +28,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import bluej.pkgmgr.*;
 import bluej.pkgmgr.Package;
 import bluej.pkgmgr.dependency.*;
+import bluej.utility.javafx.FXPlatformConsumer;
 import javafx.geometry.Point2D;
 import threadchecker.OnThread;
 import threadchecker.Tag;
@@ -54,6 +55,8 @@ public abstract class DependentTarget extends EditableTarget
 
     @OnThread(Tag.Any)
     private final AtomicReference<State> state = new AtomicReference<>(State.NEEDS_COMPILE);
+    @OnThread(Tag.FXPlatform)
+    protected final List<TargetListener> stateListeners = new ArrayList<>();
 
     @OnThread(value = Tag.Any, requireSynchronized = true)
     private List<UsesDependency> inUses;
@@ -532,10 +535,55 @@ public abstract class DependentTarget extends EditableTarget
      * 
      * @param newState The new state value
      */
+    @OnThread(Tag.FXPlatform)
     public void setState(State newState)
     {
         state.set(newState);
         repaint();
         redraw();
+        for (TargetListener stateListener : stateListeners)
+        {
+            stateListener.stateChanged(newState);
+        }
+    }
+
+    /**
+     * Adds a TargetListener to changes in this target.
+     */
+    @OnThread(Tag.FXPlatform)
+    public void addListener(TargetListener listener)
+    {
+        stateListeners.add(listener);
+    }
+
+    /**
+     * Removes a listener added by addListener
+     */
+    @OnThread(Tag.FXPlatform)
+    public void removeListener(TargetListener listener)
+    {
+        stateListeners.remove(listener);
+    }
+
+    /**
+     * A listener to changes in a DependentTarget
+     */
+    public static interface TargetListener
+    {
+        /**
+         * Called when the editor has been opened.  If the same Editor instance is opened and closed
+         * multiple times, this method is called on every open.
+         */
+        public void editorOpened();
+        
+        /**
+         * Called when state has changed
+         */
+        public void stateChanged(State newState);
+
+        /**
+         * Called when the target is renamed.
+         */
+        public void renamed(String newName);
     }
 }

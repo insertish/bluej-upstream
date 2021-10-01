@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2011,2016,2017  Michael Kolling and John Rosenberg
+ Copyright (C) 1999-2009,2010,2011,2016,2017,2018  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -145,6 +145,7 @@ public abstract class Debugger
     /**
      * Remove all breakpoints in the given class.
      */
+    @OnThread(Tag.Any)
     public abstract void removeBreakpointsForClass(String className);
 
     /**
@@ -225,7 +226,7 @@ public abstract class Debugger
      * "Run" a class (i.e. invoke its main method without arguments)
      */
     @OnThread(Tag.Any)
-    public abstract FXPlatformSupplier<DebuggerResult> runClassMain(String className)
+    public abstract DebuggerResult runClassMain(String className)
         throws ClassNotFoundException;
 
     /**
@@ -234,7 +235,7 @@ public abstract class Debugger
      * @return   The result of the constructor call
      */
     @OnThread(Tag.Any)
-    public abstract FXPlatformSupplier<DebuggerResult> instantiateClass(String className);
+    public abstract DebuggerResult instantiateClass(String className);
 
     /**
      * Instantiate a class using a specific constructor for that class.
@@ -244,7 +245,9 @@ public abstract class Debugger
      * @param args       The arguments
      * @return   The result of the constructor call
      */
-    public abstract FXPlatformSupplier<DebuggerResult> instantiateClass(String className, String [] paramTypes, DebuggerObject [] args);
+    @OnThread(Tag.Any)
+    public abstract DebuggerResult instantiateClass(String className, String [] paramTypes,
+            DebuggerObject [] args);
     
     /**
      * Get a class from the virtual machine, using the current classloader.
@@ -297,6 +300,7 @@ public abstract class Debugger
      * @return           a string of the error message generated performing
      *                   this operation or null
      */
+    @OnThread(Tag.Any)
     public abstract String toggleBreakpoint(String className, String method, boolean set,
                                             Map<String,String> properties);
     
@@ -312,6 +316,7 @@ public abstract class Debugger
      * @return           a string of the error message generated performing
      *                   this operation or null
      */
+    @OnThread(Tag.Any)
     public abstract String toggleBreakpoint(DebuggerClass debuggerClass, String method, boolean set,
             Map<String, String> properties);
 

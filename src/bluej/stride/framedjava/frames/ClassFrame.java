@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 2014,2015,2016,2017 Michael Kölling and John Rosenberg
+ Copyright (C) 2014,2015,2016,2017,2018 Michael Kölling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -21,6 +21,7 @@
  */
 package bluej.stride.framedjava.frames;
 
+import bluej.Config;
 import bluej.editor.stride.BirdseyeManager;
 import bluej.parser.AssistContent.CompletionKind;
 import bluej.parser.AssistContent.ParamInfo;
@@ -156,7 +157,8 @@ public class ClassFrame extends TopLevelDocumentMultiCanvasFrame<ClassElement>
         extendsInheritedCanvases.addListener((ListChangeListener<? super InheritedCanvas>) c ->
             inheritedLabel.setDisable(extendsInheritedCanvases.isEmpty())
         );
-        JavaFXUtil.addChangeListener(inheritedLabel.expandedProperty(), b -> editor.updateErrorOverviewBar());
+        JavaFXUtil.addChangeListenerPlatform(inheritedLabel.expandedProperty(),
+                b -> editor.updateErrorOverviewBar());
 
         // We must keep hold of an explicit reference to this binding, rather than inlining it.
         // If you do not keep this stored in a field, it will get GC-ed.
@@ -170,7 +172,7 @@ public class ClassFrame extends TopLevelDocumentMultiCanvasFrame<ClassElement>
                 implementsSlot.getHeaderItems()
             ));
 
-        constructorsLabel = makeLabel("Constructors");
+        constructorsLabel = makeLabel(Config.getString("frame.editor.label.constructors"));
         this.constructorsCanvas = new FrameCanvas(editor, this, "class-");
         constructorsLabelRow = new FrameContentRow(this, constructorsLabel);
         addCanvas(constructorsLabelRow, constructorsCanvas, 1);
@@ -215,24 +217,24 @@ public class ClassFrame extends TopLevelDocumentMultiCanvasFrame<ClassElement>
         ops.add(new CopyFrameAsStrideOperation(editor));
         ops.add(new CopyFrameAsImageOperation(editor));
         ops.add(new CopyFrameAsJavaOperation(editor));
-        ops.add(new CustomFrameOperation(getEditor(), "addRemoveAbstract", Arrays.asList("Toggle abstract"),
+        ops.add(new CustomFrameOperation(getEditor(), "addRemoveAbstract", Arrays.asList(Config.getString("frame.class.toggle.abstract")),
                 MenuItemOrder.TOGGLE_ABSTRACT, this, () ->  abstractModifier.set(!abstractModifier.get())));
 
         if (extendsSlot.isEmpty())
         {
-            ops.add(new CustomFrameOperation(getEditor(), "addExtends", Arrays.asList("Add 'extends'"),
+            ops.add(new CustomFrameOperation(getEditor(), "addExtends", Arrays.asList(Config.getString("frame.class.add.extends")),
                     MenuItemOrder.TOGGLE_EXTENDS, this, () -> showAndFocusExtends()));
         }
         else
         {
             CustomFrameOperation op = new CustomFrameOperation(getEditor(), "removeExtends",
-                    Arrays.asList("Remove 'extends " + extendsSlot.getText() + "'"), MenuItemOrder.TOGGLE_EXTENDS,
-                    this, () -> extendsSlot.setText(""));
+                    Arrays.asList(Config.getString("frame.class.remove.extends.from").replace("$", extendsSlot.getText())),
+                    MenuItemOrder.TOGGLE_EXTENDS, this, () -> extendsSlot.setText(""));
             op.setWideCustomItem(true);
             ops.add(op);
         }
 
-        ops.add(new CustomFrameOperation(getEditor(), "addImplements", Arrays.asList("Add 'implements'"),
+        ops.add(new CustomFrameOperation(getEditor(), "addImplements", Arrays.asList(Config.getString("frame.class.add.implements")),
                 MenuItemOrder.TOGGLE_IMPLEMENTS, this, () -> implementsSlot.addTypeSlotAtEnd("", true)));
 
         final List<TypeSlotFragment> types = implementsSlot.getTypes();
@@ -241,8 +243,8 @@ public class ClassFrame extends TopLevelDocumentMultiCanvasFrame<ClassElement>
             final int index = i;
             TypeSlotFragment type = types.get(i);
             CustomFrameOperation removeOp = new CustomFrameOperation(getEditor(), "removeImplements",
-                    Arrays.asList("Remove 'implements " + type.getContent() + "'"), MenuItemOrder.TOGGLE_IMPLEMENTS,
-                    this, () -> implementsSlot.removeIndex(index));
+                    Arrays.asList(Config.getString("frame.class.remove.implements").replace("$", type.getContent())),
+                    MenuItemOrder.TOGGLE_IMPLEMENTS, this, () -> implementsSlot.removeIndex(index));
             removeOp.setWideCustomItem(true);
             ops.add(removeOp);
         }
@@ -272,7 +274,7 @@ public class ClassFrame extends TopLevelDocumentMultiCanvasFrame<ClassElement>
         ExtensionDescription implementsExtension = null;
         ExtensionDescription extendsExtension = null;
         if (fieldsCanvas.equals(canvas) || canvas == null) {
-            abstractExtension = new ExtensionDescription(StrideDictionary.ABSTRACT_EXTENSION_CHAR, "Toggle abstract",
+            abstractExtension = new ExtensionDescription(StrideDictionary.ABSTRACT_EXTENSION_CHAR, Config.getString("frame.class.toggle.abstract"),
                     () -> abstractModifier.set(!abstractModifier.get()), true, ExtensionSource.INSIDE_FIRST, ExtensionSource.MODIFIER);
             implementsExtension = new ExtensionDescription(StrideDictionary.IMPLEMENTS_EXTENSION_CHAR, "Add implements declaration",
                     () -> implementsSlot.addTypeSlotAtEnd("", true), true, ExtensionSource.INSIDE_FIRST, ExtensionSource.MODIFIER);
@@ -781,7 +783,9 @@ public class ClassFrame extends TopLevelDocumentMultiCanvasFrame<ClassElement>
     @Override
     public Stream<FrameCanvas> getPersistentCanvases()
     {
-        return getCanvases().filter(canvas -> !extendsInheritedCanvases.contains(canvas));
+        List<FrameCanvas> extendsFrameCanvases = extendsInheritedCanvases.stream()
+                .map(inheritedCanvas -> inheritedCanvas.canvas).collect(Collectors.toList());
+        return getCanvases().filter(canvas -> !extendsFrameCanvases.contains(canvas));
     }
 
     @Override

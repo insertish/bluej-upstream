@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 2016,2017  Michael Kolling and John Rosenberg
+ Copyright (C) 2016,2017,2018  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -24,7 +24,6 @@ package bluej.groupwork.ui;
 import bluej.Config;
 import bluej.groupwork.actions.CommitAction;
 import bluej.groupwork.actions.PushAction;
-import bluej.groupwork.CommitFilter;
 import bluej.groupwork.Repository;
 import bluej.groupwork.StatusHandle;
 import bluej.groupwork.StatusListener;
@@ -34,24 +33,22 @@ import bluej.groupwork.TeamUtils;
 import bluej.groupwork.TeamworkCommand;
 import bluej.groupwork.TeamworkCommandResult;
 import bluej.pkgmgr.BlueJPackageFile;
-import bluej.pkgmgr.PkgMgrFrame;
 import bluej.pkgmgr.Project;
+import bluej.utility.Debug;
 import bluej.utility.DialogManager;
 import bluej.utility.FXWorker;
 import bluej.utility.javafx.FXCustomizedDialog;
 import bluej.utility.javafx.JavaFXUtil;
+import bluej.utility.javafx.NoMultipleSelectionModel;
 import bluej.utility.Utility;
 
 import java.io.File;
 import java.io.FileFilter;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -105,18 +102,18 @@ public class CommitAndPushFrame extends FXCustomizedDialog<Void> implements Comm
     private PushAction pushAction;
     private CommitAndPushWorker commitAndPushWorker;
 
-    //sometimes, usually after a conflict resolution, we need to push in order
-    //to update HEAD.
-    private boolean pushWithNoChanges = false;
+    // Sometimes, usually after a conflict resolution, we may need to push in order
+    // to update HEAD, even though no files show as changed:
+    private boolean pushNeeded = false;
+    private boolean updateNeeded = false;
 
-    public CommitAndPushFrame(Project proj, Window owner)
+    public CommitAndPushFrame(Project proj)
     {
-        super(owner, "team.commit.dcvs.title", "team-commit-push");
+        super(null, "team.commit.dcvs.title", "team-commit-push");
         project = proj;
         repository = project.getTeamSettingsController().trytoEstablishRepository(false);
         getDialogPane().setContent(makeMainPane());
         prepareButtonPane();
-        DialogManager.centreDialog(this);
     }
 
     /**
@@ -127,7 +124,8 @@ public class CommitAndPushFrame extends FXCustomizedDialog<Void> implements Comm
         ListView<TeamStatusInfo> commitFiles = new ListView<>(commitListModel);
         commitFiles.setPlaceholder(new Label(Config.getString("team.nocommitfiles")));
         commitFiles.setCellFactory(param -> new TeamStatusInfoCell(project));
-        commitFiles.setDisable(true);
+        commitFiles.setSelectionModel(new NoMultipleSelectionModel<>());
+        commitFiles.disableProperty().bind(Bindings.isEmpty(commitListModel));
 
         ScrollPane commitFileScrollPane = new ScrollPane(commitFiles);
         commitFileScrollPane.setFitToWidth(true);
@@ -141,11 +139,12 @@ public class CommitAndPushFrame extends FXCustomizedDialog<Void> implements Comm
 
         commitAction = new CommitAction(this);
         Button commitButton = new Button();
-        commitAction.useButton(PkgMgrFrame.getMostRecent(), commitButton);
+        commitAction.useButton(project, commitButton);
         commitButton.requestFocus();
         //Bind commitText properties to enable the commit button if there is a comment.
         commitText.disableProperty().bind(Bindings.isEmpty(commitListModel));
-        commitAction.disabledProperty().bind(Bindings.or(commitText.disabledProperty(), commitText.textProperty().isEmpty()));
+        commitAction.disabledProperty().bind(Bindings.or(commitText.disabledProperty(),
+                commitText.textProperty().isEmpty()));
 
         includeLayout.setOnAction(event -> {
             CheckBox layoutCheck = (CheckBox) event.getSource();
@@ -163,14 +162,14 @@ public class CommitAndPushFrame extends FXCustomizedDialog<Void> implements Comm
         commitButtonPane.setAlignment(Pos.CENTER_RIGHT);
         commitButtonPane.getChildren().addAll(includeLayout, commitButton);
 
-
         pushAction = new PushAction(this);
         Button pushButton = new Button();
-        pushAction.useButton(PkgMgrFrame.getMostRecent(), pushButton);
+        pushAction.useButton(project, pushButton);
 
         Label pushFilesLabel = new Label(Config.getString("team.commitPush.push.files"));
         pushFiles.setCellFactory(param -> new TeamStatusInfoCell(project));
-        pushFiles.setDisable(true);
+        pushFiles.setSelectionModel(new NoMultipleSelectionModel<>());
+        pushFiles.disableProperty().bind(Bindings.isEmpty(pushListModel));
         ScrollPane pushFileScrollPane = new ScrollPane(pushFiles);
         pushFileScrollPane.setFitToWidth(true);
         pushFileScrollPane.setFitToHeight(true);
@@ -183,7 +182,8 @@ public class CommitAndPushFrame extends FXCustomizedDialog<Void> implements Comm
 
         VBox mainPane = new VBox();
         JavaFXUtil.addStyleClass(mainPane, "main-pane");
-        mainPane.getChildren().addAll(new Label(Config.getString("team.commitPush.commit.files")), commitFileScrollPane,
+        mainPane.getChildren().addAll(new Label(Config.getString("team.commitPush.commit.files")),
+                commitFileScrollPane,
                 new Label(Config.getString("team.commit.comment")), commitText,
                 commitButtonPane,
                 new Separator(Orientation.HORIZONTAL),
@@ -205,7 +205,7 @@ public class CommitAndPushFrame extends FXCustomizedDialog<Void> implements Comm
             if (commitAction != null) {
                 commitAction.cancel();
             }
-                close();
+            close();
         });
     }
 
@@ -292,14 +292,6 @@ public class CommitAndPushFrame extends FXCustomizedDialog<Void> implements Comm
     }
 
     /**
-     * Remove a file from the list of changes layout files.
-     */
-    private void removeChangedLayoutFile(File file)
-    {
-        changedLayoutFiles.removeIf(info -> info.getFile().equals(file));
-    }
-
-    /**
      * Get a set of the layout files which have changed (with status info).
      *
      * @return the set of the layout files which have changed.
@@ -354,11 +346,6 @@ public class CommitAndPushFrame extends FXCustomizedDialog<Void> implements Comm
     public Project getProject()
     {
         return project;
-    }
-
-    private void setLayoutChanged(boolean hasChanged)
-    {
-        includeLayout.setDisable(!hasChanged);
     }
 
     @OnThread(Tag.FXPlatform)
@@ -423,7 +410,8 @@ public class CommitAndPushFrame extends FXCustomizedDialog<Void> implements Comm
         public void statusComplete(StatusHandle statusHandle)
         {
             commitAction.setStatusHandle(statusHandle);
-            pushWithNoChanges = statusHandle.pushNeeded();
+            pushNeeded = statusHandle.pushNeeded();
+            updateNeeded = statusHandle.pullNeeded();
             pushAction.setStatusHandle(statusHandle);
         }
 
@@ -445,182 +433,70 @@ public class CommitAndPushFrame extends FXCustomizedDialog<Void> implements Comm
         public void finished()
         {
             stopProgress();
-            if (!aborted) {
-                if (result.isError()) {
-//                    CommitAndPushFrame.this.dialogThenHide(() -> TeamUtils.handleServerResponseFX(result, CommitAndPushFrame.this.asWindow()));
+            if (!aborted)
+            {
+                if (result.isError())
+                {
                     TeamUtils.handleServerResponseFX(result, CommitAndPushFrame.this.asWindow());
                     CommitAndPushFrame.this.hide();
-                } else if (response != null) {
-                    //populate files to commit.
+                }
+                else if (response != null)
+                {
                     Set<File> filesToCommit = new HashSet<>();
                     Set<File> filesToAdd = new LinkedHashSet<>();
                     Set<File> filesToDelete = new HashSet<>();
-                    Set<File> mergeConflicts = new HashSet<>();
-                    Set<File> deleteConflicts = new HashSet<>();
-                    Set<File> otherConflicts = new HashSet<>();
-                    Set<File> needsMerge = new HashSet<>();
-                    Set<File> modifiedLayoutFiles = new HashSet<>();
 
                     List<TeamStatusInfo> info = response;
-                    getCommitFileSets(info, filesToCommit, filesToAdd, filesToDelete,
-                            mergeConflicts, deleteConflicts, otherConflicts,
-                            needsMerge, modifiedLayoutFiles, false);
+                    getCommitFileSets(info, filesToCommit, filesToAdd, filesToDelete, changedLayoutFiles);
 
-                    if (!mergeConflicts.isEmpty() || !deleteConflicts.isEmpty()
-                            || !otherConflicts.isEmpty() || !needsMerge.isEmpty()) {
-
-                        handleConflicts(mergeConflicts, deleteConflicts,
-                                otherConflicts, needsMerge);
-                        return;
-                    }
-
+                    includeLayout.setDisable(changedLayoutFiles.isEmpty());
+                    
                     commitAction.setFiles(filesToCommit);
                     commitAction.setNewFiles(filesToAdd);
                     commitAction.setDeletedFiles(filesToDelete);
-                    //update commitListModel
                     updateListModel(commitListModel, filesToCommit, info);
                     updateListModel(commitListModel, filesToAdd, info);
                     updateListModel(commitListModel, filesToDelete, info);
 
-                    //populate files ready to push.
-                    Set<File> filesToCommitInPush = new HashSet<>();
-                    Set<File> filesToAddInPush = new HashSet<>();
-                    Set<File> filesToDeleteInPush = new HashSet<>();
-                    Set<File> mergeConflictsInPush = new HashSet<>();
-                    Set<File> deleteConflictsInPush = new HashSet<>();
-                    Set<File> otherConflictsInPush = new HashSet<>();
-                    Set<File> needsMergeInPush = new HashSet<>();
-                    Set<File> modifiedLayoutFilesInPush = new HashSet<>();
-
-                    getCommitFileSets(info, filesToCommitInPush, filesToAddInPush, filesToDeleteInPush,
-                            mergeConflictsInPush, deleteConflictsInPush, otherConflictsInPush,
-                            needsMergeInPush, modifiedLayoutFilesInPush, true);
-
-                    //update commitListModel
-                    updateListModel(pushListModel, filesToCommitInPush, info);
-                    updateListModel(pushListModel, filesToAddInPush, info);
-                    updateListModel(pushListModel, filesToDeleteInPush, info);
-                    updateListModel(pushListModel, modifiedLayoutFilesInPush, info);
-
-                    this.isPushAvailable = pushWithNoChanges || !filesToCommitInPush.isEmpty() || !filesToAddInPush.isEmpty()
-                            || !filesToDeleteInPush.isEmpty() || !modifiedLayoutFilesInPush.isEmpty();
+                    if (updateNeeded)
+                    {
+                        // It's not possible to push if the remote branch is ahead
+                        pushListModel.clear();
+                        isPushAvailable = false;
+                    }
+                    else
+                    {
+                        // populate files ready to push:
+                        Set<File> filesToPush = new HashSet<>();
+                        getPushFileSets(info, filesToPush);
+                        updateListModel(pushListModel, filesToPush, info);
+                        this.isPushAvailable = pushNeeded;
+                    }
 
                     pushAction.setEnabled(this.isPushAvailable);
-
-                    //in the case we are commiting the resolution of a merge, we should check if the same file that is beingmarked as otherConflict 
-                    //on the remote branch is being commitd to the local branch. if it is, then this is the user resolution to the conflict and we should 
-                    //procceed with the commit. and then with the push as normal.
-                    boolean conflicts;
-                    conflicts = !mergeConflictsInPush.isEmpty() || !deleteConflictsInPush.isEmpty()
-                            || !otherConflictsInPush.isEmpty() || !needsMergeInPush.isEmpty();
-                    if (commitAction.isDisabled() && conflicts) {
-                        //there is a file in some of the conflict list.
-                        //check if this fill will commit normally. if it will, we should allow.
-                        Set<File> conflictingFilesInPush = new HashSet<>();
-                        conflictingFilesInPush.addAll(mergeConflictsInPush);
-                        conflictingFilesInPush.addAll(deleteConflictsInPush);
-                        conflictingFilesInPush.addAll(otherConflictsInPush);
-                        conflictingFilesInPush.addAll(needsMergeInPush);
-
-                        for (File conflictEntry : conflictingFilesInPush) {
-                            if (filesToCommit.contains(conflictEntry)) {
-                                conflictingFilesInPush.remove(conflictEntry);
-                                mergeConflictsInPush.remove(conflictEntry);
-                                deleteConflictsInPush.remove(conflictEntry);
-                                otherConflictsInPush.remove(conflictEntry);
-                                needsMergeInPush.remove(conflictEntry);
-
-                            }
-                            if (filesToAdd.contains(conflictEntry)) {
-                                conflictingFilesInPush.remove(conflictEntry);
-                                mergeConflictsInPush.remove(conflictEntry);
-                                deleteConflictsInPush.remove(conflictEntry);
-                                otherConflictsInPush.remove(conflictEntry);
-                                needsMergeInPush.remove(conflictEntry);
-                            }
-                            if (filesToDelete.contains(conflictEntry)) {
-                                conflictingFilesInPush.remove(conflictEntry);
-                                mergeConflictsInPush.remove(conflictEntry);
-                                deleteConflictsInPush.remove(conflictEntry);
-                                otherConflictsInPush.remove(conflictEntry);
-                                needsMergeInPush.remove(conflictEntry);
-                            }
-                        }
-                        conflicts = !conflictingFilesInPush.isEmpty();
-                    }
-
-                    if (commitAction.isDisabled() && conflicts) {
-
-                        handleConflicts(mergeConflictsInPush, deleteConflictsInPush,
-                                otherConflictsInPush, null);
-                        return;
-                    }
                 }
 
-                if (!commitListModel.isEmpty()) {
+                if (!commitListModel.isEmpty())
+                {
                     commitText.requestFocus();
                 }
 
-                if (pushListModel.isEmpty()){
-                    if (isPushAvailable){
+                if (pushListModel.isEmpty())
+                {
+                    if (isPushAvailable)
+                    {
                         pushFiles.setPlaceholder(new Label(Config.getString("team.pushNeeded")));
-                    } else {
+                    }
+                    else if (updateNeeded)
+                    {
+                        pushFiles.setPlaceholder(new Label(Config.getString("team.pullNeeded")));
+                    }
+                    else
+                    {
                         pushFiles.setPlaceholder(new Label(Config.getString("team.nopushfiles")));
                     }
                 }
             }
-        }
-
-        private void handleConflicts(Set<File> mergeConflicts, Set<File> deleteConflicts,
-                                     Set<File> otherConflicts, Set<File> needsMerge)
-        {
-            String dlgLabel;
-            String filesList;
-
-            // If there are merge conflicts, handle those first
-            if (!mergeConflicts.isEmpty()) {
-                dlgLabel = "team-resolve-merge-conflicts";
-                filesList = buildConflictsList(mergeConflicts);
-            } else if (!deleteConflicts.isEmpty()) {
-                dlgLabel = "team-resolve-conflicts-delete";
-                filesList = buildConflictsList(deleteConflicts);
-            } else if (!otherConflicts.isEmpty()) {
-                dlgLabel = "team-update-first";
-                filesList = buildConflictsList(otherConflicts);
-            } else {
-                stopProgress();
-                // CommitAndPushFrame.this.dialogThenHide(() -> DialogManager.showMessageFX(CommitAndPushFrame.this.asWindow(), "team-uptodate-failed"));
-                DialogManager.showMessageFX(CommitAndPushFrame.this.asWindow(), "team-uptodate-failed");
-                CommitAndPushFrame.this.hide();
-                return;
-            }
-
-            stopProgress();
-            // CommitAndPushFrame.this.dialogThenHide(() -> DialogManager.showMessageWithTextFX(CommitAndPushFrame.this.asWindow(), dlgLabel, filesList));
-            DialogManager.showMessageWithTextFX(CommitAndPushFrame.this.asWindow(), dlgLabel, filesList);
-            CommitAndPushFrame.this.hide();
-        }
-
-        /**
-         * Build a list of files, max out at 10 files.
-         *
-         * @param conflicts
-         * @return
-         */
-        private String buildConflictsList(Set<File> conflicts)
-        {
-            String filesList = "";
-            Iterator<File> i = conflicts.iterator();
-            for (int j = 0; j < 10 && i.hasNext(); j++) {
-                File conflictFile = (File) i.next();
-                filesList += "    " + conflictFile.getName() + "\n";
-            }
-
-            if (i.hasNext()) {
-                filesList += "    " + Config.getString("team.commit.moreFiles");
-            }
-
-            return filesList;
         }
 
         /**
@@ -633,83 +509,104 @@ public class CommitAndPushFrame extends FXCustomizedDialog<Void> implements Comm
          * @param filesToAdd The set to store the files to be added in
          * @param filesToRemove The set to store the files to be removed in
          * @param mergeConflicts The set to store files with merge conflicts in.
-         * @param deleteConflicts The set to store files with conflicts in,
-         * which need to be resolved by first deleting the local file
-         * @param otherConflicts The set to store files with "locally deleted"
-         * conflicts (locally deleted, remotely modified).
-         * @param needsMerge The set of files which are updated locally as well
-         * as in the repository (required merging).
-        //         * @param conflicts The set to store unresolved conflicts in
+         * @param deleteConflicts The set to store files with conflicts in, which need to be
+         *                        resolved by first deleting the local file
+         * @param otherConflicts The set to store files with "locally deleted" conflicts (locally
+         *                       deleted, remotely modified).
+         * @param needsMerge The set of files which are updated locally as well as in the
+         *                   repository (required merging).
+         * @param conflicts The set to store unresolved conflicts in
          *
          * @param remote false if this is a non-distributed repository.
          */
-        private void getCommitFileSets(List<TeamStatusInfo> info, Set<File> filesToCommit, Set<File> filesToAdd,
-                                       Set<File> filesToRemove, Set<File> mergeConflicts, Set<File> deleteConflicts,
-                                       Set<File> otherConflicts, Set<File> needsMerge, Set<File> modifiedLayoutFiles,
-                                       boolean remote)
+        private void getCommitFileSets(List<TeamStatusInfo> info, Set<File> filesToCommit,
+                Set<File> filesToAdd, Set<File> filesToRemove,
+                Set<TeamStatusInfo> modifiedLayoutFiles)
         {
-
-            CommitFilter filter = new CommitFilter();
-            Map<File, File> modifiedLayoutDirs = new HashMap<>();
-
-            for (TeamStatusInfo statusInfo : info) {
+            for (TeamStatusInfo statusInfo : info)
+            {
                 File file = statusInfo.getFile();
                 boolean isPkgFile = BlueJPackageFile.isPackageFileName(file.getName());
-                //select status to use.
-                Status status = statusInfo.getStatus(!remote);
-
-                if (filter.accept(statusInfo, !remote)) {
-                    if (!isPkgFile) {
+                Status status = statusInfo.getStatus(true);
+                
+                if (status == Status.NEEDS_ADD || status == Status.CONFLICT_ADD)
+                {
+                    filesToAdd.add(file);
+                    filesToCommit.add(file);
+                    statusInfo.setStatus(Status.NEEDS_ADD);
+                }
+                else if (status == Status.DELETED)
+                {
+                    filesToRemove.add(file);
+                    filesToCommit.add(file);
+                }
+                else if (status == Status.CONFLICT_LDRM)
+                {
+                    filesToCommit.add(file);
+                }
+                else if (status == Status.CONFLICT_LMRD)
+                {
+                    if (file.exists())
+                    {
+                        statusInfo.setStatus(Status.NEEDS_MERGE);
                         filesToCommit.add(file);
                     }
-                    // It is a package file. In case it's a change to its existence, it should be committed
-                    else if (status == Status.NEEDS_ADD || status == Status.DELETED || status == Status.CONFLICT_LDRM) {
-                        filesToCommit.add(file);
-                    }
-                    // It is a package file, without a change to its existence.
-                    else {
-                        // add file to list of files that may be added to commit
-                        File parentFile = file.getParentFile();
-                        if (!modifiedLayoutDirs.containsKey(parentFile)) {
-                            modifiedLayoutFiles.add(file);
-                            modifiedLayoutDirs.put(parentFile, file);
-                            // keep track of StatusInfo objects representing changed diagrams
-                            changedLayoutFiles.add(statusInfo);
-                        }
-                        else {
-                            // We must commit the file unconditionally
-                            filesToCommit.add(file);
-                        }
-                    }
-
-                    if (status == Status.NEEDS_ADD) {
-                        filesToAdd.add(file);
-                    }
-                    else if (status == Status.DELETED
-                            || status == Status.CONFLICT_LDRM) {
+                    else
+                    {
+                        statusInfo.setStatus(Status.DELETED);
                         filesToRemove.add(file);
+                        filesToCommit.add(file);
                     }
                 }
-                else if (!isPkgFile) {
-                    if (status == Status.HAS_CONFLICTS) {
-                        mergeConflicts.add(file);
+                else if (status == Status.HAS_CONFLICTS)
+                {
+                    // don't allow commit? Is this possible?
+                }
+                else if (status == Status.NEEDS_MERGE)
+                {
+                    filesToAdd.add(file);
+                    filesToCommit.add(file);
+                }
+                else if (status == Status.NEEDS_COMMIT)
+                {
+                    if (isPkgFile)
+                    {
+                        modifiedLayoutFiles.add(statusInfo);
                     }
-                    if (status == Status.UNRESOLVED
-                            || status == Status.CONFLICT_ADD
-                            || status == Status.CONFLICT_LMRD) {
-                        deleteConflicts.add(file);
+                    else
+                    {
+                        filesToCommit.add(file);
                     }
-                    if (status == Status.CONFLICT_LDRM) {
-                        otherConflicts.add(file);
-                    }
-                    if (status == Status.NEEDS_MERGE) {
-                        needsMerge.add(file);
-                    }
+                }
+                else if (status != Status.UP_TO_DATE)
+                {
+                    Debug.message("Commit and push: unhandled file status: " + status + " (for " + file + ")");
                 }
             }
 
-            if (!remote) {
-                setLayoutChanged(!changedLayoutFiles.isEmpty());
+            includeLayout.setDisable(changedLayoutFiles.isEmpty());
+        }
+        
+        /**
+         * Go through the status list, and figure out which files to commit, and
+         * of those which are to be added (i.e. which aren't in the repository)
+         * and which are to be removed.
+         *
+         * @param info The list of files with status (List of TeamStatusInfo)
+         * @param filesToPush The set to store the files that will be pushed
+         */
+        private void getPushFileSets(List<TeamStatusInfo> info, Set<File> filesToPush)
+        {
+            for (TeamStatusInfo statusInfo : info)
+            {
+                File file = statusInfo.getFile();
+                Status status = statusInfo.getStatus(false);
+
+                if (status != Status.UP_TO_DATE && status != Status.NEEDS_CHECKOUT
+                        && status != Status.NEEDS_UPDATE)
+                {
+                    filesToPush.add(file);
+                }
             }
         }
 
@@ -718,7 +615,8 @@ public class CommitAndPushFrame extends FXCustomizedDialog<Void> implements Comm
          * @param fileSet
          * @param info
          */
-        private void updateListModel(ObservableList<TeamStatusInfo> listModel, Set<File> fileSet, List<TeamStatusInfo> info)
+        private void updateListModel(ObservableList<TeamStatusInfo> listModel, Set<File> fileSet,
+                List<TeamStatusInfo> info)
         {
             listModel.addAll(fileSet.stream().map(file -> getTeamStatusInfoFromFile(file, info))
                     .filter(Objects::nonNull)
@@ -731,12 +629,14 @@ public class CommitAndPushFrame extends FXCustomizedDialog<Void> implements Comm
          *
          * @param file     The file which its status info is needed.
          * @param infoList The list which contains files info.
-         * @return         The team status info for the passed file,
-         *                 or null if either the passed file is null or the list doesn't include information about it.
+         * @return         The team status info for the file, or null if the list doesn't
+         *                 include information about it.
          */
         private TeamStatusInfo getTeamStatusInfoFromFile(File file, List<TeamStatusInfo> infoList)
         {
-            Optional<TeamStatusInfo> statusInfo = infoList.stream().filter(info -> info.getFile().equals(file)).findFirst();
+            Optional<TeamStatusInfo> statusInfo = infoList.stream().filter(
+                    info -> info.getFile().equals(file)
+                ).findFirst();
             return statusInfo.isPresent() ? statusInfo.get() : null;
         }
     }

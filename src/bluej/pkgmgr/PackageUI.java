@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2014,2016  Michael Kolling and John Rosenberg 
+ Copyright (C) 2018  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -21,20 +21,29 @@
  */
 package bluej.pkgmgr;
 
-import java.util.EventListener;
-
-import bluej.testmgr.record.InvokerRecord;
+import bluej.views.CallableView;
+import javafx.stage.Stage;
 import threadchecker.OnThread;
 import threadchecker.Tag;
 
 /**
- * The listener for PackageEditor events.
- *
- * @author  Andrew Patterson
+ * An interface for UI actions on a package.
+ * 
+ * @author Davin McCall
  */
-public interface PackageEditorListener extends EventListener
+@OnThread(Tag.FXPlatform)
+public interface PackageUI
 {
-    void targetEvent(PackageEditorEvent e);
+    /**
+     * Get the Stage associated with the Package UI.
+     */
+    public Stage getStage();
     
-    void recordInteraction(InvokerRecord ir);
+    /**
+     * Initiate an interactive call to a static method or a constructor. The UI should prompt for
+     * call parameters (if applicable) and then execute the call.
+     * 
+     * @param view  the view representing the method/constructor to call.
+     */
+    public void callStaticMethodOrConstructor(CallableView view);
 }

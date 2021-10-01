@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2012,2013,2014,2016,2017  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2012,2013,2014,2016,2017,2018  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -38,6 +38,7 @@ import bluej.compiler.CompileReason;
 import bluej.compiler.CompileType;
 import bluej.extmgr.FXMenuManager;
 import bluej.pkgmgr.target.ClassTarget;
+import bluej.utility.DialogManager;
 import bluej.utility.Utility;
 import javafx.application.Platform;
 import javafx.beans.property.BooleanProperty;
@@ -56,6 +57,7 @@ import javafx.scene.layout.AnchorPane;
 import javafx.scene.layout.Pane;
 import javafx.scene.layout.StackPane;
 import javafx.scene.paint.Color;
+import javafx.stage.Stage;
 import javafx.stage.Window;
 
 import bluej.debugger.DebuggerObject;
@@ -88,7 +90,9 @@ import threadchecker.Tag;
  * the classes. The fifth is just a label to show a message when the current package is empty.
  */
 @OnThread(Tag.FXPlatform)
-public final class PackageEditor extends StackPane implements MouseTrackingOverlayPane.MousePositionListener, PkgMgrFrame.PkgMgrPane
+public final class PackageEditor extends StackPane
+    implements MouseTrackingOverlayPane.MousePositionListener, PkgMgrFrame.PkgMgrPane, PackageListener,
+        PackageUI
 {
     private static final int RIGHT_PLACEMENT_MIN = 300;
     private static final int WHITESPACE_SIZE = 10;
@@ -96,7 +100,6 @@ public final class PackageEditor extends StackPane implements MouseTrackingOverl
     public static final int GRID_SIZE = 10;
     
     private final PkgMgrFrame pmf;
-    private final PackageEditorListener listener;
     private final Package pkg;
     private final SelectionController selectionController;
     // Are we showing extends/inherits arrows?
@@ -106,10 +109,10 @@ public final class PackageEditor extends StackPane implements MouseTrackingOverl
 
     // Two class layers: one front (for normal classes),
     // and one back (for test classes)
-    private final AnchorPane frontClassLayer = new AnchorPane();
+    private final AnchorPane frontClassLayer = new AnchorPaneExtraSpacing();
     private final AnchorPane backClassLayer = new AnchorPane();
     // The layer at the front on which we draw the selection rectangle:
-    private Pane selectionLayer = new Pane();
+    private final Pane selectionLayer = new Pane();
     // The label to show a massage to create or add a class
     protected Label noClassesExistedMessage;
     // The layer at the back where we draw the arrows:
@@ -148,11 +151,10 @@ public final class PackageEditor extends StackPane implements MouseTrackingOverl
      * Construct a package editor for the given package.
      */
     @OnThread(Tag.FXPlatform)
-    public PackageEditor(PkgMgrFrame pmf, Package pkg, PackageEditorListener listener, BooleanProperty showUses, BooleanProperty showInherits, MouseTrackingOverlayPane overlay)
+    public PackageEditor(PkgMgrFrame pmf, Package pkg, BooleanProperty showUses, BooleanProperty showInherits, MouseTrackingOverlayPane overlay)
     {
         this.pmf = pmf;
         this.pkg = pkg;
-        this.listener = listener;
         this.selectionController = new SelectionController(this);
         this.showUses = showUses;
         this.showExtends = showInherits;
@@ -169,7 +171,6 @@ public final class PackageEditor extends StackPane implements MouseTrackingOverl
 
         JavaFXUtil.addChangeListenerPlatform(arrowLayer.widthProperty(), s -> repaint());
         JavaFXUtil.addChangeListenerPlatform(arrowLayer.heightProperty(), s -> repaint());
-        selectionLayer = new Pane();
         // The mouse events occur on us not on the selection layer.
         // We don't want the display getting in the way of mouse events:
         selectionLayer.setMouseTransparent(true);
@@ -191,67 +192,43 @@ public final class PackageEditor extends StackPane implements MouseTrackingOverl
                 stopNewInherits();
             // Don't consume either way
         });
-    }
-
-    /**
-     * Notify listener of an event.
-     */
-    @OnThread(Tag.FXPlatform)
-    protected void fireTargetEvent(PackageEditorEvent e)
-    {
-        if (listener != null) {
-            listener.targetEvent(e);
-        }
+        
+        setPrefHeight(400.0);
     }
 
     @OnThread(Tag.FXPlatform)
-    public void raiseMethodCallEvent(Object src, CallableView cv)
+    public void benchToFixture(ClassTarget t)
     {
-        fireTargetEvent(
-            new PackageEditorEvent(src, PackageEditorEvent.TARGET_CALLABLE, cv));
+        // put objects on object bench into fixtures
+        pmf.objectBenchToTestFixture(t);
     }
 
     @OnThread(Tag.FXPlatform)
-    public void raiseRemoveTargetEvent(Target t)
+    public void fixtureToBench(ClassTarget t)
     {
-        fireTargetEvent(
-            new PackageEditorEvent(t, PackageEditorEvent.TARGET_REMOVE));
+        // put objects on object bench into fixtures
+        pmf.testFixtureToObjectBench(t);
     }
 
     @OnThread(Tag.FXPlatform)
-    public void raiseBenchToFixtureEvent(Target t)
+    public void makeTestCase(ClassTarget t)
     {
-        fireTargetEvent(
-            new PackageEditorEvent(t, PackageEditorEvent.TARGET_BENCHTOFIXTURE));
+        // start recording a new test case
+        pmf.makeTestCase(t);
     }
 
     @OnThread(Tag.FXPlatform)
-    public void raiseFixtureToBenchEvent(Target t)
+    public void runTest(ClassTarget ct, String name)
     {
-        fireTargetEvent(
-            new PackageEditorEvent(t, PackageEditorEvent.TARGET_FIXTURETOBENCH));
+        // user has initiated a run operation
+        ct.getRole().run(pmf, ct, name);
     }
 
     @OnThread(Tag.FXPlatform)
-    public void raiseMakeTestCaseEvent(Target t)
+    public void openPackage(String packageName)
     {
-        fireTargetEvent(
-            new PackageEditorEvent(t, PackageEditorEvent.TARGET_MAKETESTCASE));
-    }
-
-    @OnThread(Tag.FXPlatform)
-    public void raiseRunTargetEvent(Target t, String name)
-    {
-        fireTargetEvent(
-            new PackageEditorEvent(t, PackageEditorEvent.TARGET_RUN, name));
-    }
-
-    @OnThread(Tag.FXPlatform)
-    public void raiseOpenPackageEvent(Target t, String packageName)
-    {
-        fireTargetEvent(
-            new PackageEditorEvent(t, PackageEditorEvent.TARGET_OPEN,
-                                    packageName));
+        // user has initiated a package open operation
+        pmf.openPackageTarget(packageName);
     }
 
     /**
@@ -266,8 +243,7 @@ public final class PackageEditor extends StackPane implements MouseTrackingOverl
     @OnThread(Tag.FXPlatform)
     public void raisePutOnBenchEvent(Window src, DebuggerObject obj, GenTypeClass iType, InvokerRecord ir, boolean askForName, Optional<Point2D> animateFromScenePoint)
     {
-        fireTargetEvent(
-            new PackageEditorEvent(src, PackageEditorEvent.OBJECT_PUTONBENCH, obj, iType, ir, askForName, animateFromScenePoint));
+        pmf.putObjectOnBench(src, obj, iType, ir, askForName, animateFromScenePoint);
     }
     
     /**
@@ -276,7 +252,7 @@ public final class PackageEditor extends StackPane implements MouseTrackingOverl
     @OnThread(Tag.FXPlatform)
     public void recordInteraction(InvokerRecord ir)
     {
-        listener.recordInteraction(ir);
+        pmf.recordInteraction(ir);
     }
     
     private boolean popupMenu(double screenX, double screenY)
@@ -417,6 +393,8 @@ public final class PackageEditor extends StackPane implements MouseTrackingOverl
         t.setPos(10, (int)minHeight + 10);
     }
 
+    @Override
+    @OnThread(value = Tag.FXPlatform)
     public void graphChanged()
     {
         HashMap<Node, Boolean> keep = new HashMap<>();
@@ -515,8 +493,12 @@ public final class PackageEditor extends StackPane implements MouseTrackingOverl
         // If none of our children have focus any more
         // after processing has completed, select none:
         JavaFXUtil.runAfterCurrent(() -> {
-            if (!targetHasFocus())
+            // We want to cancel selection if codepad gets focus (for example) but not
+            // if the reason for our loss of focus is that the whole window has lost focus:
+            if (!targetHasFocus() && getFXWindow().isFocused())
+            {
                 selectionController.clearSelection();
+            }
         });
     }
 
@@ -1048,6 +1030,13 @@ public final class PackageEditor extends StackPane implements MouseTrackingOverl
                 // Finished; we can actually add the dependency
                 // Take a copy because we're going to null it:
                 ClassTarget subClassFinal = this.extendsSubClass;
+                if (!subClassFinal.hasSourceCode())
+                {
+                    DialogManager.showErrorFX(pmf.getFXWindow(),
+                            "no-extends-arrow-from-no-source-class");
+                    clearState();
+                    return false;
+                }
                 ClassTarget superClass = (ClassTarget)target;
                 if (subClassFinal.isInterface())
                 {
@@ -1076,5 +1065,52 @@ public final class PackageEditor extends StackPane implements MouseTrackingOverl
         newExtendsDestX = localX;
         newExtendsDestY = localY;
         repaint();
+    }
+    
+    @Override
+    public Stage getStage()
+    {
+        return pmf.getFXWindow();
+    }
+    
+    @Override
+    public void callStaticMethodOrConstructor(CallableView view)
+    {
+        pmf.callStaticMethodOrConstructor(view);
+    }
+
+    /**
+     * An AnchorPane with extra space at the right and bottom.
+     * There's no API/CSS for this, so we override the size computations
+     * and add the spacing to the parent's return value.
+     */
+    @OnThread(Tag.FX)
+    private static class AnchorPaneExtraSpacing extends AnchorPane
+    {
+        public static final double EXTRA_SPACE = 20.0;
+
+        @Override
+        protected double computePrefWidth(double height)
+        {
+            return super.computePrefWidth(height) + EXTRA_SPACE;
+        }
+
+        @Override
+        protected double computePrefHeight(double width)
+        {
+            return super.computePrefHeight(width) + EXTRA_SPACE;
+        }
+
+        @Override
+        protected double computeMinHeight(double width)
+        {
+            return super.computeMinHeight(width) + EXTRA_SPACE;
+        }
+
+        @Override
+        protected double computeMinWidth(double height)
+        {
+            return super.computeMinWidth(height) + EXTRA_SPACE;
+        }
     }
 }

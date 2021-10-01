@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2011,2012,2013,2014,2015,2016,2017  Michael Kolling and John Rosenberg
+ Copyright (C) 1999-2009,2010,2011,2012,2013,2014,2015,2016,2017,2018  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -913,7 +913,7 @@ class VMReference
      *            when a BlueJEvent is generated for a breakpoint, this
      *            parameter is passed as the event parameter
      */
-    public FXPlatformSupplier<DebuggerResult> runShellClass(String className)
+    public DebuggerResult runShellClass(String className)
     {
         // Calls to this method are protected by serverThreadLock in JdiDebugger
         
@@ -939,16 +939,16 @@ class VMReference
                 ObjectReference exception = getStaticFieldObject(serverClass, ExecServer.EXCEPTION_NAME);
                 if (exception != null) {
                     exceptionEvent(new InvocationException(exception));
-                    return () -> new DebuggerResult(lastException);
+                    return new DebuggerResult(lastException);
                 }
             }
             
             ObjectReference objR = getStaticFieldObject(serverClass, ExecServer.METHOD_RETURN_NAME);
-            return () -> new DebuggerResult(JdiObject.getDebuggerObject(objR));
+            return new DebuggerResult(JdiObject.getDebuggerObject(objR));
         }
         catch (VMDisconnectedException e) {
             exitStatus = Debugger.TERMINATED;
-            return () -> new DebuggerResult(exitStatus);
+            return new DebuggerResult(exitStatus);
         }
         catch (Exception e) {
             // remote invocation failed
@@ -958,13 +958,13 @@ class VMReference
             lastException = new ExceptionDescription("Internal BlueJ error: unexpected exception in remote VM\n" + e);
         }
         
-        return () -> new DebuggerResult(lastException);
+        return new DebuggerResult(lastException);
     }
     
     /**
      * Invoke the default constructor for some class, and return the resulting object.
      */
-    public FXPlatformSupplier<DebuggerResult> instantiateClass(String className)
+    public DebuggerResult instantiateClass(String className)
     {
         ObjectReference obj = null;
         exitStatus = Debugger.NORMAL_EXIT;
@@ -974,7 +974,7 @@ class VMReference
         catch (VMDisconnectedException e) {
             exitStatus = Debugger.TERMINATED;
             // return null; // debugger state change handled elsewhere
-            return () -> new DebuggerResult(Debugger.TERMINATED);
+            return new DebuggerResult(Debugger.TERMINATED);
         }
         catch (Exception e) {
             // remote invocation failed
@@ -984,11 +984,11 @@ class VMReference
             lastException = new ExceptionDescription("Internal BlueJ error: unexpected exception in remote VM\n" + e);
         }
         if (obj == null) {
-            return () -> new DebuggerResult(lastException);
+            return new DebuggerResult(lastException);
         }
         else {
             ObjectReference objFinal = obj;
-            return () -> new DebuggerResult(JdiObject.getDebuggerObject(objFinal));
+            return new DebuggerResult(JdiObject.getDebuggerObject(objFinal));
         }
     }
 
@@ -1004,7 +1004,7 @@ class VMReference
      * @return  The newly constructed object (or null if error/exception
      *          occurs)
      */
-    public FXPlatformSupplier<DebuggerResult> instantiateClass(String className, String [] paramTypes, ObjectReference [] args)
+    public DebuggerResult instantiateClass(String className, String [] paramTypes, ObjectReference [] args)
     {
         ObjectReference obj = null;
         exitStatus = Debugger.NORMAL_EXIT;
@@ -1013,7 +1013,7 @@ class VMReference
         }
         catch (VMDisconnectedException e) {
             exitStatus = Debugger.TERMINATED;
-            return () -> new DebuggerResult(exitStatus); // debugger state change handled elsewhere
+            return new DebuggerResult(exitStatus); // debugger state change handled elsewhere
         }
         catch (Exception e) {
             // remote invocation failed
@@ -1023,17 +1023,18 @@ class VMReference
             lastException = new ExceptionDescription("Internal BlueJ error: unexpected exception in remote VM\n" + e);
         }
         if (obj == null) {
-            return () -> new DebuggerResult(lastException);
+            return new DebuggerResult(lastException);
         }
         else {
             ObjectReference objFinal = obj;
-            return () -> new DebuggerResult(JdiObject.getDebuggerObject(objFinal));
+            return new DebuggerResult(JdiObject.getDebuggerObject(objFinal));
         }
     }
     
     /**
      * Emit a thread halted/resumed event for the given thread.
      */
+    @OnThread(Tag.Any)
     public void emitThreadEvent(JdiThread thread, boolean halted)
     {
         eventHandler.emitThreadEvent(thread, halted);
@@ -1313,6 +1314,7 @@ class VMReference
             return null;
         else
             return new DebuggerEvent.BreakpointProperties() {
+                @OnThread(Tag.Any)
                 public Object get(Object key)
                 {
                     return request.getProperty(key);
@@ -2232,6 +2234,11 @@ class VMReference
      */
     public void setRunOnThread(RunOnThread runOnThread)
     {
+        // In Greenfoot, we run on the Simulation thread, which is handled on the debug VM,
+        // so we don't want to mess with the setting from the server VM.  Just ignore:
+        if (Config.isGreenfoot())
+            return;
+
         int fieldValue;
         switch (runOnThread)
         {

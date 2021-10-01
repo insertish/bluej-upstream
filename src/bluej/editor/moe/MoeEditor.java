@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2010,2011,2012,2013,2014,2015,2016,2017  Michael Kolling and John Rosenberg
+ Copyright (C) 1999-2010,2011,2012,2013,2014,2015,2016,2017,2018  Michael Kolling and John Rosenberg
 
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -31,14 +31,13 @@ import bluej.debugger.DebuggerThread;
 import bluej.editor.EditorWatcher;
 import bluej.editor.moe.BlueJSyntaxView.ParagraphAttribute;
 import bluej.editor.moe.MoeActions.MoeAbstractAction;
-import bluej.editor.moe.PrintDialog.PrintSize;
+import bluej.prefmgr.PrefMgr.PrintSize;
 import bluej.editor.moe.MoeErrorManager.ErrorDetails;
 import bluej.editor.moe.MoeSyntaxDocument.Element;
 import bluej.editor.moe.PrintDialog.PrintChoices;
 import bluej.editor.stride.FXTabbedEditor;
 import bluej.editor.stride.FrameEditor;
 import bluej.editor.stride.MoeFXTab;
-import bluej.extensions.editor.Editor;
 import bluej.parser.AssistContent;
 import bluej.parser.AssistContent.ParamInfo;
 import bluej.parser.CodeSuggestions;
@@ -73,6 +72,7 @@ import bluej.utility.DialogManager;
 import bluej.utility.FileUtility;
 import bluej.utility.Utility;
 import bluej.utility.javafx.FXConsumer;
+import bluej.utility.javafx.FXPlatformConsumer;
 import bluej.utility.javafx.FXPlatformRunnable;
 import bluej.utility.javafx.FXRunnable;
 import bluej.utility.javafx.FXSupplier;
@@ -94,6 +94,7 @@ import javafx.print.PrinterJob;
 import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
+import javafx.scene.image.Image;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyCodeCombination;
 import javafx.scene.input.KeyEvent;
@@ -115,7 +116,7 @@ import javafx.util.Duration;
 import org.fxmisc.flowless.VirtualFlow;
 import org.fxmisc.flowless.VirtualizedScrollPane;
 import org.fxmisc.richtext.GenericStyledArea;
-import org.fxmisc.richtext.MouseOverTextEvent;
+import org.fxmisc.richtext.event.MouseOverTextEvent;
 import org.fxmisc.richtext.model.TwoDimensional.Bias;
 import org.fxmisc.richtext.model.TwoDimensional.Position;
 import org.fxmisc.wellbehaved.event.*;
@@ -124,7 +125,6 @@ import org.w3c.dom.events.EventTarget;
 import threadchecker.OnThread;
 import threadchecker.Tag;
 
-import javax.swing.text.BadLocationException;
 import java.io.*;
 import java.net.URL;
 import java.nio.charset.Charset;
@@ -139,7 +139,6 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Properties;
-import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
@@ -216,7 +215,7 @@ public final class MoeEditor extends ScopeColorsBorderPane
     // The most recent active FindNavigator.  Returns null if there has been no search,
     // or if the document has been modified since the last search.
     private final ObjectProperty<FindNavigator> currentSearchResult = new SimpleObjectProperty<>(null);
-    
+
     private MenuBar menubar;
     private String filename;                // name of file or null
     private long lastModified;              // time of last modification of file
@@ -229,11 +228,11 @@ public final class MoeEditor extends ScopeColorsBorderPane
     private boolean mayHaveBreakpoints;     // true if there were BP here
     private boolean ignoreChanges = false;
     private boolean tabsAreExpanded = false;
-    
+
     /** Used to obtain javadoc for arbitrary methods */
     private final JavadocResolver javadocResolver;
     private ReparseRunner reparseRunner;
-    
+
     /**
      * Property map, allows BlueJ extensions to associate property values with
      * this editor instance; otherwise unused.
@@ -250,7 +249,7 @@ public final class MoeEditor extends ScopeColorsBorderPane
     private boolean requeueForCompilation = false; // re-queue after current compile?
     private CompileReason requeueReason;
     private CompileType requeueType;
-    
+
     /** Manages display of compiler and parse errors */
     private final MoeErrorManager errorManager = new MoeErrorManager(this, enable -> {});
     private int mouseCaretPos = -1;
@@ -286,12 +285,8 @@ public final class MoeEditor extends ScopeColorsBorderPane
         currentStepLineNumber = -1;
         mayHaveBreakpoints = false;
         matchBrackets = PrefMgr.getFlag(PrefMgr.MATCH_BRACKETS);
-        undoManager = new MoeUndoManager(this);
 
         initWindow(parameters.getProjectResolver());
-        if (watcher != null && parameters.isCode() && !parameters.isCompiled()) {
-            scheduleCompilation(CompileReason.LOADED, CompileType.ERROR_CHECK_ONLY);
-        }
         callbackOnOpen = parameters.getCallbackOnOpen();
 
         this.fxTabbedEditor = getDefaultEditor.get();
@@ -448,9 +443,6 @@ public final class MoeEditor extends ScopeColorsBorderPane
                 
                 scheduleReparseRunner();
             }
-            catch (FileNotFoundException ex) {
-                clear();
-            }
             catch (IOException ex) {
                 // TODO display user-visible error
                 Debug.reportError("Couldn't open file", ex);
@@ -527,14 +519,28 @@ public final class MoeEditor extends ScopeColorsBorderPane
     @OnThread(Tag.FXPlatform)
     public void setEditorVisible(boolean vis)
     {
-        if (vis) {
+        if (vis)
+        {
             checkBracketStatus();
+            
+            if (sourceIsCode && !compiledProperty.get() && sourceDocument.notYetShown)
+            {
+                // Schedule a compilation so we can find and display any errors:
+                scheduleCompilation(CompileReason.LOADED, CompileType.ERROR_CHECK_ONLY);
+            }
+
+            // Make sure caret is visible after open:
+            //sourcePane.requestFollowCaret();
+            //sourcePane.layout();
         }
         if (fxTabbedEditor == null)
+        {
             fxTabbedEditor = defaultFXTabbedEditor.get();
-
+        }
         if (vis)
+        {
             fxTabbedEditor.addTab(fxTab, vis, true);
+        }
         fxTabbedEditor.setWindowVisible(vis, fxTab);
         if (vis)
         {
@@ -543,22 +549,13 @@ public final class MoeEditor extends ScopeColorsBorderPane
             {
                 callbackOnOpen.run();
             }
-            // Calculating the scopes properly needs a visible editor,
-            // so once we're shown, recalculate the scopes:
-            if (sourceDocument.notYetShown)
-            {
-                JavaFXUtil.runAfter(Duration.millis(200), () -> {
-                    sourceDocument.notYetShown = false;
-                    sourceDocument.recalculateAllScopes();
-                    // Must be called after the editor is actually visible for first time:
-                    sourcePane.requestFollowCaret();
-                });
-            }
-            else
-            {
-                // Make sure caret is visible after open:
-                sourcePane.requestFollowCaret();
-            }
+
+            // Allow recalculating the scopes:
+            sourceDocument.notYetShown = false;
+            
+            // Make sure caret is visible after open:
+            sourcePane.requestFollowCaret();
+            sourcePane.layout();
         }
     }
 
@@ -586,6 +583,14 @@ public final class MoeEditor extends ScopeColorsBorderPane
             // Record any edits with the data collection system:
             recordEdit(true);
             
+            // Play it safe and avoid overwriting code that has been changed outside BlueJ (or at least,
+            // outside *this* instance of BlueJ):
+            checkForChangeOnDisk();
+            if (! saveState.isChanged())
+            {
+                return;
+            }
+            
             Writer writer = null;
             try {
                 // The crash file is used during writing and will remain in
@@ -601,7 +606,6 @@ public final class MoeEditor extends ScopeColorsBorderPane
                 writer = new OutputStreamWriter(ostream, characterSet);
                 sourcePane.write(writer);
                 writer.close(); writer = null;
-                setSaved();
                 lastModified = new File(filename).lastModified();
 
                 if (PrefMgr.getFlag(PrefMgr.MAKE_BACKUP)) {
@@ -616,6 +620,9 @@ public final class MoeEditor extends ScopeColorsBorderPane
                     File crashFile = new File(crashFilename);
                     crashFile.delete();
                 }
+                
+                // Do this last, as it may trigger further actions in the watcher:
+                setSaved();
             }
             catch (IOException ex) {
                 failureException = ex;
@@ -649,13 +656,15 @@ public final class MoeEditor extends ScopeColorsBorderPane
     @OnThread(Tag.FXPlatform)
     public void close()
     {
+        cancelFreshState();
+        
         try {
             save();
         }
         catch (IOException ioe) {
             // TODO we should definitely show dialog here.
         }
-        
+
         doClose();
     }
 
@@ -794,7 +803,7 @@ public final class MoeEditor extends ScopeColorsBorderPane
 
             tpos = tabPos + 1; // skip over the tab char
         }
-        
+
         return spos;
     }
 
@@ -871,12 +880,6 @@ public final class MoeEditor extends ScopeColorsBorderPane
         windowTitle = title;
         setWindowTitle();
     }
-    
-    @Override
-    public void dependencyChanged()
-    {
-        scheduleCompilation(CompileReason.MODIFIED, CompileType.ERROR_CHECK_ONLY);
-    }
 
     /**
      * Set the "compiled" status
@@ -891,7 +894,7 @@ public final class MoeEditor extends ScopeColorsBorderPane
             errorManager.removeAllErrorHighlights();
         }
     }
-    
+
     /**
      * Schedule an immediate compilation for the specified reason and of the specified type.
      * @param reason  The reason for compilation
@@ -903,17 +906,21 @@ public final class MoeEditor extends ScopeColorsBorderPane
         {
             // We can collapse multiple compiles, but we cannot collapse an explicit compilation
             // (resulting class files kept) into a non-explicit compilation (result discarded).
-            if (! compilationQueued ||
-                    (ctype != CompileType.ERROR_CHECK_ONLY && ! compilationQueuedExplicit))
+            if (! compilationQueued )
             {
                 watcher.scheduleCompilation(true, reason, ctype);
                 compilationQueued = true;
             }
-            else if (compilationStarted)
+            else if (compilationStarted ||
+                    (ctype != CompileType.ERROR_CHECK_ONLY && ! compilationQueuedExplicit))
             {
-                // since a previously queued compilation has already started, we need to queue a second
-                // compilation after it finishes. We override any currently queued ERROR_CHECK_ONLY
-                // since explicit compiles should take precedence:
+                // Either: a previously queued compilation has already started
+                // Or: we have queued an error-check-only compilation, but are being asked to
+                //     schedule a full (explicit) compile which keeps the resulting classes.
+                //
+                // In either case, we need to queue a second compilation after the current one
+                // finishes. We override any currently queued ERROR_CHECK_ONLY since explicit
+                // compiles should take precedence:
                 if (! requeueForCompilation || ctype == CompileType.ERROR_CHECK_ONLY)
                 {
                     requeueForCompilation = true;
@@ -930,14 +937,23 @@ public final class MoeEditor extends ScopeColorsBorderPane
         compilationStarted = false;
         if (requeueForCompilation) {
             requeueForCompilation = false;
-            compilationQueuedExplicit = (requeueType != CompileType.ERROR_CHECK_ONLY);
-            watcher.scheduleCompilation(true, requeueReason, requeueType);
+            if (classesKept)
+            {
+                // If the classes were kept, that means the compilation is valid and the source
+                // hasn't changed since. There is then no need for another recompile, even if
+                // we thought we needed one before.
+                compilationQueued = false;
+            }
+            else
+            {
+                compilationQueuedExplicit = (requeueType != CompileType.ERROR_CHECK_ONLY);
+                watcher.scheduleCompilation(true, requeueReason, requeueType);
+            }
         }
         else {
             compilationQueued = false;
         }
-        
-        compiledProperty.set(successful && classesKept);
+
         if (isVisible() && classesKept)
         {
             // Compilation requested via the editor interface has completed
@@ -1071,6 +1087,7 @@ public final class MoeEditor extends ScopeColorsBorderPane
      *             does not exist in the text.
      */
     @Override
+    @OnThread(Tag.FXPlatform)
     public void setCaretLocation(SourceLocation location)
     {
         sourcePane.setCaretPosition(getOffsetFromLineColumn(location));
@@ -1182,11 +1199,10 @@ public final class MoeEditor extends ScopeColorsBorderPane
      * @throws IllegalArgumentException
      *             if either of the specified SourceLocation represent a position
      *             which does not exist in the text.
-     * @throws BadLocationException
-     *             if internally the text points outside a location in the text.
      */
     @Override
-    public void setText(SourceLocation begin, SourceLocation end, String newText) throws BadLocationException
+    @OnThread(Tag.FXPlatform)
+    public void setText(SourceLocation begin, SourceLocation end, String newText)
     {
         int start = getOffsetFromLineColumn(begin);
         int finish = getOffsetFromLineColumn(end);
@@ -1433,32 +1449,30 @@ public final class MoeEditor extends ScopeColorsBorderPane
             saveState.setState(StatusLabel.Status.CHANGED);
             setChanged();
         }
-        
+
         if (!singleLineChange) // For a multi-line change, always compile:
         {
             saveState.setState(StatusLabel.Status.CHANGED);
             setChanged();
 
-            try
-            {
-                save();
-
-                if (sourceIsCode && watcher != null) {
-                    scheduleCompilation(CompileReason.MODIFIED, CompileType.ERROR_CHECK_ONLY);
-                }
-            }
-            catch (IOException e)
-            {
-                // Note that status line displays error notice in save()
-                Debug.reportError(e);
+            // Note that this compilation will cause a save:
+            if (sourceIsCode && watcher != null) {
+                scheduleCompilation(CompileReason.MODIFIED, CompileType.ERROR_CHECK_ONLY);
             }
         }
 
         clearMessage();
-        removeSearchHighlights();
-        currentSearchResult.setValue(null);
-        errorManager.removeAllErrorHighlights();
-        errorManager.documentContentChanged();
+        // Calling the methods to remove the error/search stylings from within this 
+        // document-changed callback causes an extra change notification 
+        // to be regenerated by RichTextFX, which is unwanted.
+        // So we must run those later:
+        JavaFXUtil.runAfterCurrent(() -> {
+            removeSearchHighlights();
+            currentSearchResult.setValue(null);
+            errorManager.removeAllErrorHighlights();
+            errorManager.documentContentChanged();
+            showErrorOverlay(null, 0);
+        });
         actions.userAction();
         
         // This may handle re-indentation; as this mutates the
@@ -1589,7 +1603,7 @@ public final class MoeEditor extends ScopeColorsBorderPane
         // This means that that the point width (1/72 of an inch) is actually the pixel width, too:
         double pixelWidth = printerJob.getJobSettings().getPageLayout().getPrintableWidth();
         double pixelHeight = printerJob.getJobSettings().getPageLayout().getPrintableHeight();
-        Scene scene = new Scene(rootPane, pixelWidth, pixelHeight);
+        Scene scene = new Scene(rootPane, pixelWidth, pixelHeight, Color.GRAY);
         Config.addEditorStylesheets(scene);
 
         // We could make page size match screen size by scaling font size by difference in DPIs:
@@ -1745,7 +1759,7 @@ public final class MoeEditor extends ScopeColorsBorderPane
         else if (job.showPrintDialog(getWindow()))
         {
             FXRunnable printAction = printTo(job, choices.get().printSize, choices.get().printLineNumbers, choices.get().printHighlighting);
-            new Thread()
+            new Thread("PRINT")
             {
                 @Override
                 @OnThread(value = Tag.FX, ignoreParent = true)
@@ -2556,13 +2570,13 @@ public final class MoeEditor extends ScopeColorsBorderPane
     }
 
     /**
-     * Toggle the editor's 'compiled' status. If compiled, setEnabled the breakpoint function.
+     * Toggle the editor's 'compiled' status. This affects display (left-hand margin colour)
+     * and whether breakpoints can be set.
      */
     private void setCompileStatus(boolean compiled)
     {
         actions.getActionByName("toggle-breakpoint").setEnabled(compiled && viewingCode());
-        if (sourceIsCode && !compiled)
-            compiledProperty.set(false);
+        compiledProperty.set(compiled);
     }
 
     /**
@@ -2612,6 +2626,16 @@ public final class MoeEditor extends ScopeColorsBorderPane
             recordEdit(true);
 
             cancelFreshState();
+
+            // This is a workaround to overcome a bug in RichTextFX lib,
+            // which in some cases used to cause the editor to not scroll
+            // to follow cursor.
+            // The re-layout enforcing is inside a runAfterCurrent to avoid
+            // an IllegalArgumentException caused by state inconsistency.
+            JavaFXUtil.runAfterCurrent(() -> {
+                ensureCaretVisible();
+                layout();
+            });
         }
         oldCaretLineNumber = getLineNumberAt(caretPos);
     }
@@ -2636,7 +2660,9 @@ public final class MoeEditor extends ScopeColorsBorderPane
 
     // --------------------------------------------------------------------
 
-    @Override
+    /**
+     * Schedule compilation, if any edits have occurred since last compile.
+     */
     @OnThread(Tag.FXPlatform)
     public void cancelFreshState()
     {
@@ -2645,19 +2671,7 @@ public final class MoeEditor extends ScopeColorsBorderPane
             scheduleCompilation(CompileReason.MODIFIED, CompileType.ERROR_CHECK_ONLY);
         }
         
-        if (! saveState.isSaved())
-        {
-            try
-            {
-                save();
-            }
-            catch (IOException e)
-            {
-                // TODO this should issue a user-visible error, may need to
-                // propagate exception.
-                Debug.reportError(e);
-            }
-        }
+        // Save will occur as part of compilation scheduled above.
     }
 
     @Override
@@ -2721,6 +2735,11 @@ public final class MoeEditor extends ScopeColorsBorderPane
 
     // --------------------------------------------------------------------
 
+    /**
+     * Show the given error overlay, or hide the existing overlay
+     * @param details If non-null, show the given error details.  If null, hide existing overlay.
+     * @param displayPosition The character position at which to show.
+     */
     private void showErrorOverlay(ErrorDetails details, int displayPosition)
     {
         //Debug.message("Showing error at " + displayPosition + ": " + details);
@@ -2791,21 +2810,11 @@ public final class MoeEditor extends ScopeColorsBorderPane
     public int getBracketMatch()
     {
         int pos = -1;
-        try {
-            int caretPos = sourcePane.getCaretPosition();
-            if (caretPos != 0) {
-                caretPos--;
-            }
-            pos = TextUtilities.findMatchingBracket(sourceDocument, caretPos);
+        int caretPos = sourcePane.getCaretPosition();
+        if (caretPos != 0) {
+            caretPos--;
         }
-        catch (BadLocationException ble) {
-            Debug.reportError("Bad document location reached while trying to match brackets");
-            Debug.log("Caret position: " + sourcePane.getCaretPosition());
-            Debug.log("Document length: " + sourcePane.getText().length());
-            Debug.log("Source code: ---begin---");
-            Debug.log(sourcePane.getText());
-            Debug.log("---end---");
-        }
+        pos = TextUtilities.findMatchingBracket(sourceDocument, caretPos);
         return pos;
     }
 
@@ -2922,14 +2931,15 @@ public final class MoeEditor extends ScopeColorsBorderPane
             sourceDocument = new MoeSyntaxDocument(projectResolver, this);
         }
         else {
-            sourceDocument = new MoeSyntaxDocument(this);  // README file
+            sourceDocument = new MoeSyntaxDocument((ScopeColors) null);  // README file
         }
         listenToChanges(sourceDocument);
 
         // create the text pane
         sourcePane = sourceDocument.makeEditorPane(this, compiledProperty);
         sourcePane.setCaretPosition(0);
-        sourcePane.setUndoManager(undoManager);
+        undoManager = new MoeUndoManager(sourcePane);
+        sourcePane.setUndoManager(undoManager.getUndoManager());
         JavaFXUtil.addChangeListenerPlatform(sourcePane.caretPositionProperty(), e -> caretMoved());
         JavaFXUtil.addChangeListenerPlatform(sourcePane.estimatedScrollYProperty(), d -> {
             // The caret won't have actually moved within the document,
@@ -3078,7 +3088,7 @@ public final class MoeEditor extends ScopeColorsBorderPane
                 }
                 // Forbid Preferences from being added to the Options menu when using
                 // Mac screen menubar, as it is already exist in the Application menu.
-                else if ( !( Config.usingMacScreenMenubar() &&
+                else if ( !( Config.isMacOS() &&
                              titleKey.toLowerCase().equals("option") &&
                              itemKey.toLowerCase().equals("preferences") )
                         )
@@ -3306,10 +3316,9 @@ public final class MoeEditor extends ScopeColorsBorderPane
                 }
 
                 @Override
-                @OnThread(Tag.FX)
                 public void setupSuggestionWindow(Stage window)
                 {
-                    JavaFXUtil.runNowOrLater(() -> sourcePane.setFakeCaret(true));
+                    sourcePane.setFakeCaret(true);
                 }
             }, suggestionDetails, null, SuggestionShown.RARE, i ->
             {
@@ -3520,7 +3529,7 @@ public final class MoeEditor extends ScopeColorsBorderPane
     }
     
     @Override
-    public void insertAppendMethod(bluej.extensions.editor.Editor e, NormalMethodElement method, Consumer<Boolean> after)
+    public void insertAppendMethod(NormalMethodElement method, FXPlatformConsumer<Boolean> after)
     {
         NodeAndPosition<ParsedNode> classNode = findClassNode();
         if (classNode != null) {
@@ -3532,32 +3541,33 @@ public final class MoeEditor extends ScopeColorsBorderPane
                 for (CodeElement codeElement : method.getContents()) {
                     text += codeElement.toJavaSource().toTemporaryJavaCodeString();
                 }
-                appendTextToNode(e, existingMethodNode, text);
-                after.accept(true);
+                appendTextToNode(existingMethodNode, text);
+                after.accept(false);
                 return;
             }
             
             //Make a new method:
-            appendTextToNode(e, classNode, method.toJavaSource().toTemporaryJavaCodeString());
+            appendTextToNode(classNode, method.toJavaSource().toTemporaryJavaCodeString());
+            after.accept(true);
         }
         after.accept(false);
     }
  
     @Override
-    public void insertMethodCallInConstructor(bluej.extensions.editor.Editor e, String className, CallElement callElement, Consumer<Boolean> after)
+    public void insertMethodCallInConstructor(String className, CallElement callElement, FXPlatformConsumer<Boolean> after)
     {
         NodeAndPosition<ParsedNode> classNode = findClassNode();
         if (classNode != null) {
             NodeAndPosition<ParsedNode> constructor = findMethodNode(className, classNode);
             if (constructor == null) {
-                addDefaultConstructor(e, className, callElement);
+                addDefaultConstructor(className, callElement);
             }
             else {
                 String methodName = callElement.toJavaSource().toTemporaryJavaCodeString();
                 methodName = methodName.substring(0, methodName.indexOf('('));
                 if (!hasMethodCall(methodName, constructor, true)) {
                     //Add at the end of the constructor:
-                    appendTextToNode(e, constructor, callElement.toJavaSource().toTemporaryJavaCodeString());
+                    appendTextToNode(constructor, callElement.toJavaSource().toTemporaryJavaCodeString());
                     after.accept(true);
                     return;
                 }
@@ -3566,40 +3576,40 @@ public final class MoeEditor extends ScopeColorsBorderPane
         after.accept(false);
     }
     
-    private void addDefaultConstructor(Editor e, String className, CallElement callElement)
+    private void addDefaultConstructor(String className, CallElement callElement)
     {
         NodeAndPosition<ParsedNode> classNode = findClassNode();
         if (classNode != null) {
             //Make a new method:
-            appendTextToNode(e, classNode, "public " + className + "()\n{\n" + callElement.toJavaSource().toTemporaryJavaCodeString() + "}\n");
+            appendTextToNode(classNode, "public " + className + "()\n{\n" + callElement.toJavaSource().toTemporaryJavaCodeString() + "}\n");
         }
     }
     
     /**
      * Appends text to a node that ends in a curly bracket
      */
-    private void appendTextToNode(Editor e, NodeAndPosition<ParsedNode> node, String text)
+    private void appendTextToNode(NodeAndPosition<ParsedNode> node, String text)
     {
         //The node may have whitespace at the end, so we look for the last closing brace and
         //insert before that:
         for (int pos = node.getEnd() - 1; pos >= 0; pos--) {
-            if ("}".equals(e.getText(e.getTextLocationFromOffset(pos), e.getTextLocationFromOffset(pos+1)))) {
+            if ("}".equals(getText(getLineColumnFromOffset(pos), getLineColumnFromOffset(pos+1)))) {
                 int posFinal = pos;
                 undoManager.compoundEdit(() -> {
                     int originalLength = node.getSize();
                     // First insert the text:
-                    e.setText(e.getTextLocationFromOffset(posFinal), e.getTextLocationFromOffset(posFinal), text);
+                    setText(getLineColumnFromOffset(posFinal), getLineColumnFromOffset(posFinal), text);
                     // Then auto-indent the method to make sure our indents were correct:
                     int oldPos = getSourcePane().getCaretPosition();
                     MoeIndent.calculateIndentsAndApply(sourceDocument, node.getPosition(),
                             node.getPosition() + originalLength + text.length(), oldPos);
                 });
-                e.setCaretLocation(e.getTextLocationFromOffset(pos));
+                setCaretLocation(getLineColumnFromOffset(pos));
                 return;
             }
         }
-        Debug.message("Could not find end of node to append to: \"" + e.getText(e.getTextLocationFromOffset(
-                node.getPosition()), e.getTextLocationFromOffset(node.getEnd())) + "\"");
+        Debug.message("Could not find end of node to append to: \"" + getText(getLineColumnFromOffset(
+                node.getPosition()), getLineColumnFromOffset(node.getEnd())) + "\"");
     }
     
     private NodeAndPosition<ParsedNode> findClassNode()
@@ -3997,6 +4007,16 @@ public final class MoeEditor extends ScopeColorsBorderPane
             r.add(text);
         }
         return r;
+    }
+
+    /**
+     * Set the header image (in the tab header) for this editor
+     * @param image The image to use (any size).
+     */
+    @Override
+    public void setHeaderImage(Image image)
+    {
+        fxTab.setHeaderImage(image);
     }
 
     @OnThread(Tag.FXPlatform)

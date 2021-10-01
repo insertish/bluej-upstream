@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 2014,2015,2016 Michael Kölling and John Rosenberg
+ Copyright (C) 2014,2015,2016,2018 Michael Kölling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -23,8 +23,8 @@ package bluej.stride.framedjava.errors;
 
 import java.util.List;
 
-import bluej.stride.slots.EditableSlot;
 import bluej.utility.javafx.JavaFXUtil;
+import javafx.beans.binding.BooleanBinding;
 import javafx.beans.binding.BooleanExpression;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.SimpleBooleanProperty;
@@ -53,9 +53,17 @@ public abstract class CodeError
     private final BooleanProperty focusedProperty = new SimpleBooleanProperty(false);
     /** The slot which this error pertains to.  Cannot be null. */
     protected final JavaFragment relevantSlot;
-    /** A property to keep track of whether the error is attached to a fresh frame.
-     * Errors should not be shown on frames until they become non-fresh. */
+    
+    /**
+     * A property to keep track of whether the error is attached to a fresh frame.
+     * Errors should not be shown on frames until they become non-fresh.
+     */ 
     private final BooleanProperty freshProperty = new SimpleBooleanProperty(false);
+
+    // To avoid the weak-reference-listener issue with JavaFX, keep a strong reference
+    // to the complete of the freshProperty binding:
+    private BooleanBinding staleBinding = freshProperty.not(); 
+    
     /** A property to keep track of whether the error indicator (i.e. the red underline)
      *  is currently showing for this error, or would be if the frame was non-fresh. */
     private final BooleanProperty showingIndicatorProperty = new SimpleBooleanProperty(false);
@@ -93,7 +101,7 @@ public abstract class CodeError
         this.identifier = errorIdentifier;
         relevantSlot = code;
         // These parts must be run on the FX thread:
-        visible = freshProperty.not().and(showingIndicatorProperty);
+        visible = staleBinding.and(showingIndicatorProperty);
         code.addError(this);
     }
 
@@ -257,22 +265,23 @@ public abstract class CodeError
      * When the error indicator is visible, and the given fresh property is false,
      * records the shown-error-indicator event with the editor.
      */
+    @OnThread(Tag.FXPlatform)
     public void bindFresh(ObservableBooleanValue fresh, InteractionManager editor)
     {
         freshProperty.bind(fresh);
         if (!visibleProperty().get())
         {
             // Add a listener to send an event when we become visible:
-            JavaFXUtil.addSelfRemovingListener(visibleProperty(), vis -> {
+            JavaFXUtil.listenOnce(visibleProperty(), vis -> {
                 if (vis) // Should always be true, but check anyway
                 {
-                    JavaFXUtil.runNowOrLater(() -> editor.recordErrorIndicatorShown(getIdentifier()));
+                    editor.recordErrorIndicatorShown(getIdentifier());
                 }
             });
         }
         else
         {
-            JavaFXUtil.runNowOrLater(() -> editor.recordErrorIndicatorShown(getIdentifier()));
+            editor.recordErrorIndicatorShown(getIdentifier());
         }
     }
 

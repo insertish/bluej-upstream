@@ -12,11 +12,10 @@ import javafx.scene.control.Dialog;
 import javafx.scene.control.Label;
 import javafx.scene.control.OverrunStyle;
 import javafx.scene.control.TextField;
-import javafx.scene.layout.GridPane;
-import javafx.scene.layout.Region;
-import javafx.scene.layout.VBox;
+import javafx.scene.layout.*;
 import javafx.stage.DirectoryChooser;
 import javafx.stage.Modality;
+import javafx.stage.Stage;
 import javafx.stage.Window;
 import threadchecker.OnThread;
 import threadchecker.Tag;
@@ -58,6 +57,7 @@ class ProjectLocationDialog
         gridPane.add(makeLabel(Config.getString("newProject.parent")), 0, 1);
         gridPane.add(makeLabel(Config.getString("newProject.path")), 0, 2);
         nameField = new TextField("");
+        nameField.setPromptText(Config.getString("newProject.prompt"));
         gridPane.add(nameField, 1, 0);
         JavaFXUtil.addChangeListenerPlatform(nameField.textProperty(), s -> {dialogHasBeenEdited = true;});
         parentField = new TextField(PrefMgr.getProjectDirectory().getAbsolutePath());
@@ -95,6 +95,9 @@ class ProjectLocationDialog
 
         VBox content = new VBox(gridPane, errorLabel);
         JavaFXUtil.addStyleClass(content, "new-project-dialog");
+        ColumnConstraints column2 = new ColumnConstraints();
+        column2.setHgrow(Priority.ALWAYS);
+        gridPane.getColumnConstraints().addAll(new ColumnConstraints(), column2, new ColumnConstraints(), new ColumnConstraints() );
         dialogPane.setContent(content);
         dialog.setResultConverter(button -> {
             if (button == ButtonType.OK)
@@ -105,6 +108,10 @@ class ProjectLocationDialog
                 return null;
         });
         dialog.setResizable(true);
+
+        content.setMinWidth(450);
+        content.setMinHeight(120);
+
         updateOKButton(false);
     }
 

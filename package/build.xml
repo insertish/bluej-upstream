@@ -32,7 +32,9 @@
         <include name="lib/jsch.jar" />
         <include name="lib/svnkit.jar" />
         <include name="lib/svnkit-javahl.jar" />
-        <include name="lib/trilead.jar" />
+        <include name="lib/jbcrypt-1.0.0.jar" />
+        <include name="lib/eddsa-0.2.0.jar" />
+        <include name="lib/trilead-ssh2-build-217-jenkins-11.jar" />
         <include name="lib/antlr-runtime-3.4.jar"/>
         <include name="lib/sequence-library-1.0.3.jar"/>
         <include name="lib/sqljet-1.1.10.jar"/>
@@ -53,7 +55,7 @@
         <include name="lib/slf4j-api-1.7.2.jar"/>
         <include name="lib/slf4j-jdk14-1.7.2.jar"/>
         <include name="lib/nsmenufx-2.1.4.jar"/>
-        <include name="lib/richtextfx-fat-0.7-M5n.jar"/>
+        <include name="lib/richtextfx-fat-0.9.0.jar"/>
         <!-- Pi4J -->
         <include name="lib/userlib/pi4j-device.jar" />
         <include name="lib/userlib/pi4j-gpio-extension.jar" />
@@ -70,6 +72,7 @@
         <include name="lib/images/*.icns" />
         <include name="lib/fonts/*.ttf" />
         <include name="lib/afrikaans/" />
+        <include name="lib/arabic/" />
     	<include name="lib/catalan/" />
         <include name="lib/chinese/" />
         <include name="lib/czech/" />
@@ -160,10 +163,10 @@
         <!-- make sure the people .class files are dated in the future so they
              will appear to be compiled -->
          <tstamp>
-            <format property="touch.time" pattern="dd/MM/yyyy hh:mm aa" offset="5" unit="year"/>
+            <format property="touch.time" pattern="yyyy-MM-dd" offset="5" unit="year"/>
         </tstamp>
 
-        <touch datetime="${touch.time}" pattern="dd/MM/yyyy hh:mm aa">
+        <touch datetime="${touch.time}" pattern="yyyy-MM-dd">
             <fileset dir="install_tmp" >
                 <patternset refid="bluej.examples.classes"/>
             </fileset>
@@ -649,7 +652,7 @@
             <zipfileset dir="${bluej_home}" defaultexcludes="yes">
 	            <include name="src/**/*.java" />       
 	            <include name="boot/src/**/*.java" />       
-	            <include name="boot/src/bluej/*.png" />
+	            <include name="boot/resources/bluej/*.png" />
                 <include name="threadchecker/src/**/*" />
                 <include name="threadchecker/pluginsrc/**/*" />
 	            <include name="doc/HOWTO.*" />    
@@ -686,7 +689,7 @@
 	            <include name="test/**/*"/>
             	<exclude name="test/classes/**"/>
             	<include name="util/**/*.java"/>
-	            <include name="build.properties"/>   
+	            <include name="build.properties.template"/>
 	            <include name="build.xml"/>  
 	            <include name="shared.xml"/>  
 	            <exclude name="**/.*"/>

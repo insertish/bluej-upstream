@@ -336,6 +336,7 @@ editor.info.docNoFrames = Frame display is disabled in editor preview.
 editor.info.tabsExpanded = Converted all TABs to spaces. (You are working\nwith soft TABs, the file contained hard TABs.)
 editor.info.perfectIndent = Indentation was already correct
 editor.printer.continued=continued
+editor.info.duplication = A class with this name already exists in this package.
 #End Editor labels
 
 pkgmgr.chooseUsesFrom=Select the class where the dependency is from
@@ -393,6 +394,7 @@ pkgmgr.classmenu.edit=Open Editor
 pkgmgr.classmenu.compile=Compile
 pkgmgr.classmenu.inspect=Inspect
 pkgmgr.classmenu.remove=Delete
+pkgmgr.classmenu.duplicate=Duplicate...
 pkgmgr.classmenu.convertToJava=Convert to Java
 pkgmgr.classmenu.convertToStride=Convert to Stride
 pkgmgr.classmenu.createTest=Create Test Class
@@ -435,7 +437,7 @@ pkgmgr.codepad.redefinedVar=$ is already defined
 # "new class" dialog
 pkgmgr.newClass.title=BlueJ:  Create New Class
 pkgmgr.newClass.label=Class Name:
-pkgmgr.newClass.prompt=Class Name
+pkgmgr.newClass.prompt=Enter a name for the new class
 pkgmgr.newClass.lang=Class Language:
 pkgmgr.newClass.classType=Class Type
 pkgmgr.newClass.stdclass=Class
@@ -464,6 +466,10 @@ pkgmgr.newCSS.label=CSS File:
 pkgmgr.newCSS.prompt=Filename
 pkgmgr.newCSS.newCSS=CSS
 pkgmgr.newCSS.error=Invalid filename
+
+# "duplicate class" dialog
+pkgmgr.duplicate.title=BlueJ: Duplicate a Class
+pkgmgr.duplicate.error.notValidClassName=Not a valid class name
 
 
 # "Use Library Class" dialog
@@ -707,7 +713,8 @@ team.status.resource=File name
 team.status.version=Revision
 team.status.refresh=Refresh
 team.conflicts.title=Conflicts found
-team.conflicts.classes=The following classes had conflicts
+team.conflicts.classes=The following classes had conflicts:
+team.conflicts.files=The following files had conflicts:
 team.conflicts.show=Show conflicts
 team.error.username.at=Your username has an @ character in it, which is unsupported by BlueJ.
 team.error.username.colon=Your username has an : character in it, which is unsupported by BlueJ.
@@ -757,6 +764,7 @@ team.statusinfo.dcvs.remote.new=Needs push (new)
 team.statusinfo.dcvs.remote.modified=Needs push (modified)
 team.statusinfo.dcvs.remote.deleted=Needs push (deleted)
 team.statusinfo.dcvs.remote.needs.pull=Needs update
+team.statusinfo.dcvs.remote.removed=Needs update (removed)
 team.statusinfo.dcvs.remote.needs.push=Needs push
 
 team.settings.title = Team Settings
@@ -818,7 +826,7 @@ team.checkconn.bad=Could not connect to server.
 
 
 menu.help=_Help
-menu.help.about=_About BlueJ
+menu.help.about=_About $APPNAME
 menu.help.extensions=Installed E_xtensions
 menu.help.versionCheck=Check Version...
 menu.help.copyright=_Copyright
@@ -848,7 +856,6 @@ graph.tooltip.classBroken=This class cannot currently be parsed
 #Copyright
 
 menu.help.copyright.title=BlueJ Copyright, Licensing and Redistribution
-menu.help.copyright.line0=BlueJ \u00a9 2000-2017 Michael K\u00F6lling, John Rosenberg.
 menu.help.copyright.line1=BlueJ is available under the GNU General Public License  
 menu.help.copyright.line2=version 2 with Classpath exception.
 menu.help.copyright.line3=For more information please see the files LICENSE.txt 
@@ -880,14 +887,18 @@ raspberrypi.error.sudo.title=No hardware access
 
 # About
 
-about.bluej.version=BlueJ version
+about.version=$APPNAME version
 about.java.version=Java version
 about.vm=Virtual machine:
 about.runningOn=Running on:
 about.logfile=Debug log file:
 about.moreInformation=For more information, see
-about.theTeam=BlueJ team:
+about.theTeam=$APPNAME team:
 about.openFolder=Open Folder
+about.general.title=General
+about.translators.title=Translators
+about.contributors.title=Contributors
+about.previousTeamMembers.title=Previous Team Members:
 
 # Work Indicator
 workIndicator.resetMachine=Reset Java Virtual Machine@^R
@@ -908,3 +919,7 @@ newProject.error.parentNotExist=Location does not exist
 newProject.error.nameEmpty=Name cannot be empty
 newProject.error.compoundExist=Path already exists
 newProject.error.pathInvalid=Path is invalid
+newProject.prompt=Enter a name for the new project
+
+# Class Diagram
+classTarget.noSource=no source

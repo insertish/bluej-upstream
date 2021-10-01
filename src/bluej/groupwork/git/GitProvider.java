@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2015,2016,2017  Michael Kolling and John Rosenberg
+ Copyright (C) 1999-2009,2015,2016,2017,2018  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -97,7 +97,8 @@ public class GitProvider implements TeamworkProvider
     @Override
     public TeamworkCommandResult checkConnection(TeamSettings settings) 
     {
-        try {
+        try
+        {
             gitUrlString = makeGitUrl(settings);
             //perform a lsRemote on the remote git repo.
             LsRemoteCommand lsRemoteCommand = Git.lsRemoteRepository();
@@ -109,17 +110,20 @@ public class GitProvider implements TeamworkProvider
 
             //It seems that ssh host fingerprint check is not working properly. 
             //Disable it in a ssh connection.
-            if (gitUrlString.startsWith("ssh")) {
+            if (gitUrlString.startsWith("ssh"))
+            {
                 SshSessionFactory sshSessionFactory = new JschConfigSessionFactory() {
                     @Override
-                    protected void configure(OpenSshConfig.Host host, Session sn) {
+                    protected void configure(OpenSshConfig.Host host, Session sn)
+                    {
                         java.util.Properties config = new java.util.Properties();
                         config.put("StrictHostKeyChecking", "no");
                         sn.setConfig(config);
                     }
 
                     @Override
-                    protected JSch createDefaultJSch(FS fs) throws JSchException {
+                    protected JSch createDefaultJSch(FS fs) throws JSchException
+                    {
                         return super.createDefaultJSch(fs);
                     }
                 };
@@ -131,24 +135,34 @@ public class GitProvider implements TeamworkProvider
             }
             
             lsRemoteCommand.call(); //executes the lsRemote commnand.
-        } catch (GitAPIException ex) {
-            if (ex instanceof TransportException){
-                //there was a problem in the connection. proceed to diagnosis.
+        }
+        catch (GitAPIException ex)
+        {
+            if (ex instanceof TransportException)
+            {
+                // There was a problem in the connection. Proceed to diagnosis.
                 TeamworkCommandResult diagnosis = connectionDiagnosis(gitUrlString);
-                if (!diagnosis.isError()){
-                    //we can connect to the server.
-                    if (ex.getLocalizedMessage().contains("access denied or repository not exported")){
-                        return new TeamworkCommandError(DialogManager.getMessage("team-denied-invalidUserOrnotExported"), DialogManager.getMessage("team-denied-invalidUserOrnotExported"));
+                if (!diagnosis.isError())
+                {
+                    // We can connect to the server.
+                    if (ex.getLocalizedMessage().contains("access denied or repository not exported"))
+                    {
+                        return new TeamworkCommandError(DialogManager.getMessage("team-denied-invalidUser"),
+                                DialogManager.getMessage("team-denied-invalidUser"));
                     }
-                    if (ex.getLocalizedMessage().contains("Auth fail")){
-                        return new TeamworkCommandError(DialogManager.getMessage("team-denied-invalidUser"), DialogManager.getMessage("team-denied-invalidUser"));
+                    if (ex.getLocalizedMessage().contains("Auth fail"))
+                    {
+                        return new TeamworkCommandError(DialogManager.getMessage("team-denied-invalidUser"),
+                                DialogManager.getMessage("team-denied-invalidUser"));
                     }
-                    if (ex.getLocalizedMessage().contains("does not appear to be a git repository")){
+                    if (ex.getLocalizedMessage().contains("does not appear to be a git repository"))
+                    {
                         String message = DialogManager.getMessage("team-noRepository-uri", ex.getLocalizedMessage());
                         return new TeamworkCommandError( message, message);
                     }
-                    //http, https and git protocols does not need username nor password.
-                    if (settings.getProtocol().contains("file") || settings.getProtocol().contains("http") || settings.getProtocol().contains("git")){
+                    // http, https and git protocols do not need username nor password.
+                    if (settings.getProtocol().contains("file") || settings.getProtocol().contains("http") || settings.getProtocol().contains("git"))
+                    {
                         String message = DialogManager.getMessage("team-noRepository-uri", ex.getLocalizedMessage());
                         return new TeamworkCommandError(message, message);
                     }
@@ -156,7 +170,9 @@ public class GitProvider implements TeamworkProvider
                 return diagnosis;
             }
             return new TeamworkCommandError(ex.getMessage(), ex.getLocalizedMessage());
-        } catch (UnsupportedSettingException ex) {
+        }
+        catch (UnsupportedSettingException ex)
+        {
             return new TeamworkCommandUnsupportedSetting(ex.getLocalizedMessage());
         } 
         //if we got here, it means the command was successful.
@@ -233,7 +249,11 @@ public class GitProvider implements TeamworkProvider
      * malformed uri.
      * 
      * @param gitUrlString the string containing the connection uri;
-     * @return 
+     * @return A {@link TeamworkCommandResult} with a useful error if the problem
+     *         is that we cannot connect at all to the server, but a successful
+     *         result if we can connect to the server.  The username/password is not
+     *         checked, and neither is the server type.  We only open a socket,
+     *         no more.
      */
     public static TeamworkCommandResult connectionDiagnosis(String gitUrlString)
     {
@@ -292,40 +312,52 @@ public class GitProvider implements TeamworkProvider
     }
     
     /**
-     * opens the Git repository and returns the stored Name
+     * Find the user email as configured for the repository, if any.
+     * 
      * @param projectPath path to the BlueJ project
-     * @return String with the stored name in the Git repo.
+     * @return the stored name, if any, or null
      */
     @Override
     public String getYourNameFromRepo(File projectPath) 
     {
         String result = null;
-        try {
-            try (Git repo = Git.open(projectPath)) {
-                StoredConfig repoConfig = repo.getRepository().getConfig(); //get repo config
-                result = repoConfig.getString("user", null, "name"); //recover the user name
-                repo.close();
-            } //close the repo
-        } catch (IOException ex) { }
+        try
+        {
+            try (Git repo = Git.open(projectPath))
+            {
+                StoredConfig repoConfig = repo.getRepository().getConfig();
+                result = repoConfig.getString("user", null, "name");
+            }
+        }
+        catch (IOException ex)
+        {
+            Debug.reportError("Git: Could not get user name from repository", ex);
+        }
         return result;
     }
     
     /**
-     * opens the Git repository and returns the stored email
+     * Find the user email as configured for the repository, if any.
+     * 
      * @param projectPath path to the BlueJ project
-     * @return String with the stored email in the Git repo.
+     * @return the stored email address, if any, or null
      */
     @Override
     public String getYourEmailFromRepo(File projectPath) 
     {
         String result = null;
-        try {
-            try (Git repo = Git.open(projectPath)) {
-                StoredConfig repoConfig = repo.getRepository().getConfig(); //get repo config
-                result = repoConfig.getString("user", null, "email"); //recover the user email
-                repo.close();
-            } //close the repo
-        } catch (IOException ex) { }
+        try
+        {
+            try (Git repo = Git.open(projectPath))
+            {
+                StoredConfig repoConfig = repo.getRepository().getConfig();
+                result = repoConfig.getString("user", null, "email");
+            }
+        }
+        catch (IOException ex)
+        {
+            Debug.reportError("Git: Could not get user email from repository", ex);
+        }
         return result;
     }
 

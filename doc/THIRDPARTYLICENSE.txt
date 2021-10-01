@@ -91,6 +91,13 @@ The library is distributed under the Apache License version 2.0, as found in the
 "Apache-License-2.0.txt" file.
 
 
+EdDSA-Java (CC0 1.0 Universal)
+------------------------------
+"eddsa-0.2.0.jar" is a Java implementation of the EdDSA algorithm, used by the trilead
+library for doing SSH connections for SVNkit.  It is distributed under the CC0 1.0 Universal
+licence, as found in the "CC0-1.0-Universal.txt" file.
+
+
 Guava - Google Core library (Apache License version 2.0)
 --------------------------------------------------------
 "guava-17.0.jar" is from the Google Core libraries for Java
@@ -118,21 +125,18 @@ In BlueJ it is distributed under the terms of the Apache License version 2.0, as
 in the "Apache-License-2.0.txt" file.
 
 
+jBCrypt library (ISC License)
+-----------------------------
+jBCrypt (in "jbcrypt-1.0.0.jar") is a Java implementation of the BCrypt algorithm, which is
+referenced by the trilead library for doing SSH connections with SVNkit.  It is licensed under
+the ISC licence, as found in the "jbcrypt-ISC.txt" file.
+
+
 JGit library (Eclipse Distribution License version 1.0)
 -------------------------------------------------------
 "org.eclipse.jgit-4.9.0.jar" is part of the JGit library (https://eclipse.org/jgit/) used by BlueJ for
 Git support. It is distributed under the terms of the Eclipse Distribution License,
 as found in the "EDL-v1.0.txt" file.
-
-
-JNA (Apache License version 2.0)
---------------------------------
-"jna-4.2.0.jar" and "jna-platform-4.2.0" are part of the Java Native Access library
-(JNA; https://github.com/java-native-access/jna). This library is used by BlueJ directly
-and also by SVNKit (which is in turn used by BlueJ).
-The copyright holder allows distribution of JNA under a choice of two licenses.
-In BlueJ it is distributed under the terms of the Apache License version 2.0, as found
-in the "Apache-License-2.0.txt" file.
 
 
 JSch Java Secure Channel (BSD-style license)
@@ -157,16 +161,15 @@ the auto-generated application menu. This version is distributed under the terms
 the BSD license as found in the "nsmenufx-BSD.txt" file.
 
 
-RichTextFX (2-clause BSD license)
----------------------------------
-"richtextfx-fat-0.7-M5n.jar" is the RichTextFX library (https://github.com/TomasMikula/RichTextFX)
-and its dependencies, which all have the option to be licensed under the BSD 2-clause
-license (see the BSD-2clause.txt file), with the following copyrights:
-ReactFX: Copyright (c) 2013-2014, Tomas Mikula
-UndoFX: Copyright (c) 2014, Tomas Mikula
-Flowless: Copyright (c) 2014, TomasMikula
-WellBehavedFX: Copyright (c) 2014, TomasMikula
-RichTextFX: Copyright (c) 2013-2017, Tomas Mikula and contributors
+RichTextFX (GPLv2 with classpath exception, and 2-clause BSD licenses)
+----------------------------------------------------------------------
+"richtextfx-fat-0.9.0.jar" is the RichTextFX library (https://github.com/TomasMikula/RichTextFX)
+and its dependencies. RichTextFX itself is dual licensed and is used in BlueJ under the GPLv2
+with classpath exception (the license of BlueJ itself). The dependencies are under a BSD 2-clause
+license, and include:
+
+ReactFX: license found in the "ReactFX-BSD.txt" file;
+UndoFX, Flowless, and WellBehavedFX: license found in the "TomasMikula-BSD.txt" file.
 
 
 Roboto Mono fonts (Apache License version 2.0)
@@ -222,16 +225,16 @@ is distributed as part of SVNKit.
 
 Trilead SSH library (BSD-like license)
 --------------------------------------
-"trilead.jar" comprises the Trilead library, used by BlueJ to provide SSH support for
-version control. It is distributed under a BSD-like license as found in the
-"trilead.txt" file.
+"trilead-ssh2-build-217-jenkins-11.jar" comprises the Trilead library, used by BlueJ
+to provide SSH support for version control. It is distributed under a BSD-like license
+as found in the "trilead.txt" file.
 
 
 XOM XML Object Modeller library (Lesser GNU Public License v2.1)
 ----------------------------------------------------------------
 "xom-1.2.9.jar" comprises the XOM library (http://www.cafeconleche.org/XOM/), used
 by BlueJ. It is distributed under the terms of the LGPL v2.1, as found in the
-"GNU-LGPL-v2.1.txt" file.refs/heads/*
+"GNU-LGPL-v2.1.txt" file.
 
 
 
@@ -273,26 +276,29 @@ primary BlueJ license).
 
 4. SUMMARY OF THIRD-PARTY JAR FILES AND LICENSES
 
+antlr-runtime-3.4.jar                    BSD License
+AppleJavaExtensions.jar                  BSD-like license
 commons-logging-api-1.1.2.jar            Apache License v2.0
 commons-vfs2-2.0.jar                     Apache License v2.0
 diffutils-1.2.1.jar                      Apache License v2.0
+eddsa-0.2.0.jar                          CC0 1.0 Universal license
 guava-17.0.jar                           Apache License v2.0
 hamcrest-core-1.3.jar                    BSD License
 httpclient-4.1.1.jar                     Apache License v2.0
 httpcore-4.1.jar                         Apache License v2.0
 httpmime-4.1.1.jar                       Apache License v2.0
 javassist-3.18.0.jar                     Apache License v2.0
-jna-4.2.0.jar                            Apache License v2.0
-jna-platform-4.2.0.jar                   Apache License v2.0
+jbcrypt-1.0.0.jar                        ISC License
 jsch-0.1.53.jar                          BSD License
 junit-4.11.jar                           Common Public License v1.0
 nsmenufx-2.1.4.jar                       BSD license
 org.eclipse.jgit-4.9.0.jar               Eclipse Distribution License (EDL) v1.0
+richtextfx-fat-0.9.0.jar                 BSD License
 sequence-library-1.0.3.jar               BSD License
-slf4j-api-1.7.2.jar                      MIT
-slf4j-jdk14-1.7.2.jar                    MIT
+slf4j-api-1.7.2.jar                      MIT License
+slf4j-jdk14-1.7.2.jar                    MIT License
 sqljet-1.1.10.jar                        TMate Open Source License
 svnkit-javahl.jar                        Subversion License
 svnkit.jar                               TMate Open Source License
-trilead.jar                              BSD-like license
+trilead-ssh2-build-217-jenkins-11.jar    BSD-like license
 xom-1.2.9.jar                            Lesser GPL v2.1

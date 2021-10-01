@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2011,2012,2013,2014,2015,2016,2017  Michael Kolling and John Rosenberg
+ Copyright (C) 1999-2009,2010,2011,2012,2013,2014,2015,2016,2017,2018  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -54,6 +54,7 @@ import bluej.collect.StrideEditReason;
 import bluej.compiler.CompileInputFile;
 import bluej.compiler.CompileReason;
 import bluej.compiler.CompileType;
+import bluej.compiler.Diagnostic;
 import bluej.debugger.Debugger;
 import bluej.debugger.DebuggerClass;
 import bluej.debugger.DebuggerObject;
@@ -84,11 +85,13 @@ import bluej.parser.nodes.ParsedCUNode;
 import bluej.parser.nodes.ParsedTypeNode;
 import bluej.parser.symtab.ClassInfo;
 import bluej.parser.symtab.Selection;
+import bluej.pkgmgr.DuplicateClassDialog;
 import bluej.pkgmgr.JavadocResolver;
 import bluej.pkgmgr.Package;
 import bluej.pkgmgr.PackageEditor;
 import bluej.pkgmgr.PkgMgrFrame;
 import bluej.pkgmgr.Project;
+import bluej.pkgmgr.ProjectUtils;
 import bluej.pkgmgr.SourceInfo;
 import bluej.pkgmgr.dependency.Dependency;
 import bluej.pkgmgr.dependency.ExtendsDependency;
@@ -125,6 +128,8 @@ import bluej.views.MethodView;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.event.ActionEvent;
+import javafx.geometry.Pos;
+import javafx.scene.Node;
 import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
@@ -132,10 +137,10 @@ import javafx.scene.control.MenuItem;
 import javafx.scene.control.SeparatorMenuItem;
 import javafx.scene.image.Image;
 import javafx.scene.input.MouseEvent;
+import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
 import javafx.scene.paint.ImagePattern;
-import javafx.stage.Stage;
 import javafx.stage.Window;
 import threadchecker.OnThread;
 import threadchecker.Tag;
@@ -160,6 +165,7 @@ public class ClassTarget extends DependentTarget
     private final static String removeStr = Config.getString("pkgmgr.classmenu.remove");
     private final static String convertToJavaStr = Config.getString("pkgmgr.classmenu.convertToJava");
     private final static String convertToStrideStr = Config.getString("pkgmgr.classmenu.convertToStride");
+    private final static String duplicateClassStr = Config.getString("pkgmgr.classmenu.duplicate");
     private final static String createTestStr = Config.getString("pkgmgr.classmenu.createTest");
     private final static String launchFXStr = Config.getString("pkgmgr.classmenu.launchFX");
 
@@ -199,6 +205,9 @@ public class ClassTarget extends DependentTarget
     
     // flag to prevent recursive calls to analyseDependancies()
     private boolean analysing = false;
+    
+    // Whether the current compilation is invalid due to edits since compilation began
+    private boolean compilationInvalid = false;
 
     private boolean isMoveable = true;
     private SourceType sourceAvailable;
@@ -236,6 +245,7 @@ public class ClassTarget extends DependentTarget
     private boolean showingInterface;
     private boolean drawingExtends = false;
     private Label nameLabel;
+    private Label noSourceLabel;
 
     /**
      * Create a new class target in package 'pkg'.
@@ -278,7 +288,7 @@ public class ClassTarget extends DependentTarget
         pane.setTop(new VBox(stereotypeLabel, nameLabel));
         canvas = new ResizableCanvas() {
             @Override
-            @OnThread(Tag.FX)
+            @OnThread(value = Tag.FXPlatform, ignoreParent = true)
             public void resize(double width, double height)
             {
                 super.resize(width, height);
@@ -286,6 +296,14 @@ public class ClassTarget extends DependentTarget
             }
         };
         pane.setCenter(canvas);
+
+        // We need to add label to the stack pane element
+        // to be used later for visual indication that class lacks source
+        noSourceLabel = new Label("");
+        StackPane stackPane = new StackPane(pane.getCenter(), noSourceLabel);
+        StackPane.setAlignment(noSourceLabel, Pos.TOP_CENTER);
+        StackPane.setAlignment(canvas, Pos.CENTER);
+        pane.setCenter(stackPane);
 
         // This must come after GUI init because it might try to affect GUI:
         calcSourceAvailable();
@@ -320,17 +338,27 @@ public class ClassTarget extends DependentTarget
         });
     }
     
+    /**
+     * Check whether the class has source, and of what type.
+     */
     private void calcSourceAvailable()
     {
         if (getFrameSourceFile().canRead())
+        {
             sourceAvailable = SourceType.Stride;
+            noSourceLabel.setText("");
+        }
         else if (getJavaSourceFile().canRead())
+        {
             sourceAvailable = SourceType.Java;
+            noSourceLabel.setText("");
+        }
         else
         {
             sourceAvailable = SourceType.NONE;
             // Can't have been modified since compile since there's no source to modify:
             setState(State.COMPILED);
+            noSourceLabel.setText("(" + Config.getString("classTarget.noSource") + ")");
         }
     }
 
@@ -412,7 +440,7 @@ public class ClassTarget extends DependentTarget
      * 
      * @return  A suitable reflective, or null.
      */
-    public Reflective getTypeRefelective()
+    public Reflective getTypeReflective()
     {
         // If compiled, return a reflective based on actual reflection
         if (isCompiled()) {
@@ -498,18 +526,31 @@ public class ClassTarget extends DependentTarget
         }
     }
 
-    public void markCompiling(boolean clearErrorState, int compilationSequence)
+    /**
+     * Compilation of the class represented by this target has begun.
+     * 
+     * @param compilationSequence   compilation sequence identifier which can be used to associate
+     *                              related compilation events.
+     */
+    public void markCompiling(int compilationSequence)
     {
-        if (clearErrorState && getState() == State.HAS_ERROR)
+        // The results of compilation will be invalid if the editor contents have not been saved:
+        compilationInvalid = (editor != null) ? editor.isModified() : false; 
+        
+        if (getState() == State.HAS_ERROR)
+        {
             setState(State.NEEDS_COMPILE);
+        }
 
-        if (getSourceType() == SourceType.Stride) {
+        if (getSourceType() == SourceType.Stride)
+        {
             getEditor(); // Create editor if necessary
         }
         if (editor != null)
         {
-            if (editor.compileStarted(compilationSequence)) {
-                markKnownError(true);
+            if (editor.compileStarted(compilationSequence))
+            {
+                setState(State.HAS_ERROR);
             }
         }
     }
@@ -877,6 +918,9 @@ public class ClassTarget extends DependentTarget
      */
     public void invalidate()
     {
+        // Mark any current compilation as stale:
+        compilationInvalid = true;
+        
         if (hasSourceCode())
         {
             markModified();
@@ -889,17 +933,6 @@ public class ClassTarget extends DependentTarget
                 // Will avoid going into an infinite circular loop.
                 dependent.invalidate();
             }
-        }
-    }
-    
-    /**
-     * A direct dependency of this class was modified. Any compiler diagnostics
-     * from the previous compile may now be invalid.
-     */
-    private void dependencyChanged()
-    {
-        if (editor != null) {
-            editor.dependencyChanged();
         }
     }
 
@@ -996,9 +1029,46 @@ public class ClassTarget extends DependentTarget
         return visible;
     }
 
-    public void markCompiled(boolean classesKept)
+    /**
+     * Mark the class as having compiled, either successfully or not.
+     */
+    public void markCompiled(boolean successful, CompileType compileType)
     {
-        setState(State.COMPILED);
+        if (compilationInvalid)
+        {
+            // We pass "classesKept" as false since the generated classes are invalid now:
+            editor.compileFinished(successful, false);
+            return;
+        }
+        
+        if (successful && compileType.keepClasses())
+        {
+            // If the src file has last-modified date in the future, fix the date.
+            // this will remove "uncompiled" stripes on the class
+            fixSourceModificationDate();
+            
+            // Empty class files should not be marked compiled,
+            // even though compilation is "successful".
+            boolean newCompiledState = upToDate();
+            newCompiledState &= !hasKnownError();
+            if (newCompiledState)
+            {
+                setState(State.COMPILED);
+                endCompile();
+            }
+        }
+
+        if (editor != null)
+        {
+            editor.compileFinished(successful, compileType.keepClasses());
+            if (isCompiled())
+            {
+                editor.setCompiled(true);
+            }
+        }
+        
+        // Note: we assume that errors have already been marked, so there's no need to mark
+        // an error state now for an unsuccessful compilation.
     }
 
     public static class SourceFileInfo
@@ -1099,6 +1169,15 @@ public class ClassTarget extends DependentTarget
     }
 
     /**
+     * Gets the editor, if it is already open.  If not open, returns
+     * null (without attempting to open it, in contrast to getEditor())
+     */
+    public Editor getEditorIfOpen()
+    {
+        return editor;
+    }
+
+    /**
      * Get an editor for this class, either in source view or interface view.
      * 
      * @param showInterface Determine whether to show interface view or 
@@ -1128,18 +1207,25 @@ public class ClassTarget extends DependentTarget
             EntityResolver resolver = new PackageResolver(project.getEntityResolver(),
                     getPackage().getQualifiedName());
 
+
+            final FXPlatformRunnable openCallback = () -> {
+                recordEditorOpen();
+                for (TargetListener stateListener : stateListeners)
+                {
+                    stateListener.editorOpened();
+                }
+            };
             if (sourceAvailable == SourceType.Java || sourceAvailable == SourceType.NONE) {
                 editor = EditorManager.getEditorManager().openClass(filename, docFilename,
                         project.getProjectCharset(),
                         getBaseName(), project::getDefaultFXTabbedEditor, this, isCompiled(), resolver,
-                        project.getJavadocResolver(), this::recordEditorOpen);
+                        project.getJavadocResolver(), openCallback);
             }
             else if (sourceAvailable == SourceType.Stride) {
                 File frameSourceFile = getFrameSourceFile();
                 File javaSourceFile = getJavaSourceFile();
                 JavadocResolver javadocResolver = project.getJavadocResolver();
                 Package pkg = getPackage();
-                final FXPlatformRunnable openCallback = this::recordEditorOpen;
                 editor = new FrameEditor(frameSourceFile, javaSourceFile, this, resolver, javadocResolver, pkg, openCallback);
             }
             
@@ -1202,20 +1288,22 @@ public class ClassTarget extends DependentTarget
 
     /**
      * Open an inspector window for the class represented by this target.
+     * 
+     * @param parent Parent window.
+     * @param animateFromCentre Animate from centre of this node.
      */
-    private void inspect()
+    private void inspect(Window parent, Node animateFromCentre)
     {
-        PkgMgrFrame pmf = PkgMgrFrame.findFrame(getPackage());
         Project proj = getPackage().getProject();
 
         new Thread() {
             @Override
-            @OnThread(Tag.Unique)
+            @OnThread(Tag.Worker)
             public void run() {
                 // Try and load the class.
                 try {
                     FXPlatformSupplier<DebuggerClass> clss = getPackage().getDebugger().getClass(getQualifiedName(), true);
-                    Platform.runLater(() -> proj.getClassInspectorInstance(clss.get(), getPackage(), pmf.getFXWindow(), ClassTarget.this.getNode()));
+                    Platform.runLater(() -> proj.getClassInspectorInstance(clss.get(), getPackage(), parent, animateFromCentre));
                 }
                 catch (ClassNotFoundException cnfe) {}
             }
@@ -1228,11 +1316,7 @@ public class ClassTarget extends DependentTarget
     public void modificationEvent(Editor editor)
     {
         invalidate();
-        for (Dependency d : dependents()) {
-            ClassTarget dependent = (ClassTarget) d.getFrom();
-            dependent.dependencyChanged();
-        }
-        
+                
         removeBreakpoints();
         if (getPackage().getProject().getDebugger() != null)
         {
@@ -1339,13 +1423,22 @@ public class ClassTarget extends DependentTarget
     }
 
     @Override
-    @OnThread(Tag.Any)
+    @OnThread(Tag.FXPlatform)
     public void scheduleCompilation(boolean immediate, CompileReason reason, CompileType type)
     {
-        if (Config.isGreenfoot())
+        if (Config.isGreenfoot() && type == CompileType.EXPLICIT_USER_COMPILE)
+        {
+            // We compile the package rather than just the class for explicit compiles in
+            // Greenfoot, but mark this target as modified first so that we do also compile
+            // this class even if we wouldn't otherwise (and can report the result to the
+            // editor, which is expecting to receive it):
+            markModified();
             getPackage().getProject().scheduleCompilation(immediate, reason, type, getPackage());
+        }
         else
+        {
             getPackage().getProject().scheduleCompilation(immediate, reason, type, this);
+        }
     }
 
     /**
@@ -1354,7 +1447,7 @@ public class ClassTarget extends DependentTarget
      * We load the compiled class if possible and check it the compilation has
      * resulted in it taking a different role (ie abstract to applet)
      */
-    public void endCompile()
+    private void endCompile()
     {
         Class<?> cl = getPackage().loadClass(getQualifiedName());
 
@@ -1392,6 +1485,7 @@ public class ClassTarget extends DependentTarget
                 // skeleton successfully generated
                 setState(State.NEEDS_COMPILE);
                 sourceAvailable = sourceType;
+                noSourceLabel.setText("");
                 return true;
             }
             return false;
@@ -1399,14 +1493,21 @@ public class ClassTarget extends DependentTarget
     }
 
     /**
-     * Description of the Method
+     * Inserts a package deceleration in the source file of this class, only if it
+     * is not correct or if it does't exist. Also, the default package will be ignored.
      * 
-     * @param packageName Description of the Parameter
-     * @exception IOException Description of the Exception
+     * @param packageName the package's name
+     * @exception IllegalArgumentException if the package name is not a valid java identifier
      */
     public void enforcePackage(String packageName)
         throws IOException
     {
+        if (getSourceType() != SourceType.Java)
+        {
+            // Only force packages in Java files
+            return;
+        }
+
         if (!JavaNames.isQualifiedIdentifier(packageName)) {
             throw new IllegalArgumentException();
         }
@@ -1735,8 +1836,9 @@ public class ClassTarget extends DependentTarget
     private boolean doClassNameChange(String newName)
     {
         //need to check that class does not already exist
-        if (getPackage().getTarget(newName) != null) {
-            getPackage().showError("duplicate-name");
+        if (getPackage().getTarget(newName) != null)
+        {
+            getEditor().writeMessage((Config.getString("editor.info.duplication")));
             return false;
         }
 
@@ -1767,6 +1869,12 @@ public class ClassTarget extends DependentTarget
 
             deleteSourceFiles();
             getClassFile().delete();
+            // Delete subclass files like Foo$1.class, Foo$Inner.class
+            for (File innerClassFile : getInnerClassFiles())
+            {
+                innerClassFile.delete();
+            }
+            
             getContextFile().delete();
             getDocumentationFile().delete();
 
@@ -1797,6 +1905,12 @@ public class ClassTarget extends DependentTarget
             }
 
             DataCollector.renamedClass(getPackage(), oldFrameSourceFile, newFrameSourceFile, oldJavaSourceFile, newJavaSourceFile);
+
+            // Take copy of listeners in case the rename causes new listeners to be added:
+            for (TargetListener stateListener : new ArrayList<>(stateListeners))
+            {
+                stateListener.renamed(newName);
+            }
 
             // Inform all listeners about the name change
             ClassEvent event = new ClassEvent(ClassEvent.CHANGED_NAME, getPackage(), getBClass(), oldName);
@@ -1900,7 +2014,9 @@ public class ClassTarget extends DependentTarget
     {
         String displayName = getDisplayName();
         int width = calculateWidth(nameLabel, displayName);
-        setSize(width, getHeight());
+        // Don't make size smaller if user has already resized
+        // to larger than is needed for text width:
+        setSize(Math.max(width, (int)pane.getPrefWidth()), getHeight());
         repaint();
     }
 
@@ -1998,19 +2114,21 @@ public class ClassTarget extends DependentTarget
                 menu.getItems().add(new SeparatorMenuItem());
             }
             
-            if (roleRef.createClassStaticMenu(menu.getItems(), this, source != SourceType.NONE, cl)) {
+            if (roleRef.createClassStaticMenu(menu.getItems(), this, cl)) {
                 menu.getItems().add(new SeparatorMenuItem());
             }
         }
         boolean sourceOrDocExists = source != SourceType.NONE || docExists;
         menu.getItems().add(new EditAction(sourceOrDocExists));
         menu.getItems().add(new CompileAction(source != SourceType.NONE));
-        menu.getItems().add(new InspectAction(cl != null));
+        menu.getItems().add(new InspectAction(cl != null, null));
         menu.getItems().add(new RemoveAction());
+        menu.getItems().add(new DuplicateClassAction());
+        Window parentWindow = pane.getScene().getWindow();
         if (source == SourceType.Stride)
-            menu.getItems().add(new ConvertToJavaAction());
+            menu.getItems().add(new ConvertToJavaAction(parentWindow));
         else if (source == SourceType.Java && roleRef.canConvertToStride())
-            menu.getItems().add(new ConvertToStrideAction());
+            menu.getItems().add(new ConvertToStrideAction(parentWindow));
 
         // call on role object to add any options needed at bottom
         roleRef.createRoleMenuEnd(menu.getItems(), this, getState());
@@ -2142,7 +2260,7 @@ public class ClassTarget extends DependentTarget
             PkgMgrFrame pmf = PkgMgrFrame.findFrame(getPackage());
             if (pmf.askRemoveClass())
             {
-                    getPackage().getEditor().raiseRemoveTargetEvent(ClassTarget.this);
+                remove();
             }
         }
     }
@@ -2151,11 +2269,21 @@ public class ClassTarget extends DependentTarget
      * Action to inspect the static members of a class
      */
     @OnThread(Tag.FXPlatform)
-    private class InspectAction extends MenuItem
+    public class InspectAction extends MenuItem
     {
-        public InspectAction(boolean enable)
+        private final Node animateFromCentreOverride;
+
+        /**
+         * Create an action to inspect a class (i.e. static members, not inspecting an instance)
+         * 
+         * @param enable Should the action be enabled?
+         * @param parentOverride If non-null, use this as parent.  If null, use PkgMgrFrame window.
+         * @param animateFromCentreOverride If non-null, animate from centre of this node.  If null, use ClassTarget's GUI node
+         */
+        public InspectAction(boolean enable, Node animateFromCentreOverride)
         {
             super(inspectStr);
+            this.animateFromCentreOverride = animateFromCentreOverride;
             setOnAction(e -> actionPerformed(e));
             setDisable(!enable);
             JavaFXUtil.addStyleClass(this, MENU_STYLE_INBUILT);
@@ -2164,25 +2292,32 @@ public class ClassTarget extends DependentTarget
         @OnThread(Tag.FXPlatform)
         private void actionPerformed(ActionEvent e)
         {
-            if (checkDebuggerState()) {
-                inspect();
+            if (checkDebuggerState())
+            {
+                Window parent = getPackage().getUI().getStage();
+                Node animateFromCentre = animateFromCentreOverride != null ? animateFromCentreOverride : getNode();
+
+                inspect(parent, animateFromCentre);
             }
         }
     }
 
     @OnThread(Tag.FXPlatform)
-    private class ConvertToJavaAction extends MenuItem
+    public class ConvertToJavaAction extends MenuItem
     {
-        public ConvertToJavaAction()
+        private final Window parentWindow;
+        
+        public ConvertToJavaAction(Window parentWindow)
         {
             super(convertToJavaStr);
+            this.parentWindow = parentWindow;
             setOnAction(this::actionPerformed);
             JavaFXUtil.addStyleClass(this, MENU_STYLE_INBUILT);
         }
 
         private void actionPerformed(ActionEvent e)
         {
-            if (JavaFXUtil.confirmDialog("convert.to.java.title", "convert.to.java.message", (Stage)ClassTarget.this.pane.getScene().getWindow(), true))
+            if (JavaFXUtil.confirmDialog("convert.to.java.title", "convert.to.java.message", parentWindow, true))
             {
                 convertStrideToJava();
             }
@@ -2192,10 +2327,25 @@ public class ClassTarget extends DependentTarget
     @OnThread(Tag.FXPlatform)
     public class ConvertToStrideAction extends MenuItem
     {
-        public ConvertToStrideAction()
+        public ConvertToStrideAction(Window parentWindow)
         {
             super(convertToStrideStr);
-            setOnAction(e -> promptAndConvertJavaToStride());
+            setOnAction(e -> promptAndConvertJavaToStride(parentWindow));
+            JavaFXUtil.addStyleClass(this, MENU_STYLE_INBUILT);
+        }
+    }
+
+    /**
+     * A menu item to invoke a class duplication. This is valid for
+     * Java and Stride classes.
+     */
+    @OnThread(Tag.FXPlatform)
+    private class DuplicateClassAction extends MenuItem
+    {
+        public DuplicateClassAction()
+        {
+            super(duplicateClassStr);
+            setOnAction(event -> duplicate());
             JavaFXUtil.addStyleClass(this, MENU_STYLE_INBUILT);
         }
     }
@@ -2210,13 +2360,10 @@ public class ClassTarget extends DependentTarget
      * are warnings not errors.  Errors, which stop the process, mainly arise
      * from unparseable Java source code.
      */
-    public void promptAndConvertJavaToStride()
+    public void promptAndConvertJavaToStride(Window window)
     {
         File javaSourceFile = getJavaSourceFile();
         Charset projectCharset = getPackage().getProject().getProjectCharset();
-        Stage window = null;
-        if (pane.getScene() != null)
-            window = (Stage)pane.getScene().getWindow();
         if (JavaFXUtil.confirmDialog("convert.to.stride.title", "convert.to.stride.message", window, true))
         {
             try
@@ -2283,7 +2430,7 @@ public class ClassTarget extends DependentTarget
         }
     }
 
-    @OnThread(Tag.FX)
+    @OnThread(Tag.FXPlatform)
     @Override
     protected void redraw()
     {
@@ -2299,33 +2446,8 @@ public class ClassTarget extends DependentTarget
             // could get quite time-consuming when we have lots of classes.
             // Instead, we create an image of the given stripes which
             // we can draw tiled to save time.
-            if (hasKnownError())
-            {
-                // Red stripes
-                int size = RED_STRIPE_SEPARATION * 10;
-                if (redStripeImage == null)
-                {
-                    redStripeImage = JavaFXUtil.createImage((int)size, (int)size, gImage -> {
-                        JavaFXUtil.stripeRect(gImage, 0, 0, size, size, RED_STRIPE_SEPARATION - STRIPE_THICKNESS, STRIPE_THICKNESS, false, RED_STRIPE);
-                        JavaFXUtil.stripeRect(gImage, 0, 0, size, size, RED_STRIPE_SEPARATION - STRIPE_THICKNESS, STRIPE_THICKNESS, true, RED_STRIPE);
-                    });
-                }
-                g.setFill(new ImagePattern(redStripeImage, 0, 0, size, size, false));
-                g.fillRect(0, 0, width, height);
-            }
-            else
-            {
-                int size = GREY_STRIPE_SEPARATION * 10;
-                // Grey stripes
-                if (greyStripeImage == null)
-                {
-                    greyStripeImage = JavaFXUtil.createImage(size, size, gImage -> {
-                        JavaFXUtil.stripeRect(gImage, 0, 0, size, size, GREY_STRIPE_SEPARATION - STRIPE_THICKNESS, STRIPE_THICKNESS, false, GREY_STRIPE);
-                    });
-                }
-                g.setFill(new ImagePattern(greyStripeImage, 0, 0, size, size, false));
-                g.fillRect(0, 0, width, height);
-            }
+            g.setFill(hasKnownError() ? getRedStripeFill() : getGreyStripeFill());
+            g.fillRect(0, 0, width, height);
         }
 
         if (this.selected && isResizable())
@@ -2337,6 +2459,41 @@ public class ClassTarget extends DependentTarget
             g.strokeLine(width - RESIZE_CORNER_SIZE, height, width, height - RESIZE_CORNER_SIZE);
             g.strokeLine(width - RESIZE_CORNER_SIZE + RESIZE_CORNER_GAP, height, width, height - RESIZE_CORNER_SIZE + RESIZE_CORNER_GAP);
         }
+    }
+
+    /**
+     * Gets the grey diagonal stripe pattern used for modified classes.
+     */
+    @OnThread(Tag.FX)
+    public static ImagePattern getGreyStripeFill()
+    {
+        int size = GREY_STRIPE_SEPARATION * 10;
+        // Grey stripes
+        if (greyStripeImage == null)
+        {
+            greyStripeImage = JavaFXUtil.createImage(size, size, gImage -> {
+                JavaFXUtil.stripeRect(gImage, 0, 0, size, size, GREY_STRIPE_SEPARATION - STRIPE_THICKNESS, STRIPE_THICKNESS, false, GREY_STRIPE);
+            });
+        }
+        return new ImagePattern(greyStripeImage, 0, 0, size, size, false);
+    }
+
+    /**
+     * Gets the red diagonal stripe pattern used for classes with an error.
+     */
+    @OnThread(Tag.FX)
+    public static ImagePattern getRedStripeFill()
+    {
+        // Red stripes
+        int size = RED_STRIPE_SEPARATION * 10;
+        if (redStripeImage == null)
+        {
+            redStripeImage = JavaFXUtil.createImage((int)size, (int)size, gImage -> {
+                JavaFXUtil.stripeRect(gImage, 0, 0, size, size, RED_STRIPE_SEPARATION - STRIPE_THICKNESS, STRIPE_THICKNESS, false, RED_STRIPE);
+                JavaFXUtil.stripeRect(gImage, 0, 0, size, size, RED_STRIPE_SEPARATION - STRIPE_THICKNESS, STRIPE_THICKNESS, true, RED_STRIPE);
+            });
+        }
+        return new ImagePattern(redStripeImage, 0, 0, size, size, false);
     }
 
     /**
@@ -2444,6 +2601,20 @@ public class ClassTarget extends DependentTarget
     }
 
     /**
+     * Duplicates the class which is represented by this class target
+     */
+    private void duplicate()
+    {
+        String originalClassName = getBaseName();
+        SourceType sourceType = getSourceType();
+        PkgMgrFrame pmf = PkgMgrFrame.findFrame(getPackage());
+
+        DuplicateClassDialog dialog = new DuplicateClassDialog(pmf.getFXWindow(), "CopyOf" + originalClassName, sourceType);
+        Optional<String> duplicateClassName = dialog.showAndWait();
+        duplicateClassName.ifPresent(name -> pmf.duplicateClass(originalClassName, name, getSourceFile(), sourceType));
+    }
+
+    /**
      * Adds the given stride code element as a Stride file for this
      * class target, as part of a conversion from Java into Stride, or part
      * of generating a new class from a template.
@@ -2493,7 +2664,7 @@ public class ClassTarget extends DependentTarget
     @Override
     public void executeMethod(MethodView mv)
     {
-        getPackage().getEditor().raiseMethodCallEvent(this, mv);
+        getPackage().callStaticMethodOrConstructor(mv);
     }
     
     /**
@@ -2502,7 +2673,7 @@ public class ClassTarget extends DependentTarget
     @Override
     public void callConstructor(ConstructorView cv)
     {
-        getPackage().getEditor().raiseMethodCallEvent(this, cv);
+        getPackage().callStaticMethodOrConstructor(cv);
     }
     
     /**
@@ -2514,7 +2685,7 @@ public class ClassTarget extends DependentTarget
      */
     private boolean checkDebuggerState()
     {
-        return PkgMgrFrame.createFrame(getPackage(), null).checkDebuggerState();
+        return ProjectUtils.checkDebuggerState(getPackage().getProject(), getPackage().getUI().getStage());
     }
 
     /**
@@ -2600,14 +2771,33 @@ public class ClassTarget extends DependentTarget
     }
 
     /**
-     * Mark that there is a known compilation error with this target.
-     * (Mark is cleared when state is set to COMPILING).
+     * Display a compilation diagnostic (error message), if possible and appropriate. The editor
+     * decides if it is appropriate to display the error and may have a policy where eg it only
+     * shows a limited number of errors.
+     * 
+     * @param diagnostic   the compiler-generated diagnostic
+     * @param errorIndex   the index of the error in this batch (first error is 0)
+     * @param compileType  the type of compilation leading to the error
+     * @return    true if the diagnostic was displayed to the user
      */
-    public void markKnownError(boolean classesKept)
+    public boolean showDiagnostic(Diagnostic diagnostic, int errorIndex, CompileType compileType)
     {
-        // Errors are marked as part of compilation, so we expect that a suitable ClassEvent
-        // is generated when compilation finishes; no need for it here.
+        // If an edit has been made since the compilation started, we don't want to display the
+        // error since it may no longer be present, and if it is it will be shown by a later
+        // compilation anyway:
+        if (compilationInvalid)
+        {
+            return false;
+        }
+        
+        Editor ed = getEditor();
+        if (ed == null)
+        {
+            return false;
+        }
+        
         setState(State.HAS_ERROR);
+        return ed.displayDiagnostic(diagnostic, errorIndex, compileType);
     }
     
     /**

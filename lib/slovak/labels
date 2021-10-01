@@ -772,7 +772,7 @@ team.checkconn.ok=Pripojenie je v\u00a0poriadku.
 team.checkconn.bad=Pripojenie k\u00a0serveru nebolo mo\u017en\u00e9 nadviaza\u0165.
 
 menu.help=_Pomocn\u00edk
-menu.help.about=_O\u00a0BlueJi
+menu.help.about=_O\u00a0$APPNAMEi
 menu.help.extensions=In\u0161talovan\u00e9 _roz\u0161\u00edrenia
 menu.help.versionCheck=Skontrolova\u0165 a_ktualiz\u00e1cie\u2026
 menu.help.copyright=_Autorsk\u00e9 pr\u00e1va
@@ -800,7 +800,6 @@ graph.tooltip.classBroken=T\u00e1to trieda nemohla by\u0165 korektne spracovan\u
 # Copyright
 
 menu.help.copyright.title=Autorsk\u00e9 pr\u00e1va n\u00e1stroja BlueJ
-menu.help.copyright.line0=BlueJ \u00a9 2000 \u2013 2017 Michael K\u00f6lling, John Rosenberg.
 menu.help.copyright.line1=Prostredie BlueJ je \u0161\u00edrite\u013en\u00e9 v\u00a0s\u00falade s\u00a0licenciou GNU
 menu.help.copyright.line2=General Public License verzia 2 s\u00a0v\u00fdnimkou Classpath.
 menu.help.copyright.line3=Viac inform\u00e1ci\u00ed n\u00e1jdete v\u00a0s\u00faboroch LICENSE.txt
@@ -832,13 +831,13 @@ raspberrypi.error.sudo.title=Nem\u00e1m pr\u00edstup k\u00a0hardv\u00e9ru
 
 # About
 
-about.bluej.version=Verzia BlueJa
+about.version=Verzia $APPNAMEa
 about.java.version=Verzia Javy
 about.vm=Java VM:
 about.runningOn=Opera\u010dn\u00fd syst\u00e9m:
 about.logfile=V\u00fdpis chybov\u00fdch hl\u00e1sen\u00ed:
 about.moreInformation=Viac inform\u00e1ci\u00ed z\u00edskate na 
-about.theTeam=Slovensk\u00e1 lokaliz\u00e1cia:\n\u00a0     Roman Horv\u00e1th, Klaudia Kanyicskov\u00e1, Andrea Hrn\u010diarikov\u00e1\n\u00a0\n\u00a0\nAutori prostredia BlueJ:
+about.theTeam=Slovensk\u00e1 lokaliz\u00e1cia:\n\u00a0     Roman Horv\u00e1th, Klaudia Kanyicskov\u00e1, Andrea Hrn\u010diarikov\u00e1\n\u00a0\n\u00a0\nAutori prostredia $APPNAME:
 about.openFolder=Otvori\u0165 prie\u010dinok
 
 # Work Indicator

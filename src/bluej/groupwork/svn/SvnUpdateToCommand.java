@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2012  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2012,2018  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -172,11 +172,11 @@ public class SvnUpdateToCommand extends SvnCommand implements UpdateResults
                 Iterator<File> i;
                 for (i = addedList.iterator(); i.hasNext(); )
                 {
-                    listener.fileAdded(i.next());
+                    listener.fileModified(i.next());
                 }
                 for (i = updatedList.iterator(); i.hasNext(); )
                 {
-                    listener.fileUpdated(i.next());
+                    listener.fileModified(i.next());
                 }
                 for (i = removedList.iterator(); i.hasNext(); )
                 {
@@ -219,16 +219,26 @@ public class SvnUpdateToCommand extends SvnCommand implements UpdateResults
         return new TeamworkCommandResult();
     }
 
+    @Override
+    public boolean mergeCommitNeeded()
+    {
+        // Subversion never requires a merge commit.
+        return false;
+    }
+    
+    @Override
     public Set<File> getBinaryConflicts()
     {
         return binaryConflicts;
     }
     
+    @Override
     public List<File> getConflicts()
     {
         return conflicts;
     }
     
+    @Override
     public void overrideFiles(final Set<File> files)
     {
         final SVNClientInterface client = getRepository().getClient();
@@ -261,6 +271,11 @@ public class SvnUpdateToCommand extends SvnCommand implements UpdateResults
                             // (keepLocal == true) or completely remove the file.
                             String [] paths = new String[] { file.getPath() };
                             client.remove(paths, "", true, keepLocal, Collections.emptyMap());
+                            
+                            if (!keepLocal)
+                            {
+                                Platform.runLater(() -> listener.fileRemoved(file));
+                            }
 
                             return;
                         }

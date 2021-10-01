@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2011  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2011,2018  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -52,8 +52,10 @@ public abstract class DebuggerThread
      * Get the current execution of the stack. This is only reliable if the
      * thread is currently halted.
      */
+    @OnThread(Tag.Any)
     public abstract List<SourceLocation> getStack();
     
+    @OnThread(Tag.Any)
     public abstract List<VarDisplayInfo> getLocalVariables(int frameNo);
     public abstract boolean varIsObject(int frameNo, int index);
     public abstract DebuggerObject getStackObject(int frameNo, int index);
@@ -63,6 +65,7 @@ public abstract class DebuggerThread
      * The returned object may represent the null reference if the frame
      * is for a static method.
      */
+    @OnThread(Tag.Any)
     public abstract DebuggerObject getCurrentObject(int frameNo);
     
     /**
@@ -74,7 +77,9 @@ public abstract class DebuggerThread
     public abstract void setSelectedFrame(int frame);
     public abstract int getSelectedFrame();
 
+    @OnThread(Tag.Any)
     public abstract void halt();
+    @OnThread(Tag.Any)
     public abstract void cont();
 
     /**
@@ -87,7 +92,9 @@ public abstract class DebuggerThread
      * Step to the next executed line (which might be in a called method). This is only valid when the
      * thread is suspended. It is safe to call this from a DebuggerListener.
      */
+    @OnThread(Tag.Any)
     public abstract void stepInto();
     
+    @OnThread(Tag.Any)
     public abstract boolean sameThread(DebuggerThread thread);
 }

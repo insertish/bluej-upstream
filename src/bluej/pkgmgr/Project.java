@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2011,2012,2013,2014,2015,2016,2017  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2011,2012,2013,2014,2015,2016,2017,2018  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -75,7 +75,6 @@ import bluej.utility.FileUtility.WriteCapabilities;
 import bluej.utility.ImportScanner;
 import bluej.utility.JavaNames;
 import bluej.utility.Utility;
-import bluej.utility.javafx.FXPlatformSupplier;
 import bluej.utility.javafx.JavaFXUtil;
 import bluej.views.View;
 import javafx.animation.Interpolator;
@@ -288,7 +287,7 @@ public class Project implements DebuggerListener, DebuggerThreadListener, Inspec
 
         unnamedPackage = new Package(this);
         Properties props = unnamedPackage.getLastSavedProperties();
-        setProjectProperties(props);
+        loadProjectProperties(props);
         packages.put("", unnamedPackage);
 
         shelfStorage = new FrameShelfStorage(this.projectDir);
@@ -301,7 +300,7 @@ public class Project implements DebuggerListener, DebuggerThreadListener, Inspec
         debugger.setUserLibraries(libraryUrls.toArray(new URL[libraryUrls.size()]));
         debugger.newClassLoader(getClassLoader());
         debugger.addDebuggerListener(this);
-        // Note: this line must come after setProjectProperties (currently above):
+        // Note: this line must come after loadProjectProperties (currently above):
         debugger.setRunOnThread(getRunOnThread() == null ? RunOnThread.DEFAULT : getRunOnThread());
         debugger.launch();
 
@@ -364,7 +363,7 @@ public class Project implements DebuggerListener, DebuggerThreadListener, Inspec
     }
 
     /**
-     * Open a BlueJ project.
+     * Open a BlueJ project (or find an existing open project).
      *
      * @param projectPath
      *            a string representing the path to open. This can either be a
@@ -382,9 +381,7 @@ public class Project implements DebuggerListener, DebuggerThreadListener, Inspec
         try {
             startingDir = pathIntoStartingDirectory(projectPath);
         } catch (IOException ioe) {
-            Debug.message("could not resolve directory " + projectPath);
-
-            //ioe.printStackTrace();
+            Debug.reportError("could not resolve directory " + projectPath, ioe);
             return null;
         }
 
@@ -467,7 +464,7 @@ public class Project implements DebuggerListener, DebuggerThreadListener, Inspec
             // Prompt user to "Save elsewhere"
 
 
-            DialogManager.showMessageFX(null, "project-is-readonly", new String[]{projectDir.toString()});
+            DialogManager.showMessageFX(null, "project-is-readonly", projectDir.toString());
 
             boolean done = false;
 
@@ -782,7 +779,7 @@ public class Project implements DebuggerListener, DebuggerThreadListener, Inspec
      * Get the project properties to be written to storage when the project is saved.
      */
     @OnThread(Tag.FXPlatform)
-    public synchronized Properties getProjectProperties()
+    public synchronized Properties getProjectPropertiesCopy()
     {
         Properties p = new Properties();
         p.put(PROJECT_CHARSET_PROP, characterSet.name());
@@ -794,28 +791,44 @@ public class Project implements DebuggerListener, DebuggerThreadListener, Inspec
     /**
      * Restore project properties (called just after project is opened). 
      */
-    private synchronized void setProjectProperties(Properties props)
+    private synchronized void loadProjectProperties(Properties props)
     {
         String charsetName = props.getProperty(PROJECT_CHARSET_PROP);
-        if (charsetName != null) {
-            try {
+        if (charsetName != null)
+        {
+            try
+            {
                 characterSet = Charset.forName(charsetName);
             }
-            catch (IllegalCharsetNameException icne) {
-                Debug.log("Illegal project character set name: " + charsetName);
+            catch (IllegalCharsetNameException icne)
+            {
+                Debug.message("Illegal project character set name: " + charsetName);
             }
-            catch (UnsupportedCharsetException ucse) {
-                Debug.log("Unsupported project character set: " + charsetName);
+            catch (UnsupportedCharsetException ucse)
+            {
+                Debug.message("Unsupported project character set: " + charsetName);
             }
         }
-        if (characterSet == null) {
+        if (characterSet == null)
+        {
             characterSet = Charset.defaultCharset();
             props.put(PROJECT_CHARSET_PROP, characterSet.name());
         }
 
         String runOnThreadProp = props.getProperty(RUN_ON_THREAD_PROP);
-        // It matters whether it was found or not, so store null if not found:
-        runOnThread = runOnThreadProp == null || runOnThreadProp.isEmpty() ? null : RunOnThread.valueOf(runOnThreadProp);
+        try
+        {
+            // Note that the null value is checked for explicitly and means "prompt if
+            // running an FX application". So, rather than set to DEFAULT, leave as null
+            // if the property isn't set:
+            runOnThread = runOnThreadProp == null || runOnThreadProp.isEmpty() ?
+                    null : RunOnThread.valueOf(runOnThreadProp);
+        }
+        catch (IllegalArgumentException iae)
+        {
+            // Property was set to an invalid setting
+            Debug.message("Invalid run-on-thread setting: " + runOnThreadProp);
+        }
     }
 
     /**
@@ -1215,6 +1228,16 @@ public class Project implements DebuggerListener, DebuggerThreadListener, Inspec
     }
 
     /**
+     * Get all packages from the project. The returned collection is a live view
+     * and should not be modified directly.
+     * @return  all the packages in the current project.
+     */
+    public Collection<Package> getProjectPackages()
+    {
+        return packages.values();
+    }
+
+    /**
      * Return the extensions BProject associated with this Project.
      * There should be only one BProject object associated with each Project.
      * @return the BProject associated with this Project.
@@ -1447,21 +1470,30 @@ public class Project implements DebuggerListener, DebuggerThreadListener, Inspec
      */
     public void clearAllSelections()
     {
-        packages.values().stream().map(Package::getEditor).forEach(PackageEditor::clearSelection);
+        for (Package pkg : packages.values())
+        {
+            PackageEditor ed = pkg.getEditor();
+            if (ed != null)
+            {
+                ed.clearSelection();
+            }
+        }
     }
 
     /**
-     * Make the grapheditors of this project clear their selection and select
-     * the targets given in the parameter targets.
+     * Make the package editors for this project select the targets given in the 
+     * <code>targets</code> parameter. Pre-existing selections remain selected. Targets in a
+     * package with no editor open will not be selected.
      *
-     * @param targets a list of Targets
+     * @param targets  a list of Targets 
      */
     public void selectTargetsInGraphs(List<Target> targets)
     {
-        for (Iterator<Target> i = targets.iterator(); i.hasNext();) {
-            Target target = i.next();
-            if (target != null){
-                PackageEditor packageEditor = target.getPackage().getEditor();
+        for (Target target : targets)
+        {
+            PackageEditor packageEditor = target.getPackage().getEditor();
+            if (packageEditor != null)
+            {
                 packageEditor.addToSelection(target);
                 packageEditor.repaint();
             }
@@ -1474,11 +1506,6 @@ public class Project implements DebuggerListener, DebuggerThreadListener, Inspec
      *
      * <p>Use ReadmeTarget.README_ID ("@README") as the target base name to get the
      * readme target for a package.
-     *
-     * Given the path and name of a target in the project, return the target or
-     * null if the target doesn't exist
-     * @param pathAndName
-     * @return the target
      */
     public Target getTarget(String targetId)
     {
@@ -1510,7 +1537,6 @@ public class Project implements DebuggerListener, DebuggerThreadListener, Inspec
                 Editor editor = classTarget.getEditor();
                 if (editor != null) {
                     editor.setEditorVisible(true);
-                    // TODO: make moe select the ======== part of cvs conflicts
                 }
             }
         }
@@ -1551,9 +1577,13 @@ public class Project implements DebuggerListener, DebuggerThreadListener, Inspec
         // if there is a breakpoint in a JavaFX class and we are restarting VM
         // before FX launch, then we set the breakpoints before launching the FX app:
         packages.values().forEach(Package::reInitBreakpoints);
-        PkgMgrFrame frame = PkgMgrFrame.findFrame(getUnnamedPackage());
-        if (frame != null) {
-            frame.bringToFront();
+        if (Config.isMacOS())
+        {
+            PkgMgrFrame frame = PkgMgrFrame.findFrame(getUnnamedPackage());
+            if (frame != null)
+            {
+                frame.bringToFront();
+            }
         }
 
         BlueJEvent.raiseEvent(BlueJEvent.CREATE_VM_DONE, null);
@@ -1606,7 +1636,7 @@ public class Project implements DebuggerListener, DebuggerThreadListener, Inspec
             // dispose windows for local classes. Should not run user code
             // on the event queue, so run it in a separate thread.
             new Thread() {
-                @OnThread(Tag.Unique)
+                @OnThread(Tag.Worker)
                 public void run() {
                     getDebugger().disposeWindows();
                 }
@@ -1665,7 +1695,8 @@ public class Project implements DebuggerListener, DebuggerThreadListener, Inspec
     public ExecControls getExecControls()
     {
         if (execControls == null) {
-            execControls = new ExecControls(this, getDebugger(), threadListContents);
+            execControls = new ExecControls(this, getDebugger(),
+                    Config.isGreenfoot() ? null : threadListContents);
             debuggerShowing.bindBidirectional(execControls.showingProperty());
         }
         return execControls;
@@ -2103,15 +2134,15 @@ public class Project implements DebuggerListener, DebuggerThreadListener, Inspec
     /**
      * Get the commit dialog for this project
      */
-    public CommitAndPushInterface getCommitCommentsDialog(PkgMgrFrame pmf)
+    public CommitAndPushInterface getCommitCommentsDialog()
     {
         // lazy instantiation of commit comments frame
         if (commitCommentsFrame == null) {
             if (this.teamSettingsController.isDVCS()) {
                 //a dcvs repository uses a different window.
-                commitCommentsFrame = new CommitAndPushFrame(this, pmf.getFXWindow());
+                commitCommentsFrame = new CommitAndPushFrame(this);
             } else {
-                commitCommentsFrame = new CommitCommentsFrame(this, pmf.getFXWindow());
+                commitCommentsFrame = new CommitCommentsFrame(this);
             }
         }
         return commitCommentsFrame;
@@ -2120,10 +2151,11 @@ public class Project implements DebuggerListener, DebuggerThreadListener, Inspec
     /**
      * Get the update dialog for this project
      */
-    public UpdateFilesFrame getUpdateDialog(PkgMgrFrame pmf)
+    public UpdateFilesFrame getUpdateDialog()
     {
-        if (updateFilesFrame == null) {
-            updateFilesFrame = new UpdateFilesFrame(this, pmf.getFXWindow());
+        if (updateFilesFrame == null)
+        {
+            updateFilesFrame = new UpdateFilesFrame(this);
         }
         return updateFilesFrame;
     }
@@ -2189,14 +2221,13 @@ public class Project implements DebuggerListener, DebuggerThreadListener, Inspec
     }
 
     /**
-     * return the associated status window
+     * Get the team status window associated with this project.
      */
-    public StatusFrame getStatusWindow(FXPlatformSupplier<javafx.stage.Window> parent)
+    public StatusFrame getStatusWindow()
     {
-        if(statusFrame == null) {
-            statusFrame = new StatusFrame(this, parent.get());
-            final StatusFrame f = this.statusFrame;
-            f.setLocationRelativeTo(parent.get());
+        if (statusFrame == null)
+        {
+            statusFrame = new StatusFrame(this);
         }
         return statusFrame;
     }
@@ -2476,31 +2507,24 @@ public class Project implements DebuggerListener, DebuggerThreadListener, Inspec
     @OnThread(Tag.Any)
     public void threadStateChanged(DebuggerThread thread, boolean shouldDisplay)
     {
-        DebuggerThreadDetails details = new DebuggerThreadDetails(thread);
         Platform.runLater(() -> {
-            DebuggerThreadDetails prevSelection = null;
-            if (hasExecControls())
-            {
-                prevSelection = getExecControls().getSelectedThreadDetails();
-            }
-
             for (int i = 0; i < threadListContents.size(); i++)
             {
                 if (threadListContents.get(i).isThread(thread))
                 {
-                    threadListContents.set(i, details);
+                    threadListContents.get(i).update();
+                    break;
                 }
             }
 
-            if (shouldDisplay)
+            if (hasExecControls())
             {
-                getExecControls().setSelectedThread(details);
+                getExecControls().updateThreadDetails(thread);
+                if (shouldDisplay)
+                {
+                    getExecControls().selectThread(thread);
+                }
             }
-            else if (prevSelection != null)
-            {
-                getExecControls().setSelectedThread(prevSelection);
-            }
-            getExecControls().threadStateChanged(details);
         });
     }
 
@@ -2564,22 +2588,30 @@ public class Project implements DebuggerListener, DebuggerThreadListener, Inspec
     public static class DebuggerThreadDetails
     {
         private final DebuggerThread debuggerThread;
-        private final String debuggerThreadDisplay;
-        private final boolean suspended;
+        private String debuggerThreadDisplay;
+        private boolean suspended;
 
         @OnThread(Tag.Any)
         public DebuggerThreadDetails(DebuggerThread dt)
         {
             this.debuggerThread = dt;
-            this.debuggerThreadDisplay = dt.toString();
-            this.suspended = dt.isSuspended();
+            update();
         }
-
-        // Equality is solely dependent on the thread, not the display:
+        
+        /**
+         * Update details based on the current state of the thread.
+         */
+        @OnThread(Tag.Any)
+        public void update()
+        {
+            this.debuggerThreadDisplay = debuggerThread.toString();
+            this.suspended = debuggerThread.isSuspended();
+        }
 
         @Override
         public boolean equals(Object o)
         {
+            // Equality is solely dependent on the thread, not the display:
             if (this == o) return true;
             if (o == null || getClass() != o.getClass()) return false;
 

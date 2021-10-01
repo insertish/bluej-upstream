@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 2010,2011,2014,2015  Michael Kolling and John Rosenberg
+ Copyright (C) 2010,2011,2014,2015,2018  Michael Kolling and John Rosenberg
 
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -38,12 +38,15 @@ import bluej.debugger.gentype.JavaType;
 import bluej.debugger.gentype.MethodReflective;
 import bluej.debugger.gentype.Reflective;
 import bluej.utility.JavaReflective;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 
 /**
  * A Reflective implementation for arrays (which defers most functionality to the component reflective)
  * 
  * @author Davin McCall
  */
+@OnThread(Tag.Any)
 public class ParsedArrayReflective extends Reflective
 {
     private Reflective component;
@@ -151,6 +154,12 @@ public class ParsedArrayReflective extends Reflective
     public boolean isStatic()
     {
         return component.isStatic();
+    }
+    
+    @Override
+    public boolean isFinal()
+    {
+        return component.isFinal();
     }
     
     @Override

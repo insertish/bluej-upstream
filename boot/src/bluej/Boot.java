@@ -56,7 +56,7 @@ public class Boot
     // and then the update-version target should be executed.
     public static final int BLUEJ_VERSION_MAJOR = 4;
     public static final int BLUEJ_VERSION_MINOR = 1;
-    public static final int BLUEJ_VERSION_RELEASE = 2;
+    public static final int BLUEJ_VERSION_RELEASE = 3;
     public static final String BLUEJ_VERSION_SUFFIX = "";
 
     // public static final int BLUEJ_VERSION_NUMBER = BLUEJ_VERSION_MAJOR * 1000 +
@@ -94,12 +94,11 @@ public class Boot
         "diffutils-1.2.1.jar", "commons-logging-api-1.1.2.jar",
         JLAYER_MP3_JAR, "opencsv-2.3.jar", "xom-1.2.9.jar",
         "lang-stride.jar",
-        // We don't add JNA to our JARs.  See GreenfootUtil class for more details
-        //"jna-4.2.0.jar", "jna-platform-4.2.0.jar",
+        "nsmenufx-2.1.4.jar", "richtextfx-fat-0.9.0.jar",
         "guava-17.0.jar", "javassist-3.18.0.jar", "commons-vfs2-2.0.jar",
         "httpclient-4.1.1.jar", "httpcore-4.1.jar", "httpmime-4.1.1.jar"};
     private static final int greenfootUserBuildJars = 4;
-    public static String GREENFOOT_VERSION = "3.1.0";
+    public static String GREENFOOT_VERSION = "3.5.0";
     public static String GREENFOOT_API_VERSION = "3.0.0";
     // A singleton boot object so the rest of BlueJ can pick up args etc.
     private static Boot instance;
@@ -111,25 +110,27 @@ public class Boot
         "commons-logging-api-1.1.2.jar",
         "commons-vfs2-2.0.jar",
         "diffutils-1.2.1.jar",
+        "eddsa-0.2.0.jar",
         "guava-17.0.jar",
         "hamcrest-core-1.3.jar",
         "httpclient-4.1.1.jar",
         "httpcore-4.1.jar",
         "httpmime-4.1.1.jar",
         "javassist-3.18.0.jar",
+        "jbcrypt-1.0.0.jar",
         "jsch-0.1.53.jar",
         "junit-4.11.jar",
         "lang-stride.jar",
         "nsmenufx-2.1.4.jar",
         "org.eclipse.jgit-4.9.0.jar",
-        "richtextfx-fat-0.7-M5n.jar",
+        "richtextfx-fat-0.9.0.jar",
         "sequence-library-1.0.3.jar",
         "slf4j-api-1.7.2.jar",
         "slf4j-jdk14-1.7.2.jar",
         "sqljet-1.1.10.jar",
         "svnkit.jar",
         "svnkit-javahl.jar",
-        "trilead.jar",
+        "trilead-ssh2-build-217-jenkins-11.jar",
         "xom-1.2.9.jar" };
     // The variable form of the above
     private static String [] runtimeJars = bluejJars;
@@ -216,7 +217,7 @@ public class Boot
             @OnThread(Tag.FXPlatform)
             public Image get()
             {
-                URL url = getClass().getResource(isGreenfoot ? "gen-greenfoot-splash.png" : "gen-bluej-splash.png");
+                URL url = getClass().getResource(isGreenfoot ? "greenfoot-splash.png" : "gen-bluej-splash.png");
                 if (url != null)
                     return new Image(url.toString());
                 else

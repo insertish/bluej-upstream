@@ -764,8 +764,8 @@ team.checkconn.bad=No se pudo establecer conexi\u00f3n con el servidor.
 
 
 menu.help=_Ayuda
-menu.help.about=_Acerca de BlueJ...
-menu.help.extensions=E_xtensiones Instaladas 
+menu.help.about=_Acerca de $APPNAME...
+menu.help.extensions=E_xtensiones Instaladas
 menu.help.versionCheck=Comprobar Versi\u00f3n...
 menu.help.copyright=_Copyright
 menu.help.website= Sitio _Web de BlueJ
@@ -793,7 +793,6 @@ graph.tooltip.classBroken=Esta clase no puede ser analizada en este momento
 #Copyright
 
 menu.help.copyright.title=Derechos de autor de BlueJ, Licencias y Redistribuci\u00f3n
-menu.help.copyright.line0=BlueJ \u00a9 2000-2017 Michael K\u00F6lling, John Rosenberg.
 menu.help.copyright.line1=BlueJ est\u00e1 disponible bajo la Licencia P\u00fablica General GNU  
 menu.help.copyright.line2=versi\u00f3n 2 con excepci\u00f3n de las rutas de clases.
 menu.help.copyright.line3=Para mayor informaci\u00f3n por favor vea los archivos LICENSE.txt 
@@ -825,14 +824,14 @@ raspberrypi.error.sudo.title=No hay acceso al hardware
 
 # About
 
-about.bluej.version=Versi\u00f3n BlueJ 
+about.version=Versi\u00f3n $APPNAME
 about.java.version=Versi\u00f3n Java
 about.vm=M\u00e1quina Virtual:
 about.runningOn=Ejecut\u00e1ndose en:
 about.javahome=Directorio de instalaci\u00f3n de Java:
 about.logfile=Archivo de registro de depuraci\u00f3n:
 about.moreInformation=Para mayor informaci\u00f3n, vea
-about.theTeam=El equipo BlueJ:
+about.theTeam=El equipo $APPNAME:
 
 # Work Indicator
 workIndicator.resetMachine=Reiniciar la M\u00e1quina Virtual@^R

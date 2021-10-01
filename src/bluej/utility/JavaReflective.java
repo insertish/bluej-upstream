@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2011,2013,2014,2015,2016  Michael Kolling and John Rosenberg
+ Copyright (C) 1999-2009,2010,2011,2013,2014,2015,2016,2018  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -44,8 +44,6 @@ import bluej.debugger.gentype.JavaPrimitiveType;
 import bluej.debugger.gentype.JavaType;
 import bluej.debugger.gentype.MethodReflective;
 import bluej.debugger.gentype.Reflective;
-import threadchecker.OnThread;
-import threadchecker.Tag;
 
 /**
  * A reflective for GenTypeClass which uses the standard java reflection API.  
@@ -112,6 +110,12 @@ public class JavaReflective extends Reflective
     public boolean isPublic()
     {
         return Modifier.isPublic(c.getModifiers());
+    }
+    
+    @Override
+    public boolean isFinal()
+    {
+        return Modifier.isFinal(c.getModifiers());
     }
     
     @Override
@@ -391,7 +395,6 @@ public class JavaReflective extends Reflective
      * @param c        The type, whose enclosing entities type parameters are required
      * @param tparMap  The map, into which the mappings from name to type parameter are to be stored
      */
-    @OnThread(Tag.FXPlatform)
     private void getTparMapping(Class<?> c, Map<String,GenTypeDeclTpar> tparMap)
     {
         JavaUtils ju = JavaUtils.getJavaUtils();
@@ -441,7 +444,6 @@ public class JavaReflective extends Reflective
      * @param tpars  The set of type parameters to create mappings for
      * @param map    The map of name to type parameter
      */
-    @OnThread(Tag.FXPlatform)
     private void storeTparMappings(List<GenTypeDeclTpar> tpars, Map<String, ? super GenTypeDeclTpar> map)
     {
         for (GenTypeDeclTpar tpar : tpars) {

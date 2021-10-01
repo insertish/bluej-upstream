@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 2014,2015,2016,2017 Michael Kölling and John Rosenberg
+ Copyright (C) 2014,2015,2016,2017,2018 Michael Kölling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -32,10 +32,8 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import bluej.Config;
-import bluej.stride.framedjava.frames.CallFrame;
 import bluej.stride.framedjava.slots.StructuredSlot;
 import bluej.stride.generic.ExtensionDescription.ExtensionSource;
-import javafx.application.Platform;
 import javafx.beans.binding.When;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.ObjectProperty;
@@ -59,7 +57,6 @@ import javafx.scene.layout.Pane;
 import javafx.scene.layout.Region;
 import javafx.scene.paint.Color;
 import javafx.scene.paint.Paint;
-import javafx.scene.transform.Transform;
 
 import bluej.collect.StrideEditReason;
 import bluej.stride.framedjava.elements.CodeElement;
@@ -181,7 +178,8 @@ public abstract class Frame implements CursorFinder, FocusParent<FrameContentIte
      * frameEnabledProperty, or whether we are showing a preview of the enabled or disabled
      * state.
      */
-    private final ObjectProperty<FramePreviewEnabled> framePreviewEnableProperty = new SimpleObjectProperty(FramePreviewEnabled.PREVIEW_NONE);
+    private final ObjectProperty<FramePreviewEnabled> framePreviewEnableProperty =
+            new SimpleObjectProperty<>(FramePreviewEnabled.PREVIEW_NONE);
 
     /**
      * Tracks whether this frame is the source of a current drag operation.  If so,
@@ -646,7 +644,7 @@ public abstract class Frame implements CursorFinder, FocusParent<FrameContentIte
         // without making Frame (rather than subclasses) implement CodeFrame, which wouldn't
         // work because we'd lose the useful type parameter on CodeFrame
         if (this instanceof CodeFrame)
-            ((CodeFrame)this).setElementEnabled(enabled);
+            ((CodeFrame<?>)this).setElementEnabled(enabled);
         
         if (!enabled)
         {
@@ -1111,6 +1109,7 @@ public abstract class Frame implements CursorFinder, FocusParent<FrameContentIte
      * @param src The item in which delete was pressed
      * @return True if we deleted ourselves in response, otherwise false
      */
+    @OnThread(Tag.FXPlatform)
     public boolean deleteAtEnd(FrameContentItem srcRow, HeaderItem src)
     {
         return false;
@@ -1142,13 +1141,17 @@ public abstract class Frame implements CursorFinder, FocusParent<FrameContentIte
         return Stream.concat(Stream.of(this), getCanvases().flatMap(c -> c.getBlocksSubtype(Frame.class).stream()).flatMap(Frame::getAllFrames));
     }
 
-    /** Sets this frame to be fresh */
+    /**
+     * Sets this frame to be fresh
+     */
+    @OnThread(Tag.FXPlatform)
     public void markFresh()
     {
         fresh.set(true);
     }
 
     /** Sets this frame to be non-fresh */
+    @OnThread(Tag.FXPlatform)
     public void markNonFresh()
     {
         // Don't mark it non-fresh just because they've hit ctrl-space:
@@ -1156,9 +1159,11 @@ public abstract class Frame implements CursorFinder, FocusParent<FrameContentIte
             fresh.set(false);
     }
 
+    @OnThread(Tag.FXPlatform)
     protected boolean isShowingSuggestions()
     {
-        return getEditableSlots().anyMatch(s -> s instanceof StructuredSlot && ((StructuredSlot)s).isShowingSuggestions());
+        return getEditableSlots().anyMatch(s -> s instanceof StructuredSlot &&
+                ((StructuredSlot<?,?,?>)s).isShowingSuggestions());
     }
 
     /** Checks wheter this frame is fresh */
@@ -1594,14 +1599,6 @@ public abstract class Frame implements CursorFinder, FocusParent<FrameContentIte
         effort += getAllFrames().filter(f -> f != this).mapToInt(Frame::calculateEffort).sum();
         // We omit how much effort it was to add extensions, etc: this only needs to be a rough calculation.
         return effort;
-    }
-
-    /**
-     * Perform an action once this frame is actually added to a scene.
-     */
-    protected final void onceInScene(FXRunnable action)
-    {
-        JavaFXUtil.onceNotNull(getNode().sceneProperty(), s -> action.run());
     }
 
     /**

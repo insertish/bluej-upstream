@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2011,2013,2014,2015,2016,2017  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2011,2013,2014,2015,2016,2017,2018  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -23,20 +23,19 @@ package bluej.editor;
 
 import java.io.IOException;
 import java.util.List;
-import java.util.function.Consumer;
 
 import bluej.compiler.CompileType;
 import bluej.compiler.Diagnostic;
 import bluej.debugger.DebuggerThread;
-import bluej.editor.moe.PrintDialog.PrintSize;
+import bluej.prefmgr.PrefMgr.PrintSize;
 import bluej.editor.stride.FrameEditor;
 import bluej.parser.symtab.ClassInfo;
 import bluej.stride.framedjava.elements.CallElement;
 import bluej.stride.framedjava.elements.NormalMethodElement;
+import bluej.utility.javafx.FXPlatformConsumer;
 import bluej.utility.javafx.FXRunnable;
 import javafx.print.PrinterJob;
-import threadchecker.OnThread;
-import threadchecker.Tag;
+import javafx.scene.image.Image;
 
 
 /**
@@ -60,7 +59,6 @@ public interface Editor
      * 
      * @param vis  true to make the editor visible, or false to hide it.
      */
-    @OnThread(Tag.FXPlatform)
     void setEditorVisible(boolean vis);
 
     /**
@@ -88,7 +86,6 @@ public interface Editor
     /**
      * Close the editor window.
      */
-    @OnThread(Tag.FXPlatform)
     void close();
 
     /**
@@ -135,9 +132,7 @@ public interface Editor
      *  
      *  @param msg the message to display
      */
-    @OnThread(Tag.FXPlatform)
     public void writeMessage(String msg);
-
 
     /**
      * Remove the step mark (the mark that shows the current line when
@@ -157,13 +152,7 @@ public interface Editor
     void changeName(String title, String filename, String javaFilename, String docFileName);
 
     /**
-     * Notify that a dependency of this class has changed, and re-compilation
-     * is necessary for updated diagnostics.
-     */
-    void dependencyChanged();
-    
-    /**
-     * Set the "compiled" status
+     * Set the "compiled" status, as shown in the class diagram.
      * 
      * @param compiled    true if the class has been compiled
      */
@@ -210,7 +199,6 @@ public interface Editor
     /**
      * Returns an action which will print the contents of the editor
      */
-    @OnThread(Tag.FXPlatform)
     FXRunnable printTo(PrinterJob printerJob, PrintSize printSize, boolean printLineNumbers, boolean printBackground);
 
     /**
@@ -263,24 +251,19 @@ public interface Editor
     
     /**
      * Create a new method, or appending the contents if the method already exists
-     *   
-     * @param e extensions editor
+     *
      * @param method element
-     * @param after will be passed true if the method existed already, false otherwise (will always be run)
+     * @param after will be passed true if the method did not exist already and was inserted, false otherwise (will always be run)
      */
-    void insertAppendMethod(bluej.extensions.editor.Editor e, NormalMethodElement method, Consumer<Boolean> after);
+    void insertAppendMethod(NormalMethodElement method, FXPlatformConsumer<Boolean> after);
 
     /**
      * Insert a method call in constructor, if it does not already exists
-     *   
-     * @param e extensions editor
-     * @param className string
+     * 
      * @param methodCall element 
-     * @param after will be passed true if the call existed already
+     * @param after will be passed true if the call did not exist already and was inserted
      */
-    void insertMethodCallInConstructor(bluej.extensions.editor.Editor e, String className, CallElement methodCall, Consumer<Boolean> after);
-
-    void cancelFreshState();
+    void insertMethodCallInConstructor(String className, CallElement methodCall, FXPlatformConsumer<Boolean> after);
 
     /**
      * Focuses the method of the given name in the editor.  If the paramTypes are non-null
@@ -325,4 +308,10 @@ public interface Editor
      * Other imports which may overlap (e.g. java.awt.*, java.util.List) will not be altered.
      */
     void removeImports(List<String> importTargets);
+
+    /**
+     * Set the header image (in the tab header) for this editor
+     * @param image The image to use (any size).
+     */
+    void setHeaderImage(Image image);
 }

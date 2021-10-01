@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2015  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2015,2018  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -25,19 +25,8 @@ import bluej.utility.javafx.FXPlatformRunnable;
 import javafx.beans.binding.BooleanExpression;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.SimpleBooleanProperty;
-import org.fxmisc.richtext.model.EditableStyledDocument;
+import org.fxmisc.richtext.util.UndoUtils;
 import org.fxmisc.undo.UndoManager;
-import org.fxmisc.undo.UndoManagerFactory;
-import org.reactfx.EventStream;
-import org.reactfx.Guard;
-import threadchecker.OnThread;
-import threadchecker.Tag;
-
-import java.util.Optional;
-import java.util.function.BiFunction;
-import java.util.function.Consumer;
-import java.util.function.Function;
-
 
 /**
  * An undo/redo manager for the editor. A stack of compound edits is maintained;
@@ -46,19 +35,25 @@ import java.util.function.Function;
  * 
  * @author Davin McCall
  */
-public class MoeUndoManager implements UndoManagerFactory
+public class MoeUndoManager
 {
-    private final UndoManagerFactory delegate;
     private UndoManager undoManager;
-    private final MoeEditor editor;
     private BooleanProperty canUndo;
     private BooleanProperty canRedo;
 
-    public MoeUndoManager(MoeEditor editor)
+    public MoeUndoManager(MoeEditorPane editorPane)
     {
-        this.editor = editor;
-        delegate = UndoManagerFactory.fixedSizeHistoryFactory(100);
+        // We uses a plain text undo manager instead of a rich text one.
+        // This is to avoid making the undo manager to record the automatic
+        // styling that MoeEditor performs.
+        undoManager = UndoUtils.plainTextUndoManager(editorPane);
     }
+
+    public UndoManager getUndoManager()
+    {
+        return undoManager;
+    }
+
 
     /**
      * Runs the given edit action.  See comment within.
@@ -114,22 +109,6 @@ public class MoeUndoManager implements UndoManagerFactory
     public void redo()
     {
         undoManager.redo();
-    }
-
-    @Override
-    @OnThread(value = Tag.FXPlatform, ignoreParent = true)
-    public <C> UndoManager create(EventStream<C> eventStream, Function<? super C, ? extends C> function, Consumer<C> consumer)
-    {
-        undoManager = delegate.create(eventStream, function, consumer);
-        return undoManager;
-    }
-
-    @Override
-    @OnThread(value = Tag.FXPlatform, ignoreParent = true)
-    public <C> UndoManager create(EventStream<C> eventStream, Function<? super C, ? extends C> function, Consumer<C> consumer, BiFunction<C, C, Optional<C>> biFunction)
-    {
-        undoManager = delegate.create(eventStream, function, consumer, biFunction);
-        return undoManager;
     }
 
     public void forgetHistory()

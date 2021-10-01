@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program.
- Copyright (C) 1999-2009,2014,2016,2017  Michael Kolling and John Rosenberg
+ Copyright (C) 1999-2009,2014,2016,2017,2018  Michael Kolling and John Rosenberg
 
  This program is free software; you can redistribute it and/or
  modify it under the terms of the GNU General Public License
@@ -42,7 +42,6 @@ import javafx.scene.control.ListView;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
-import javafx.stage.Window;
 
 import bluej.Config;
 import bluej.groupwork.actions.UpdateAction;
@@ -57,7 +56,6 @@ import bluej.groupwork.TeamworkCommand;
 import bluej.groupwork.TeamworkCommandResult;
 import bluej.groupwork.UpdateFilter;
 import bluej.pkgmgr.BlueJPackageFile;
-import bluej.pkgmgr.PkgMgrFrame;
 import bluej.pkgmgr.Project;
 import bluej.utility.DialogManager;
 import bluej.utility.FXWorker;
@@ -81,6 +79,7 @@ public class UpdateFilesFrame extends FXCustomizedDialog<Void>
     private CheckBox includeLayoutCheckbox;
     private ActivityIndicator progressBar;
     private UpdateAction updateAction;
+    private Button updateButton;
     private UpdateWorker updateWorker;
 
     private Project project;
@@ -98,21 +97,35 @@ public class UpdateFilesFrame extends FXCustomizedDialog<Void>
 
     private final boolean isDVCS;
 
-    public UpdateFilesFrame(Project project, Window owner)
+    /**
+     * Constructor for UpdateFilesFrame.
+     */
+    public UpdateFilesFrame(Project project)
     {
-        super(owner, "team.update.title", "team-update-files");
+        super(null, "team.update.title", "team-update-files");
         this.project = project;
+        updateAction.useButton(project, updateButton);
         isDVCS = project.getTeamSettingsController().isDVCS();
         buildUI();
-        prepareButtonPane();
-        DialogManager.centreDialog(this);
     }
 
     @Override
     protected Node wrapButtonBar(Node original)
     {
-        //TODO move buttons to bottom left
-        return super.wrapButtonBar(original);
+        updateAction = new UpdateAction(this);
+        updateButton = new Button();
+        // Note that we can't connect the button and action yet as we are called by the
+        // superclass constructor, and project is not set yet.
+        updateButton.requestFocus();
+        
+        progressBar = new ActivityIndicator();
+        progressBar.setRunning(false);
+        
+        HBox updateButtonPane = new HBox();
+        JavaFXUtil.addStyleClass(updateButtonPane, "button-hbox");
+        updateButtonPane.getChildren().addAll(progressBar, updateButton, original);
+        
+        return updateButtonPane;
     }
 
     /**
@@ -121,30 +134,21 @@ public class UpdateFilesFrame extends FXCustomizedDialog<Void>
     private void buildUI()
     {
         VBox mainPane = new VBox();
-        JavaFXUtil.addStyleClass(mainPane, "main-pane");/////
+        JavaFXUtil.addStyleClass(mainPane, "main-pane");
 
         updateListModel = FXCollections.observableArrayList();
         Label updateFilesLabel = new Label(Config.getString("team.update.files"));
         ListView<UpdateStatus> updateFiles = new ListView<>(updateListModel);
         if (isDVCS) {
-            updateFiles.setCellFactory(param -> new FileRendererCell(project, true));//
+            updateFiles.setCellFactory(param -> new FileRendererCell(project, true));
         } else {
-            updateFiles.setCellFactory(param -> new FileRendererCell(project));//
+            updateFiles.setCellFactory(param -> new FileRendererCell(project));
         }
-        updateFiles.setDisable(true);
+        updateFiles.setEditable(false);
 
         ScrollPane updateFileScrollPane = new ScrollPane(updateFiles);
         updateFileScrollPane.setFitToWidth(true);
         updateFileScrollPane.setFitToHeight(true);
-
-
-        updateAction = new UpdateAction(this);
-        Button updateButton = new Button();
-        updateAction.useButton(PkgMgrFrame.getMostRecent(), updateButton);
-        updateButton.requestFocus();
-
-        progressBar = new ActivityIndicator();
-        progressBar.setRunning(false);
 
         includeLayoutCheckbox = new CheckBox(Config.getString("team.update.includelayout"));
         includeLayoutCheckbox.setDisable(true);
@@ -152,27 +156,20 @@ public class UpdateFilesFrame extends FXCustomizedDialog<Void>
             CheckBox layoutCheck = (CheckBox)event.getSource();
             includeLayout = layoutCheck.isSelected();
             resetForcedFiles();
-            if (includeLayout) {
+            if (includeLayout)
+            {
                 addModifiedLayouts();
-                if(updateButton.isDisabled()) {
-                    updateAction.setEnabled(true);
-                }
             }
-            // unselected
-            else {
+            else
+            {
                 removeModifiedLayouts();
-                if(isUpdateListEmpty()) {
-                    updateAction.setEnabled(false);
-                }
             }
         });
 
-        HBox updateButtonPane = new HBox();
-        JavaFXUtil.addStyleClass(updateButtonPane, "button-hbox");
-        updateButtonPane.getChildren().addAll(progressBar, updateButton);
-
-        mainPane.getChildren().addAll(updateFilesLabel, updateFileScrollPane, includeLayoutCheckbox, updateButtonPane);
+        mainPane.getChildren().addAll(updateFilesLabel, updateFileScrollPane, includeLayoutCheckbox);
         getDialogPane().setContent(mainPane);
+        
+        prepareButtonPane();
     }
 
     /**
@@ -181,7 +178,7 @@ public class UpdateFilesFrame extends FXCustomizedDialog<Void>
      */
     private void prepareButtonPane()
     {
-        getDialogPane().getButtonTypes().setAll(ButtonType.CLOSE);
+        getDialogPane().getButtonTypes().add(ButtonType.CANCEL);
         this.setOnCloseRequest(event -> {
             if (updateWorker != null) {
                 updateWorker.abort();
@@ -234,47 +231,44 @@ public class UpdateFilesFrame extends FXCustomizedDialog<Void>
         }
     }
 
-    public void reset()
-    {
-        updateListModel.clear();
-    }
-
     private void removeModifiedLayouts()
     {
-        // remove modified layouts from list of files shown for commit
-        updateListModel.removeAll(changedLayoutFiles);
+        // remove modified layouts from list of files shown for commit:
+        updateListModel.removeIf(updateStatus ->
+            changedLayoutFiles.stream().anyMatch(statusInfo ->
+                updateStatus.infoStatus != null &&
+                        statusInfo.getFile().equals(updateStatus.infoStatus.getFile())
+            )
+        );
 
-        if(updateListModel.isEmpty()) {
-            updateListModel.add(noFilesToUpdate);
+        if(updateListModel.isEmpty())
+        {
+            if (pullWithNoChanges)
+            {
+                updateListModel.add(needUpdate);
+            }
+            else
+            {
+                updateListModel.add(noFilesToUpdate);
+                updateAction.setEnabled(false);
+            }
         }
     }
 
-    private boolean isUpdateListEmpty()
-    {
-        return updateListModel.isEmpty() || updateListModel.contains(noFilesToUpdate);
-    }
-
     /**
-     * Add the modified layouts to the displayed list of files to be updated.
+     * Add the modified layouts to the displayed list of files to be updated. Should only be
+     * called if there is at least one modified layout file.
      */
     private void addModifiedLayouts()
     {
-        if(updateListModel.contains(noFilesToUpdate)) {
-            updateListModel.remove(noFilesToUpdate);
+        updateListModel.remove(noFilesToUpdate);
+        updateListModel.remove(needUpdate);
+        updateAction.setEnabled(true);
+        
+        for (TeamStatusInfo statusInfo : changedLayoutFiles)
+        {
+            updateListModel.add(new UpdateStatus(statusInfo));
         }
-    }
-
-    /**
-     * Get a set (of File) containing the layout files which need to be updated.
-     */
-    public Set<File> getChangedLayoutFiles()
-    {
-        return changedLayoutFiles.stream().map(TeamStatusInfo::getFile).collect(Collectors.toSet());
-    }
-
-    public boolean includeLayout()
-    {
-        return includeLayoutCheckbox != null && includeLayoutCheckbox.isSelected();
     }
 
     /**
@@ -291,20 +285,6 @@ public class UpdateFilesFrame extends FXCustomizedDialog<Void>
     public void stopProgress()
     {
         progressBar.setRunning(false);
-    }
-
-    public Project getProject()
-    {
-        return project;
-    }
-
-    /**
-     * The layout has changed. Enable the "include layout" checkbox, etc.
-     */
-    private void setLayoutChanged()
-    {
-        includeLayoutCheckbox.setDisable(false);
-        includeLayoutCheckbox.setSelected(includeLayout);
     }
 
     public void disableLayoutCheck()
@@ -326,8 +306,8 @@ public class UpdateFilesFrame extends FXCustomizedDialog<Void>
     }
 
     /**
-     * Inner class to do the actual cvs status check to populate commit dialog
-     * to ensure that the UI is not blocked during remote call
+     * Worker to do the actual status check (to populate commit dialog) in the background, to
+     * avoid blocking the UI.
      */
     class UpdateWorker extends FXWorker implements StatusListener
     {
@@ -427,15 +407,22 @@ public class UpdateFilesFrame extends FXCustomizedDialog<Void>
                     updateAction.setFilesToUpdate(updateFiles);
                     resetForcedFiles();
 
-                    if (includeLayout && ! changedLayoutFiles.isEmpty()) {
-                        addModifiedLayouts();
+                    if (includeLayout && ! changedLayoutFiles.isEmpty())
+                    {
+                        for (TeamStatusInfo statusInfo : changedLayoutFiles)
+                        {
+                            updateListModel.add(new UpdateStatus(statusInfo));
+                        }
                     }
 
-                    if(updateListModel.isEmpty() && !pullWithNoChanges) {
+                    if(updateListModel.isEmpty() && !pullWithNoChanges)
+                    {
                         updateListModel.add(noFilesToUpdate);
                     }
-                    else {
-                        if (isDVCS && pullWithNoChanges && updateListModel.isEmpty()) {
+                    else
+                    {
+                        if (isDVCS && pullWithNoChanges && updateListModel.isEmpty())
+                        {
                             updateListModel.add(needUpdate);
                         }
                         updateAction.setEnabled(true);
@@ -443,7 +430,7 @@ public class UpdateFilesFrame extends FXCustomizedDialog<Void>
                 }
             }
         }
-
+        
         /**
          * Go through the status list, and figure out which files to update, and
          * which to force update.
@@ -456,11 +443,31 @@ public class UpdateFilesFrame extends FXCustomizedDialog<Void>
          */
         private void getUpdateFileSet(List<TeamStatusInfo> info, Set<File> filesToUpdate, Set<File> conflicts, Set<File> modifiedLayoutFiles)
         {
+            if (isDVCS)
+            {
+                getUpdateFileSetDist(info, filesToUpdate, conflicts, modifiedLayoutFiles);
+            }
+            else
+            {
+                getUpdateFileSetNondist(info, filesToUpdate, conflicts, modifiedLayoutFiles);
+            }
+
+            if (! changedLayoutFiles.isEmpty()) {
+                includeLayoutCheckbox.setDisable(false);
+                includeLayoutCheckbox.setSelected(includeLayout);
+            }
+        }
+        
+        /**
+         * Go through file statuses and determine which files will be updated (non-distributed version control).
+         */
+        private void getUpdateFileSetNondist(List<TeamStatusInfo> info, Set<File> filesToUpdate,
+                Set<File> conflicts, Set<File> modifiedLayoutFiles)
+        {
             UpdateFilter filter = new UpdateFilter();
             TeamViewFilter viewFilter = new TeamViewFilter();
             for (TeamStatusInfo statusInfo : info) {
-                //update must look in the remoteStatus in a DVCS. if not DVCS, look into the local status.
-                Status status = statusInfo.getStatus(!isDVCS);
+                Status status = statusInfo.getStatus(true);
                 if (filter.accept(statusInfo)) {
                     if (!BlueJPackageFile.isPackageFileName(statusInfo.getFile().getName())) {
                         updateListModel.add(new UpdateStatus(statusInfo));
@@ -501,9 +508,44 @@ public class UpdateFilesFrame extends FXCustomizedDialog<Void>
                     }
                 }
             }
+        }
 
-            if (! changedLayoutFiles.isEmpty()) {
-                setLayoutChanged();
+        /**
+         * Go through file statuses and determine which files will be updated (distributed version control).
+         */
+        private void getUpdateFileSetDist(List<TeamStatusInfo> info, Set<File> filesToUpdate,
+                Set<File> conflicts, Set<File> modifiedLayoutFiles)
+        {
+            UpdateFilter filter = new UpdateFilter();
+            TeamViewFilter viewFilter = new TeamViewFilter();
+            for (TeamStatusInfo statusInfo : info) {
+                Status status = statusInfo.getStatus(false);
+                if (filter.acceptDist(status)) {
+                    if (! BlueJPackageFile.isPackageFileName(statusInfo.getFile().getName()))
+                    {
+                        updateListModel.add(new UpdateStatus(statusInfo));
+                        filesToUpdate.add(statusInfo.getFile());
+                    }
+                    else {
+                        if (! viewFilter.accept(statusInfo)) {
+                            // If the file should not be viewed, just ignore it.
+                        }
+                        else if (status != Status.NEEDS_UPDATE && status != Status.NEEDS_MERGE)
+                        {
+                            // The package file is new or removed. There is no
+                            // option not to include it in the update.
+                            updateListModel.add(new UpdateStatus(statusInfo));
+                            forcedLayoutFiles.add(statusInfo.getFile());
+                        }
+                        else
+                        {
+                            // add file to list of layout files that may optionally be updated:
+                            modifiedLayoutFiles.add(statusInfo.getFile());
+                            // keep track of StatusInfo objects representing changed diagrams
+                            changedLayoutFiles.add(statusInfo);
+                        }
+                    }
+                }
             }
         }
     }

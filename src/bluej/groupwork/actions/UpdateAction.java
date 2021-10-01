@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2010,2012,2014,2016,2017  Michael Kolling and John Rosenberg
+ Copyright (C) 1999-2010,2012,2014,2016,2017,2018  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -48,11 +48,11 @@ import bluej.pkgmgr.target.ClassTarget;
 import bluej.pkgmgr.target.PackageTarget;
 import bluej.pkgmgr.target.ReadmeTarget;
 import bluej.pkgmgr.target.Target;
+import bluej.utility.Debug;
 import bluej.utility.DialogManager;
 import bluej.utility.FXWorker;
 import bluej.utility.JavaNames;
-
-import javafx.application.Platform;
+import javafx.stage.Window;
 import threadchecker.OnThread;
 import threadchecker.Tag;
 
@@ -67,7 +67,6 @@ import threadchecker.Tag;
 @OnThread(Tag.FXPlatform)
 public class UpdateAction extends TeamAction
 {
-    private Project project;
     private boolean includeLayout = true;
     private UpdateFilesFrame updateFrame;
     private UpdateWorker worker;
@@ -113,17 +112,13 @@ public class UpdateAction extends TeamAction
     }
 
     @Override
-    protected void actionPerformed(PkgMgrFrame pmf)
+    protected void actionPerformed(Project project)
     {
-        project = updateFrame.getProject();
+        updateFrame.startProgress();
+        PkgMgrFrame.displayMessage(project, Config.getString("team.update.statusMessage"));
 
-        if (project != null) {
-            updateFrame.startProgress();
-            PkgMgrFrame.displayMessage(project, Config.getString("team.update.statusMessage"));
-
-            worker = new UpdateWorker(project, statusHandle, filesToUpdate, filesToForceUpdate);
-            worker.start();
-        }
+        worker = new UpdateWorker(project, statusHandle, filesToUpdate, filesToForceUpdate);
+        worker.start();
         updateFrame.disableLayoutCheck();
     }
 
@@ -140,6 +135,7 @@ public class UpdateAction extends TeamAction
 
     private class UpdateWorker extends FXWorker implements UpdateListener
     {
+        private Project project;
         private TeamworkCommand command;
         private TeamworkCommandResult result;
         private boolean aborted;
@@ -147,6 +143,7 @@ public class UpdateAction extends TeamAction
         public UpdateWorker(Project project, StatusHandle statusHandle,
                             Set<File> filesToUpdate, Set<File> filesToForceUpdate)
         {
+            this.project = project;
             command = statusHandle.updateTo(this, filesToUpdate, filesToForceUpdate);
         }
 
@@ -161,15 +158,14 @@ public class UpdateAction extends TeamAction
         /* (non-Javadoc)
          * @see bluej.groupwork.UpdateListener#fileAdded(java.io.File)
          */
+        @Override
         @OnThread(Tag.FXPlatform)
-        public void fileAdded(final File f)
+        public void fileModified(final File f)
         {
-            project.prepareCreateDir(f.getParentFile());
-
             String fileName = f.getName();
-            if (! fileName.endsWith(".java") &&
-                    ! fileName.endsWith(".class") &&
-                    ! BlueJPackageFile.isPackageFileName(fileName)) {
+            boolean isPkgFile = BlueJPackageFile.isPackageFileName(fileName);
+            if (! fileName.endsWith(".java") && ! fileName.endsWith(".class") && ! isPkgFile)
+            {
                 return;
             }
 
@@ -179,41 +175,63 @@ public class UpdateAction extends TeamAction
                 return;
             }
 
-            if (BlueJPackageFile.isPackageFileName(fileName)) {
-                if (packageName.length() > 0) {
+            if (isPkgFile)
+            {
+                if (packageName.length() > 0)
+                {
                     // If we now have a new package, we might need to add it
                     // as a target in an existing package
                     String parentPackageName = JavaNames.getPrefix(packageName);
                     Package parentPackage = project.getCachedPackage(parentPackageName);
-                    if (parentPackage != null) {
+                    if (parentPackage != null)
+                    {
                         Target t = parentPackage.addPackage(JavaNames.getBase(packageName));
                         parentPackage.positionNewTarget(t);
+                    }
+                }
+                
+                Package filePackage = project.getCachedPackage(packageName);
+                if (filePackage != null && includeLayout)
+                {
+                    // There's a pre-existing package, so we assume this is a modification:
+                    try
+                    {
+                        filePackage.reReadGraphLayout();
+                    }
+                    catch (IOException ioe)
+                    {
+                        Debug.reportError("Error re-reading package file (team update)", ioe);
                     }
                 }
             }
             else {
                 int n = fileName.lastIndexOf(".");
                 String name = fileName.substring(0, n);
-                if (! JavaNames.isIdentifier(name)) {
+                if (! JavaNames.isIdentifier(name))
+                {
                     return;
                 }
 
                 Package pkg = project.getCachedPackage(packageName);
-                if (pkg == null) {
+                if (pkg == null)
+                {
                     return;
                 }
+                
                 Target t = pkg.getTarget(name);
-                if (t != null && ! (t instanceof ClassTarget)) {
-                    return;
-                }
-
-                ClassTarget ct = (ClassTarget) t;
-                if (ct == null) {
-                    ct = pkg.addClass(name);
+                if (t == null)
+                {
+                    // Addition of a new class:
+                    ClassTarget ct = pkg.addClass(name);
                     pkg.positionNewTarget(ct);
                     DataCollector.addClass(pkg, ct);
+                    return;
                 }
-                ct.reload();
+                
+                if (t instanceof ClassTarget)
+                {
+                    ((ClassTarget) t).reload();
+                }
             }
         }
 
@@ -274,73 +292,6 @@ public class UpdateAction extends TeamAction
         }
 
         /* (non-Javadoc)
-         * @see bluej.groupwork.UpdateListener#fileUpdated(java.io.File)
-         */
-        @OnThread(Tag.FXPlatform)
-        public void fileUpdated(final File f)
-        {
-            String fileName = f.getName();
-            if (!fileName.endsWith(".java") &&
-                    !fileName.endsWith(".class") &&
-                    !BlueJPackageFile.isPackageFileName(fileName))
-            {
-                return;
-            }
-
-            // First find out the package name...
-            String packageName = project.getPackageForFile(f);
-            if (packageName == null)
-            {
-                return;
-            }
-            Package pkg = project.getCachedPackage(packageName);
-            if (pkg == null)
-            {
-                return;
-            }
-
-            if (BlueJPackageFile.isPackageFileName(fileName))
-            {
-                try
-                {
-                    if (includeLayout)
-                    {
-                        pkg.reReadGraphLayout();
-                    }
-                }
-                catch (IOException ioe)
-                {
-                    ioe.printStackTrace();
-                }
-            }
-            else
-            {
-                int n = fileName.lastIndexOf(".");
-                String name = fileName.substring(0, n);
-                Target t = pkg.getTarget(name);
-
-
-                if (t == null && f.exists())
-                {
-                    //create new target.
-                    ClassTarget ct = pkg.addClass(name);
-                    pkg.positionNewTarget(ct);
-                    DataCollector.addClass(pkg, ct);
-                    ct.reload();
-                    return;
-                }
-
-                if (!(t instanceof ClassTarget))
-                {
-                    return;
-                }
-
-                ClassTarget ct = (ClassTarget) t;
-                ct.reload();
-            }
-        }
-
-        /* (non-Javadoc)
          * @see bluej.groupwork.UpdateListener#dirRemoved(java.io.File)
          */
         @OnThread(Tag.FXPlatform)
@@ -357,15 +308,11 @@ public class UpdateAction extends TeamAction
         @OnThread(Tag.FXPlatform)
         public void handleConflicts(final UpdateResults updateServerResponse)
         {
-            if (updateServerResponse == null) {
+            if (updateServerResponse.getConflicts().isEmpty()
+                    && updateServerResponse.getBinaryConflicts().isEmpty())
+            {
                 return;
             }
-
-            if (updateServerResponse.getConflicts().size() <= 0
-                    && updateServerResponse.getBinaryConflicts().size() <= 0) {
-                return;
-            }
-
 
             /** A list of files to replace with repository version */
             Set<File> filesToOverride = new HashSet<>();
@@ -398,8 +345,7 @@ public class UpdateAction extends TeamAction
             List<String> nonBlueJConflicts = new LinkedList<String>();
             List<Target> targets = new LinkedList<Target>();
 
-            for (Iterator<File> i = updateServerResponse.getConflicts().iterator();
-                 i.hasNext(); )
+            for (Iterator<File> i = updateServerResponse.getConflicts().iterator(); i.hasNext(); )
             {
                 File file = i.next();
 
@@ -443,6 +389,11 @@ public class UpdateAction extends TeamAction
                     {
                         blueJconflicts.add(fileName);
                         targets.add(target);
+                        // Force the package frame open, if it isn't already:
+                        if (target.getPackage().getUI() == null)
+                        {
+                            PkgMgrFrame.createFrame(target.getPackage(), PkgMgrFrame.getMostRecent());
+                        }
                     }
                 }
             }
@@ -451,10 +402,18 @@ public class UpdateAction extends TeamAction
             {
                 project.clearAllSelections();
                 project.selectTargetsInGraphs(targets);
+                
+                // Show the conflicts dialog as a child of the first appropriate PkgMgr frame. We
+                // can't make it a child of the update frame because that will close.
+                Window stage = targets.isEmpty() ? null : targets.get(0).getPackage().getUI().getStage();
 
-                ConflictsDialog conflictsDialog = new ConflictsDialog(project, updateFrame.asWindow(),
+                ConflictsDialog conflictsDialog = new ConflictsDialog(project, stage,
                         blueJconflicts, nonBlueJConflicts);
                 conflictsDialog.show();
+            }
+            else if (updateServerResponse.mergeCommitNeeded())
+            {
+                DialogManager.showMessageFX(null, "team-merge-commit-needed");
             }
         }
 
@@ -528,8 +487,6 @@ public class UpdateAction extends TeamAction
 
     /**
      * Strip the dot-suffix from a file name.
-     * @param filename
-     * @return
      */
     private String filenameToTargetIdentifier(String filename)
     {

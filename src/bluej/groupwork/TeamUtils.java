@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2014,2016  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2014,2016,2018  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -23,11 +23,7 @@ package bluej.groupwork;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 
 import javafx.stage.Window;
 
@@ -36,6 +32,9 @@ import threadchecker.Tag;
 import bluej.utility.DialogManager;
 import bluej.utility.FileUtility;
 
+/**
+ * Utilities for teamwork functionality.
+ */
 public class TeamUtils
 {
     /**
@@ -43,19 +42,20 @@ public class TeamUtils
      * indicates an error, then display an error dialog.
      * 
      * Call on the AWT event handling thread.
-     * 
-     * @param basicServerResponse  The response to handle
+     *
      */
     @OnThread(Tag.FXPlatform)
     public static void handleServerResponseFX(TeamworkCommandResult result, final Window window)
     {
-        if (result != null) {
-            if (result.wasAuthFailure()) {
+        if (result != null)
+        {
+            if (result.wasAuthFailure())
+            {
                 DialogManager.showErrorFX(window, "team-authentication-problem");
             }
-            else if (result.isError() && ! result.wasAborted()) {
-                String message = result.getErrorMessage();
-                DialogManager.showErrorTextFX(window, message);
+            else if (result.isError() && ! result.wasAborted())
+            {
+                DialogManager.showErrorTextFX(window, result.getErrorMessage());
             }
         }
     }

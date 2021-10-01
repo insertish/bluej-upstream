@@ -21,10 +21,6 @@
  */
 package threadchecker;
 
-import java.io.BufferedOutputStream;
-import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
-import java.io.PrintStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -203,6 +199,7 @@ class TCScanner extends TreePathScanner<Void, Void>
         methodAnns.add(new MethodRef("javafx.embed.swing.SwingNode", "getContent", new LocatedTag(Tag.Any, false, false, "<SwingNode>")));
 
         methodAnns.add(new MethodRef("javafx.application.Application", "launch", new LocatedTag(Tag.Any, false, false, "<FX launch>")));
+        methodAnns.add(new MethodRef("javafx.application.Application", "start", new LocatedTag(Tag.FXPlatform, false, false, "<FX application>")));
         methodAnns.add(new MethodRef("javafx.animation.AnimationTimer", "handle", new LocatedTag(Tag.FXPlatform, false, false, "<AnimationTimer>")));
         
         // This one isn't actually true!  But it's used during printing so let's live:
@@ -260,10 +257,10 @@ class TCScanner extends TreePathScanner<Void, Void>
         classAnns.put("java.awt.Desktop", new LocatedTag(Tag.Swing, false, true, "<AWT Desktop>"));
         
         // Threads always run in their own unique thread, of course:
-        // Could do: methodAnns.add(new MethodRef("java.lang.Thread", "run", new LocatedTag(Tag.Unique, false, true, "<Thread.run>")));
+        // Could do: methodAnns.add(new MethodRef("java.lang.Thread", "run", new LocatedTag(Tag.Worker, false, true, "<Thread.run>")));
         // If we use class annotation with applyToSubclasses, it solves a lot of annoyances where inner class Threads get their package's tags:
-        classAnns.put("java.lang.Thread", new LocatedTag(Tag.Unique, true, true, "<Thread>"));
-        methodAnns.add(new MethodRef("java.lang.Thread", "run", new LocatedTag(Tag.Unique, true, true, "<Thread>")));
+        classAnns.put("java.lang.Thread", new LocatedTag(Tag.Worker, true, true, "<Thread>"));
+        methodAnns.add(new MethodRef("java.lang.Thread", "run", new LocatedTag(Tag.Worker, true, true, "<Thread>")));
         methodAnns.add(new MethodRef("java.lang.Thread", "setPriority", new LocatedTag(Tag.Any, false, true, "<Thread>")));
         methodAnns.add(new MethodRef("java.lang.Thread", "getPriority", new LocatedTag(Tag.Any, false, true, "<Thread>")));
         methodAnns.add(new MethodRef("java.lang.Thread", "start", new LocatedTag(Tag.Any, false, true, "<Thread>")));
@@ -277,6 +274,7 @@ class TCScanner extends TreePathScanner<Void, Void>
         methodAnns.add(new MethodRef("java.lang.Thread", "interrupted", new LocatedTag(Tag.Any, false, true, "<Thread>")));
         methodAnns.add(new MethodRef("java.lang.Thread", "yield", new LocatedTag(Tag.Any, false, true, "<Thread>")));
         methodAnns.add(new MethodRef("java.lang.Thread", "setDaemon", new LocatedTag(Tag.Any, false, true, "<Thread>")));
+        methodAnns.add(new MethodRef("java.lang.Thread", "setName", new LocatedTag(Tag.Any, false, true, "<Thread>")));
         methodAnns.add(new MethodRef("java.lang.Thread", "isAlive", new LocatedTag(Tag.Any, false, true, "<Thread>")));
         methodAnns.add(new MethodRef("java.lang.Thread", "<init>", new LocatedTag(Tag.Any, false, true, "<Thread>")));
         
@@ -371,16 +369,24 @@ class TCScanner extends TreePathScanner<Void, Void>
     public Void visitMethod(MethodTree method, Void arg1)
     {
         TypeMirror methodType = trees.getTypeMirror(getCurrentPath());
-        Collection<? extends TypeMirror> superTypes = allSuperTypes(trees.getTypeMirror(typeScopeStack.getLast().path));
+        Collection<? extends TypeMirror> superTypes = allSuperTypes(trees.getTypeMirror(typeScopeStack.getLast().path), method);
         
-        // Check if this method declares an annotation absent from
-        // its parent, and warn that it can be circumvented:
-        checkAgainstOverridden(method.getName(), getSourceTag(method, () -> cu.getPackageName().toString() + typeScopeStack.stream().limit(typeScopeStack.size()).map(TCScanner::typeToName).collect(Collectors.joining("."))), methodType, superTypes, false, method);
-         
-        addCur(methodScopeStack, method);
-        Void r = super.visitMethod(method, arg1);
-        this.methodScopeStack.removeLast();
-        return r;
+        // Skip methods with @SuppressWarnings("threadchecker")
+        if (!suppressesChecker(method))
+        {
+            // Check if this method declares an annotation absent from
+            // its parent, and warn that it can be circumvented:
+            checkAgainstOverridden(method.getName(), getSourceTag(method, () -> cu.getPackageName().toString() + typeScopeStack.stream().limit(typeScopeStack.size()).map(TCScanner::typeToName).collect(Collectors.joining("."))), methodType, superTypes, false, method);
+
+            addCur(methodScopeStack, method);
+            Void r = super.visitMethod(method, arg1);
+            this.methodScopeStack.removeLast();
+            return r;
+        }
+        else
+        {
+            return null;
+        }
     }
 
     /**
@@ -667,7 +673,7 @@ class TCScanner extends TreePathScanner<Void, Void>
             return defaultReturn;
         }
         
-        Collection<? extends TypeMirror> superTypes = allSuperTypes(trees.getTypeMirror(typeScopeStack.getLast().path));
+        Collection<? extends TypeMirror> superTypes = allSuperTypes(trees.getTypeMirror(typeScopeStack.getLast().path), lhs);
         
         LocatedTag invokedOnTag = null;
         
@@ -786,7 +792,7 @@ class TCScanner extends TreePathScanner<Void, Void>
                 final TypeMirror invokeTargetTypeFinal = invokeTargetType;
                 LocatedTag directTag = getRemoteTag(e, () -> invokeTargetTypeFinal.toString() + "." + e.getSimpleName().toString(), errorLocation);
             
-                Collection<? extends TypeMirror> invokeTargetSuperTypes = allSuperTypes(invokeTargetType);
+                Collection<? extends TypeMirror> invokeTargetSuperTypes = allSuperTypes(invokeTargetType, lhs);
             
                 LocatedTag overridden = checkAgainstOverridden(name, directTag, e.asType(), invokeTargetSuperTypes, true, errorLocation);
              
@@ -933,8 +939,11 @@ class TCScanner extends TreePathScanner<Void, Void>
             methodAnn = getSourceTag(surroundingMethod, () -> cu.getPackageName().toString() + typeScopeStack.stream().limit(typeScopeStack.size() - 1).map(TCScanner::typeToName).collect(Collectors.joining(".")));
             classAnn = getSourceTag(typeScopeStack.get(typeScopeStack.size() - 2).item, () -> cu.getPackageName().toString() + typeScopeStack.stream().limit(typeScopeStack.size() - 2).map(TCScanner::typeToName).collect(Collectors.joining(".")));
             knownMethodAnn = methodAnns.stream()
-                    .filter(m -> allSuperTypes(trees.getTypeMirror(typeScopeStack.get(typeScopeStack.size() - 2).path)).stream().
-                                   anyMatch(ty -> m.matches(ty, methodName, methodType)))
+                    .filter(m -> allSuperTypes(
+                            trees.getTypeMirror(typeScopeStack.get(typeScopeStack.size() - 2).path),
+                            errorLocation)
+                                .stream()
+                                .anyMatch(ty -> m.matches(ty, methodName, methodType)))
                     .map(m -> m.tag)
                     .findFirst().orElse(null);
         }
@@ -946,8 +955,8 @@ class TCScanner extends TreePathScanner<Void, Void>
             methodAnn = getSourceTag(methodScopeStack.getLast().item, () -> cu.getPackageName().toString() + typeScopeStack.stream().limit(typeScopeStack.size()).map(TCScanner::typeToName).collect(Collectors.joining(".")));
             classAnn = getSourceTag(typeScopeStack.getLast().item, () -> cu.getPackageName().toString() + typeScopeStack.stream().limit(typeScopeStack.size() - 1).map(TCScanner::typeToName).collect(Collectors.joining(".")));
             knownMethodAnn = methodAnns.stream()
-                    .filter(m -> allSuperTypes(trees.getTypeMirror(typeScopeStack.getLast().path)).stream().
-                                   anyMatch(ty -> m.matches(ty, methodName, methodType)))
+                    .filter(m -> allSuperTypes(trees.getTypeMirror(typeScopeStack.getLast().path),
+                            errorLocation).stream().anyMatch(ty -> m.matches(ty, methodName, methodType)))
                     .map(m -> m.tag)
                     .findFirst().orElse(null);
         }
@@ -1066,12 +1075,22 @@ class TCScanner extends TreePathScanner<Void, Void>
     }
 
     // Gets all supertypes (including interfaces) of the given type:
-    private Collection<? extends TypeMirror> allSuperTypes(TypeMirror orig)
+    private Collection<? extends TypeMirror> allSuperTypes(TypeMirror orig, Tree errorLocation)
     {
         if (orig == null)
+        {
             return Collections.emptyList();
+        }
+        
+        LocatedTag ttag = getRemoteTag(types.asElement(orig), () -> orig.toString(), errorLocation);
+        if (ttag != null && ttag.ignoreParent())
+        {
+            return Collections.emptyList();
+        }
+        
         List<? extends TypeMirror> supers = types.directSupertypes(orig);
-        return Stream.concat(supers.stream(), supers.stream().flatMap(t -> allSuperTypes(t).stream())).collect(Collectors.toList());
+        return Stream.concat(supers.stream(), supers.stream()
+                .flatMap(t -> allSuperTypes(t, errorLocation).stream())).collect(Collectors.toList());
     }
 
     /**
@@ -1175,6 +1194,20 @@ class TCScanner extends TreePathScanner<Void, Void>
     private LocatedTag getSourceTag(MethodTree t, Supplier<String> enclosingStem)
     {
         return checkSingle(t.getModifiers().getAnnotations().stream().map(a -> getSourceTag(a, () -> enclosingStem.get() + "." + t.getName().toString() + " method")), t);
+    }
+
+    /**
+     * Is the method tagged as @SuppressWarnings, where one of the strings is "threadchecker"?
+     */
+    private boolean suppressesChecker(MethodTree t)
+    {
+        return t.getModifiers().getAnnotations().stream().anyMatch(a -> {
+            if (a.getAnnotationType().toString().equals("SuppressWarnings"))
+            {
+                return a.getArguments().stream().map(Object::toString).anyMatch(c -> c.contains("threadchecker"));
+            }
+            return false;
+        });
     }
     
     /**
@@ -1438,28 +1471,10 @@ class TCScanner extends TreePathScanner<Void, Void>
                 .map(arg -> trees.getTypeMirror(new TreePath(getCurrentPath(), arg)))
                 .collect(Collectors.toList());
         
-        Tree parent = getCurrentPath().getParentPath().getLeaf();
-        // If we have a lambda type, and match it,
-        // then we must be making an anonymous inner class
-        TypeMirror lambdaClassType = calculatedExpectedLambdaType(parent, node);
-        boolean matchesLambda = false;
-        if (lambdaClassType != null && isSameType(lambdaClassType, trees.getTypeMirror(trees.getPath(cu, node.getIdentifier())))
-                && node.getClassBody() != null)
-        {
-            Optional<LocatedTag> lambdaAnn = lambdaClassToAnn(parent, lambdaClassType, node, false);
-            if (lambdaAnn != null)
-            {
-                matchesLambda = true;
-                lambdaScopeStack.addLast(lambdaAnn.orElse(null));
-            }
-        }
-        
         WrapDescent wrap = checkInvocation(elements.getName("<init>"), node.getIdentifier(), trees.getTypeMirror(trees.getPath(cu, node.getIdentifier())), null, argTypes, arg1, node);
         if (wrap.before != null) wrap.before.run();
         Void r = super.visitNewClass(node, arg1);
         if (wrap.after != null) wrap.after.run();
-        if (matchesLambda)
-            lambdaScopeStack.removeLast();
         return r;
     }
 
@@ -1528,7 +1543,8 @@ class TCScanner extends TreePathScanner<Void, Void>
         if (tag != null) 
         {
             // Our present tag:
-            Collection<? extends TypeMirror> superTypes = allSuperTypes(trees.getTypeMirror(typeScopeStack.getLast().path));
+            Collection<? extends TypeMirror> superTypes = allSuperTypes(
+                    trees.getTypeMirror(typeScopeStack.getLast().path), node);
 
             Optional<LocatedTag> ann = getCurrentTag(superTypes, node);
             
@@ -1643,7 +1659,8 @@ class TCScanner extends TreePathScanner<Void, Void>
                 
             }
             // Give it default tag from class if none explicitly:
-            Collection<? extends TypeMirror> superTypes = allSuperTypes(trees.getTypeMirror(typeScopeStack.getLast().path));
+            Collection<? extends TypeMirror> superTypes = allSuperTypes(
+                    trees.getTypeMirror(typeScopeStack.getLast().path), node);
 
             Optional<LocatedTag> ann = getCurrentTag(superTypes, cu);
             fields.put(node.getName().toString(), ann.orElse(null));

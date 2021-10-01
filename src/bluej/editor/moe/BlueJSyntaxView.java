@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2011,2014,2015,2016,2017  Michael Kolling and John Rosenberg
+ Copyright (C) 1999-2009,2011,2014,2015,2016,2017,2018  Michael Kolling and John Rosenberg
 
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -31,14 +31,11 @@ import bluej.parser.nodes.ParsedNode;
 import bluej.prefmgr.PrefMgr;
 import bluej.utility.Debug;
 import bluej.utility.javafx.FXCache;
-import bluej.utility.javafx.FXPlatformConsumer;
 import bluej.utility.javafx.JavaFXUtil;
 import com.google.common.collect.ImmutableSet;
 import javafx.beans.binding.BooleanExpression;
 import javafx.beans.binding.ObjectExpression;
 import javafx.beans.property.ReadOnlyDoubleProperty;
-import javafx.beans.value.ChangeListener;
-import javafx.beans.value.ObservableValue;
 import javafx.geometry.Bounds;
 import javafx.scene.Node;
 import javafx.scene.Scene;
@@ -63,10 +60,8 @@ import org.fxmisc.richtext.model.TwoDimensional.Position;
 import threadchecker.OnThread;
 import threadchecker.Tag;
 
-import java.lang.ref.WeakReference;
 import java.util.*;
 import java.util.Map.Entry;
-import javax.swing.text.BadLocationException;
 import javax.swing.text.Segment;
 
 /**
@@ -93,6 +88,8 @@ public class BlueJSyntaxView
     private static final int LEFT_OUTER_SCOPE_MARGIN = 2;
     private static final int RIGHT_SCOPE_MARGIN = 4;
     private static final int CURVED_CORNER_SIZE = 4;
+    private static final int PARAGRAPH_MARGIN = 24;
+    
     // See comments in getImageFor for more info.
     // 1 means draw edge, 2 means draw filling
     @OnThread(Tag.FX)
@@ -108,8 +105,11 @@ public class BlueJSyntaxView
     private final BooleanExpression syntaxHighlighting;
     private int imageCacheLineHeight;
     private ReadOnlyDoubleProperty widthProperty; // width of editor view
-    // package-protected:
-    MoeEditorPane editorPane;
+    private MoeEditorPane editorPane;
+    
+    // Draw a "small" version:
+    @OnThread(Tag.FX)
+    private boolean small = false;
 
     /* Scope painting colours */
     /* The following are initialized by resetColors() */
@@ -148,16 +148,6 @@ public class BlueJSyntaxView
             return pseudoClass;
         }
     }
-
-    // The line numbers in both maps start at one:
-    private final Map<Integer, EnumSet<ParagraphAttribute>> paragraphAttributes = new HashMap<>();
-    private final Map<Integer, FXPlatformConsumer<EnumSet<ParagraphAttribute>>> paragraphAttributeListeners = new HashMap<>();
-
-    /**
-     * This is those line labels which may currently be on-screen.  Weak references used so
-     * that old line labels can get GCed as we scroll up and down:
-     */
-    private final Set<WeakReference<Label>> lineLabels = new HashSet<>();
 
     /**
      * Cached indents for ParsedNode items.  Maps a node to an indent (in pixels)
@@ -215,6 +205,14 @@ public class BlueJSyntaxView
             }
         });
     }
+    
+    /**
+     * Get the editor pane that this view is associated with.
+     */
+    public MoeEditorPane getEditorPane()
+    {
+        return editorPane;
+    }
 
     /**
      * Mark the syntax view as being during an update.  Don't forget
@@ -225,7 +223,6 @@ public class BlueJSyntaxView
     {
         this.duringUpdate = duringUpdate;
     }
-
 
     /**
      * Gets the syntax token styles for a given line of code.
@@ -253,18 +250,23 @@ public class BlueJSyntaxView
             return null;
     }
 
-    protected final void paintScopeMarkers(List<ScopeInfo> scopes, int fullWidth,
-            int firstLine, int lastLine, boolean onlyMethods)
+    /**
+     * Recalculate scope margins in the given line range. All line numbers are 0-based.
+     * 
+     * @param pendingScopes  map to store updated scope margin information.
+     * @param firstLineIncl  the first line in the range to update (inclusive).
+     * @param lastLineIncl   the last line in the range to update (inclusive).
+     */
+    public void recalculateScopes(Map<Integer, ScopeInfo> pendingScopes, int firstLineIncl, int lastLineIncl)
     {
-        paintScopeMarkers(scopes, fullWidth, firstLine, lastLine, onlyMethods, false);
-    }
-
-    List<ScopeInfo> recalculateScopes(int firstLineIncl, int lastLineIncl)
-    {
-        List<ScopeInfo> scopes = new ArrayList<>();
-        // Subtract 24 which is width of paragraph graphic:
-        paintScopeMarkers(scopes, widthProperty == null  || widthProperty.get() == 0 ? 200 : ((int)widthProperty.get() - 24), firstLineIncl, lastLineIncl, false);
-        return scopes;
+        // editorPane is null during testing -- just skip updating the scopes in that case:
+        if (editorPane == null)
+            return;
+        
+        recalcScopeMarkers(pendingScopes,
+                (widthProperty == null || widthProperty.get() == 0) ? 200 :
+                        ((int)widthProperty.get() - PARAGRAPH_MARGIN),
+                firstLineIncl, lastLineIncl, false);
     }
 
     public Image getImageFor(ScopeInfo s, int lineHeight)
@@ -298,14 +300,17 @@ public class BlueJSyntaxView
     @OnThread(Tag.FX)
     private Image drawImageFor(ScopeInfo s, int lineHeight)
     {
-        WritableImage image = new WritableImage(s.nestedScopes.stream().mapToInt(n -> n.leftRight.rhs + 1).max().orElse(1) + 1, lineHeight);
+        WritableImage image = new WritableImage(s.nestedScopes.stream()
+                .mapToInt(n -> n.leftRight.rhs + 1).max().orElse(1) + 1, lineHeight);
 
         for (ScopeInfo.SingleNestedScope singleNestedScope : s.nestedScopes)
         {
             LeftRight leftRight = singleNestedScope.leftRight;
-            int sideTopMargin = leftRight.starts ? CURVED_CORNER_SIZE : 0;
-            int sideBottomMargin = leftRight.ends ? CURVED_CORNER_SIZE : 0;
-            fillRect(image.getPixelWriter(), leftRight.lhs, 0 + sideTopMargin, leftRight.padding, lineHeight - sideBottomMargin - sideTopMargin, leftRight.fillColor);
+            int padding = small ? 0 : CURVED_CORNER_SIZE;
+            int sideTopMargin = leftRight.starts ? padding : 0;
+            int sideBottomMargin = leftRight.ends ? padding : 0;
+            fillRect(image.getPixelWriter(), leftRight.lhs, 0 + sideTopMargin, padding,
+                    lineHeight - sideBottomMargin - sideTopMargin, leftRight.fillColor);
             for (int y = sideTopMargin; y < lineHeight - sideBottomMargin; y++)
             {
                 image.getPixelWriter().setColor(leftRight.lhs, y, leftRight.edgeColor);
@@ -320,39 +325,42 @@ public class BlueJSyntaxView
 
             if (leftRight.starts)
             {
-                for (int x = 0; x < CURVED_CORNER_SIZE; x++)
+                for (int x = 0; x < padding; x++)
                 {
-                    for (int y = 0; y < CURVED_CORNER_SIZE; y++)
+                    for (int y = 0; y < padding; y++)
                     {
-                        if (CORNER_TEMPLATE[y][x] == 1)
-                            image.getPixelWriter().setColor(leftRight.lhs + x, y, leftRight.edgeColor);
-                        else if (CORNER_TEMPLATE[y][x] == 2)
-                            image.getPixelWriter().setColor(leftRight.lhs + x, y, leftRight.fillColor);
+                        if (CORNER_TEMPLATE[y][x] != 0)
+                        {
+                            Color c = (CORNER_TEMPLATE[y][x] == 1) ?
+                                    leftRight.edgeColor : leftRight.fillColor; 
+                            image.getPixelWriter().setColor(leftRight.lhs + x, y, c);
+                        }
                     }
                 }
             }
             if (leftRight.ends)
             {
-                for (int x = 0; x < CURVED_CORNER_SIZE; x++)
+                for (int x = 0; x < padding; x++)
                 {
-                    for (int y = 0; y < CURVED_CORNER_SIZE; y++)
+                    for (int y = 0; y < padding; y++)
                     {
-                        if (CORNER_TEMPLATE[y][x] == 1)
-                            image.getPixelWriter().setColor(leftRight.lhs + x, lineHeight - 1 - y, leftRight.edgeColor);
-                        else if (CORNER_TEMPLATE[y][x] == 2)
-                            image.getPixelWriter().setColor(leftRight.lhs + x, lineHeight - 1 - y, leftRight.fillColor);
+                        if (CORNER_TEMPLATE[y][x] != 0) {
+                            Color c = (CORNER_TEMPLATE[y][x] == 1) ?
+                                    leftRight.edgeColor : leftRight.fillColor; 
+                            image.getPixelWriter().setColor(leftRight.lhs + x, lineHeight - 1 - y, c);
+                        }
                     }
                 }
             }
 
-
             Middle middle = singleNestedScope.middle;
 
-            fillRect(image.getPixelWriter(), middle.lhs, 0, middle.rhs - middle.lhs, lineHeight, middle.bodyColor);
+            fillRect(image.getPixelWriter(), middle.lhs + padding, 0, middle.rhs - middle.lhs - padding,
+                    lineHeight, middle.bodyColor);
 
             if (middle.topColor != null)
             {
-                for (int x = middle.lhs; x < middle.rhs; x++)
+                for (int x = middle.lhs + padding; x < middle.rhs; x++)
                 {
                     image.getPixelWriter().setColor(x, 0, middle.topColor);
                 }
@@ -360,7 +368,7 @@ public class BlueJSyntaxView
 
             if (middle.bottomColor != null)
             {
-                for (int x = middle.lhs; x < middle.rhs; x++)
+                for (int x = middle.lhs + padding; x < middle.rhs; x++)
                 {
                     image.getPixelWriter().setColor(x, lineHeight - 1, middle.bottomColor);
                 }
@@ -368,35 +376,39 @@ public class BlueJSyntaxView
 
 
             // Right edge:
-            fillRect(image.getPixelWriter(), leftRight.rhs - leftRight.padding, 0 + sideTopMargin, leftRight.padding, lineHeight - sideBottomMargin - sideTopMargin, leftRight.fillColor);
+            fillRect(image.getPixelWriter(), leftRight.rhs - padding, 0 + sideTopMargin, padding,
+                    lineHeight - sideBottomMargin - sideTopMargin, leftRight.fillColor);
+            
             for (int y = sideTopMargin; y < lineHeight - sideBottomMargin; y++)
             {
                 image.getPixelWriter().setColor(leftRight.rhs, y, leftRight.edgeColor);
             }
 
-            if (leftRight.starts && leftRight.rhs > CURVED_CORNER_SIZE)
+            if (leftRight.starts && leftRight.rhs > padding)
             {
-                for (int x = 0; x < CURVED_CORNER_SIZE; x++)
+                for (int x = 0; x < padding; x++)
                 {
-                    for (int y = 0; y < CURVED_CORNER_SIZE; y++)
+                    for (int y = 0; y < padding; y++)
                     {
-                        if (CORNER_TEMPLATE[y][x] == 1)
-                            image.getPixelWriter().setColor(leftRight.rhs - x, y, leftRight.edgeColor);
-                        else if (CORNER_TEMPLATE[y][x] == 2)
-                            image.getPixelWriter().setColor(leftRight.rhs - x, y, leftRight.fillColor);
+                        if (CORNER_TEMPLATE[y][x] != 0) {
+                            Color c = (CORNER_TEMPLATE[y][x] == 1) ?
+                                    leftRight.edgeColor : leftRight.fillColor; 
+                            image.getPixelWriter().setColor(leftRight.rhs - x, y, c);
+                        }
                     }
                 }
             }
-            if (leftRight.ends && leftRight.rhs > CURVED_CORNER_SIZE)
+            if (leftRight.ends && leftRight.rhs > padding)
             {
-                for (int x = 0; x < CURVED_CORNER_SIZE; x++)
+                for (int x = 0; x < padding; x++)
                 {
-                    for (int y = 0; y < CURVED_CORNER_SIZE; y++)
+                    for (int y = 0; y < padding; y++)
                     {
-                        if (CORNER_TEMPLATE[y][x] == 1)
-                            image.getPixelWriter().setColor(leftRight.rhs - x, lineHeight - 1 - y, leftRight.edgeColor);
-                        else if (CORNER_TEMPLATE[y][x] == 2)
-                            image.getPixelWriter().setColor(leftRight.rhs - x, lineHeight - 1 - y, leftRight.fillColor);
+                        if (CORNER_TEMPLATE[y][x] != 0) {
+                            Color c = (CORNER_TEMPLATE[y][x] == 1) ?
+                                    leftRight.edgeColor : leftRight.fillColor; 
+                            image.getPixelWriter().setColor(leftRight.rhs - x, lineHeight - 1 - y, c);
+                        }
                     }
                 }
             }
@@ -461,26 +473,10 @@ public class BlueJSyntaxView
             document.fireChangedUpdate(null);
         });
         JavaFXUtil.addChangeListenerPlatform(editorPane.showLineNumbersProperty(), showLineNumbers -> {
-            for (Iterator<WeakReference<Label>> iterator = lineLabels.iterator(); iterator.hasNext(); )
-            {
-                WeakReference<Label> weakLabel = iterator.next();
-                Label l = weakLabel.get();
-                if (l != null)
-                {
-                    if (((StackPane)l.getGraphic()).getChildren().stream().anyMatch(Node::isVisible) || !showLineNumbers)
-                    {
-                        l.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
-                    }
-                    else
-                    {
-                        l.setContentDisplay(ContentDisplay.TEXT_ONLY);
-                    }
-                }
-                else
-                {
-                    iterator.remove();
-                }
-            }
+            // By re-setting the paragraph graphic factory, force all visible lines to be re-drawn. Note that
+            // this effectively creates a new function object from the method handle each time it is called, which
+            // is why it works, but it's not clear if this behaviour is formally guaranteed.
+            editorPane.setParagraphGraphicFactory(this::getParagraphicGraphic);
         });
     }
 
@@ -499,8 +495,18 @@ public class BlueJSyntaxView
         Element belowLineEl;
     }
 
-    protected void paintScopeMarkers(List<ScopeInfo> scopes, int fullWidth,
-            int firstLine, int lastLine, boolean onlyMethods, boolean small)
+    /**
+     * Re-calculate scope margins for the given lines, and add changed margin information to the given
+     * map. Line numbers are 0-based.
+     * 
+     * @param pendingScopes  a map of (line number : scope information) for updated scope margins
+     * @param fullWidth      the full width of the view, used for determining right margin
+     * @param firstLine      the first line in the range to process (inclusive).
+     * @param lastLine       the last line in the range to process (inclusive).
+     * @param onlyMethods    true if only methods should be scope highlighted and not constructs inside.
+     */
+    protected void recalcScopeMarkers(Map<Integer, ScopeInfo> pendingScopes, int fullWidth,
+            int firstLine, int lastLine, boolean onlyMethods)
     {
         //optimization for the raspberry pi.
         //if (strength == 0) {
@@ -519,79 +525,82 @@ public class BlueJSyntaxView
         int aboveLine = firstLine - 1;
         List<NodeAndPosition<ParsedNode>> prevScopeStack = new LinkedList<NodeAndPosition<ParsedNode>>();
         int curLine = firstLine;
+        
+        ThreeLines lines = new ThreeLines();
+        lines.aboveLineSeg = new Segment();
+        lines.thisLineSeg = new Segment();
+        lines.belowLineSeg = new Segment();
 
-        try {
-            ThreeLines lines = new ThreeLines();
-            lines.aboveLineSeg = new Segment();
-            lines.thisLineSeg = new Segment();
-            lines.belowLineSeg = new Segment();
+        lines.aboveLineEl = null;
+        if (aboveLine >= 0) {
+            lines.aboveLineEl = map.getElement(aboveLine);
+            document.getText(lines.aboveLineEl.getStartOffset(),
+                    lines.aboveLineEl.getEndOffset() - lines.aboveLineEl.getStartOffset(),
+                    lines.aboveLineSeg);
+        }
+        lines.belowLineEl = null;
+        if (firstLine + 1 < map.getElementCount()) {
+            lines.belowLineEl = map.getElement(firstLine + 1);
+            document.getText(lines.belowLineEl.getStartOffset(),
+                    lines.belowLineEl.getEndOffset() - lines.belowLineEl.getStartOffset(),
+                    lines.belowLineSeg);
+        }
 
-            lines.aboveLineEl = null;
-            if (aboveLine >= 0) {
-                lines.aboveLineEl = map.getElement(aboveLine);
-                document.getText(lines.aboveLineEl.getStartOffset(),
-                        lines.aboveLineEl.getEndOffset() - lines.aboveLineEl.getStartOffset(),
-                        lines.aboveLineSeg);
+        lines.thisLineEl = map.getElement(firstLine);
+        document.getText(lines.thisLineEl.getStartOffset(),
+                lines.thisLineEl.getEndOffset() - lines.thisLineEl.getStartOffset(),
+                lines.thisLineSeg);
+
+        getScopeStackAfter(rootNode, 0, lines.thisLineEl.getStartOffset(), prevScopeStack);
+
+        while (curLine <= lastLine) {
+
+            // curLine is zero-based, but getParagraphAttributes is one-based:
+            ScopeInfo scope = new ScopeInfo(getParagraphAttributes(curLine + 1));
+            
+            if (prevScopeStack.isEmpty()) {
+                break;
             }
-            lines.belowLineEl = null;
-            if (firstLine + 1 < map.getElementCount()) {
-                lines.belowLineEl = map.getElement(firstLine + 1);
-                document.getText(lines.belowLineEl.getStartOffset(),
-                        lines.belowLineEl.getEndOffset() - lines.belowLineEl.getStartOffset(),
-                        lines.belowLineSeg);
+
+            drawScopes(fullWidth, scope, document, lines, prevScopeStack, onlyMethods, 0);
+            if (! scope.equals(document.getDocument().getParagraphStyle(curLine)))
+            {
+                pendingScopes.put(curLine, scope);
             }
-
-            lines.thisLineEl = map.getElement(firstLine);
-            document.getText(lines.thisLineEl.getStartOffset(),
-                    lines.thisLineEl.getEndOffset() - lines.thisLineEl.getStartOffset(),
-                    lines.thisLineSeg);
-
-            getScopeStackAfter(rootNode, 0, lines.thisLineEl.getStartOffset(), prevScopeStack);
-
-            while (curLine <= lastLine) {
-
-                // curLine is zero-based, but getParagraphAttributes is one-based:
-                ScopeInfo scope = new ScopeInfo(getParagraphAttributes(curLine + 1));
-                scopes.add(scope);
-
-                if (prevScopeStack.isEmpty()) {
-                    break;
+            else
+            {
+                pendingScopes.remove(curLine);
+            }
+            
+            // Next line
+            curLine++;
+            if (curLine <= lastLine) {
+                lines.aboveLineEl = lines.thisLineEl;
+                lines.thisLineEl = lines.belowLineEl; 
+                if (curLine + 1 < map.getElementCount()) {
+                    lines.belowLineEl = map.getElement(curLine + 1);
                 }
+                else {
+                    lines.belowLineEl = null;
+                }
+                Segment oldAbove = lines.aboveLineSeg;
+                lines.aboveLineSeg = lines.thisLineSeg;
+                lines.thisLineSeg = lines.belowLineSeg;
+                lines.belowLineSeg = oldAbove; // recycle the object
 
-                drawScopes(fullWidth, scope, document, lines, prevScopeStack, small, onlyMethods, 0);
-
-                // Next line
-                curLine++;
-                if (curLine <= lastLine) {
-                    lines.aboveLineEl = lines.thisLineEl;
-                    lines.thisLineEl = lines.belowLineEl; 
-                    if (curLine + 1 < map.getElementCount()) {
-                        lines.belowLineEl = map.getElement(curLine + 1);
-                    }
-                    else {
-                        lines.belowLineEl = null;
-                    }
-                    Segment oldAbove = lines.aboveLineSeg;
-                    lines.aboveLineSeg = lines.thisLineSeg;
-                    lines.thisLineSeg = lines.belowLineSeg;
-                    lines.belowLineSeg = oldAbove; // recycle the object
-
-                    if (lines.belowLineEl != null) {
-                        document.getText(lines.belowLineEl.getStartOffset(),
-                                lines.belowLineEl.getEndOffset() - lines.belowLineEl.getStartOffset(),
-                                lines.belowLineSeg);
-                    }
+                if (lines.belowLineEl != null) {
+                    document.getText(lines.belowLineEl.getStartOffset(),
+                            lines.belowLineEl.getEndOffset() - lines.belowLineEl.getStartOffset(),
+                            lines.belowLineSeg);
                 }
             }
         }
-        catch (BadLocationException ble) {}
     }
 
     private class DrawInfo
     {
         final ScopeInfo scopes;
         ThreeLines lines;
-        boolean small;
 
         ParsedNode node;
         boolean starts;  // the node starts on the current line
@@ -615,9 +624,7 @@ public class BlueJSyntaxView
      * @param prevScopeStack the stack of nodes (from outermost to innermost) at the beginning of the current line
      */
     private void drawScopes(int fullWidth, ScopeInfo scopes, MoeSyntaxDocument document, ThreeLines lines,
-            List<NodeAndPosition<ParsedNode>> prevScopeStack, boolean small,
-            boolean onlyMethods, int nodeDepth)
-    throws BadLocationException
+            List<NodeAndPosition<ParsedNode>> prevScopeStack, boolean onlyMethods, int nodeDepth)
     {
         int rightMargin = small ? 0 : 10;
 
@@ -625,7 +632,6 @@ public class BlueJSyntaxView
 
         DrawInfo drawInfo = new DrawInfo(scopes);
         drawInfo.lines = lines;
-        drawInfo.small = small;
 
         // Process the current scope stack. This contains all nodes that span the beginning of this line,
         // the foremost child and its foremost child and so on.
@@ -746,12 +752,17 @@ public class BlueJSyntaxView
     private OptionalInt getLeftEdge(int startOffset)
     {
         if (editorPane == null)
+        {
             return OptionalInt.empty();
+        }
+        
         Position position = document.offsetToPosition(startOffset);
 
-        boolean allSpaces = document.getDocument().getParagraph(position.getMajor()).getText().substring(0, position.getMinor()).chars().allMatch(c -> c == ' ');
+        int column = position.getMinor();
+        String lineText = document.getDocument().getParagraph(position.getMajor()).getText();
+        boolean allSpaces = (column == 0) || lineText.lastIndexOf(' ', column - 1) == 0;
 
-        if (!editorPane.visibleLines.get(position.getMajor()) && (!allSpaces || cachedSpaceSizes.size() <= 4))
+        if (!editorPane.lineIsVisible(position.getMajor()) && (!allSpaces || cachedSpaceSizes.size() <= 4))
         {
             // If we are printing, we'll never be able to get the on-screen position
             // for our off-screen editor.  So we must make our best guess at positions
@@ -761,13 +772,15 @@ public class BlueJSyntaxView
                 TextField field = new TextField();
                 field.styleProperty().bind(editorPane.styleProperty());
                 // Have to put TextField into a Scene for CSS to take effect:
+                @SuppressWarnings("unused")
                 Scene s = new Scene(new BorderPane(field));
                 field.applyCss();
                 double singleSpaceWidth = JavaFXUtil.measureString(field, "          ", false, false) / 10.0;
                 // I admit, I don't understand why we need the 1.05 fudge factor here,
                 // but after an hour or two of fiddling, it's the only thing I've found
                 // that makes the measureString backgrounds line-up with the editor pane text:
-                return OptionalInt.of((int) (singleSpaceWidth * position.getMinor() * 1.05));
+                int positionSpaceWidth = (int)(singleSpaceWidth * position.getMinor() * 1.05);
+                return OptionalInt.of(positionSpaceWidth + PARAGRAPH_MARGIN);
             }
             else
             {
@@ -807,34 +820,36 @@ public class BlueJSyntaxView
          * think of any situation where that is not the case.  We clear the array when the font size changes.
          */
 
-
-
         if (allSpaces)
         {
             // All spaces, we can use/update cached space indents
-            int numberOfSpaces = position.getMinor();
+            int numberOfSpaces = column;
             while (numberOfSpaces >= cachedSpaceSizes.size())
             {
                 // We have more spaces than the cache; we must update it if we can
                 Optional<Bounds> screenBounds = Optional.empty();
                 if (!duringUpdate)
                 {
-                    screenBounds = editorPane.getCharacterBoundsOnScreen(startOffset - numberOfSpaces + cachedSpaceSizes.size(), startOffset - numberOfSpaces + cachedSpaceSizes.size() + 1);
+                    screenBounds = editorPane.getCharacterBoundsOnScreen(
+                            startOffset - numberOfSpaces + cachedSpaceSizes.size(),
+                            startOffset - numberOfSpaces + cachedSpaceSizes.size() + 1);
                 }
                 // If the character isn't on screen, we're not going to be able to calculate indent,
                 // and we know we haven't got a cached indent, so give up:
                 if (!screenBounds.isPresent())
                 {
-                    // If we've got a few spaces, we can make a reasonable estimate, on the basis that space characters
-                    // are going to be the same width as each other.
+                    // If we've got a few spaces, we can make a reasonable estimate, on the basis
+                    // that space characters are going to be the same width as each other.
                     if (cachedSpaceSizes.size() >= 4)
                     {
                         int highestSpaces = cachedSpaceSizes.size() - 1;
-                        return OptionalInt.of((int)(cachedSpaceSizes.get(highestSpaces) / (double)highestSpaces * numberOfSpaces));
+                        double highestWidth = cachedSpaceSizes.get(highestSpaces) - cachedSpaceSizes.get(0); 
+                        return OptionalInt.of((int)(highestWidth / highestSpaces * numberOfSpaces
+                                + cachedSpaceSizes.get(0)));
                     }
                     return OptionalInt.empty();
                 }
-                double indent = editorPane.screenToLocal(screenBounds.get()).getMinX() - 24.0;
+                double indent = editorPane.screenToLocal(screenBounds.get()).getMinX();
                 cachedSpaceSizes.add(indent);
             }
             return OptionalInt.of(cachedSpaceSizes.get(numberOfSpaces).intValue());
@@ -851,19 +866,16 @@ public class BlueJSyntaxView
 
                 if (screenBounds.isPresent())
                 {
-                    // Minus 24 to allow for the left-hand margin:
-                    double indent = editorPane.screenToLocal(screenBounds.get()).getMinX() - 24.0;
+                    double indent = editorPane.screenToLocal(screenBounds.get()).getMinX();
                     return OptionalInt.of((int) indent);
                 }
             }
             catch (IllegalArgumentException | IndexOutOfBoundsException e)
             {
-                // This occurs when asking about the last character in the file
-                // Report it only if not at end of file:
-                if (startOffset < editorPane.getLength() - 1)
-                {
-                    Debug.reportError(e);
-                }
+                // These shouldn't occur but there have been some related bugs, and it is better to
+                // catch the exception and leave the editor in a (somewhat) usable state. We'll log
+                // the error, however:
+                Debug.reportError(e);
             }
 
             // Not on screen, wider than any indent we have cached, nothing we can do:
@@ -936,20 +948,17 @@ public class BlueJSyntaxView
     }
 
     /**
-     * Draw the left edge of the scope, and the middle part up the given bound.
+     * Create a nested scope record based on the supplied information.
      */
     private ScopeInfo.SingleNestedScope calculatedNestedScope(DrawInfo info, int xpos, int rbound)
     {
-        if (! info.small) {
+        if (! small) {
             xpos -= info.node.isInner() ? LEFT_INNER_SCOPE_MARGIN : LEFT_OUTER_SCOPE_MARGIN;
         }
 
-        // draw node start
-        int hoffs = info.small ? 0 : CURVED_CORNER_SIZE; // determines size of corner arcs
-
         return new ScopeInfo.SingleNestedScope(
-                new LeftRight(xpos, rbound, hoffs, info.starts, info.ends, info.color2, info.color1),
-                getScopeMiddle(info, xpos + hoffs, rbound));
+                new LeftRight(xpos, rbound, info.starts, info.ends, info.color2, info.color1),
+                getScopeMiddle(info, xpos, rbound));
     }
 
     /**
@@ -987,10 +996,10 @@ public class BlueJSyntaxView
      * @param lineSeg  Segment containing text of the current line
      */
     private int getNodeRBound(NodeAndPosition<ParsedNode> nap, int fullWidth, int nodeDepth,
-            Element lineEl, Segment lineSeg) throws BadLocationException
+            Element lineEl, Segment lineSeg)
     {
         int napEnd = nap.getEnd();
-        int rbound = fullWidth - nodeDepth * RIGHT_SCOPE_MARGIN;
+        int rbound = fullWidth - nodeDepth * (small ? 0 : RIGHT_SCOPE_MARGIN);
         if (lineEl == null || napEnd >= lineEl.getEndOffset()) {
             return rbound;
         }
@@ -1066,13 +1075,12 @@ public class BlueJSyntaxView
     }
 
     /**
-     * Get a node's indent amount (in component co-ordinate space) for a given line.
+     * Get a node's indent amount (in component co-ordinate space, minus left margin) for a given line.
      * If the node isn't present on the line, returns Integer.MAX_VALUE. A cached value
      * is used if available.
      */
     private int getNodeIndent(MoeSyntaxDocument doc, NodeAndPosition<ParsedNode> nap, Element lineEl,
             Segment segment)
-        throws BadLocationException
     {
 
         if (lineEl == null) {
@@ -1102,7 +1110,7 @@ public class BlueJSyntaxView
         // hope that the editor is now visible:
         if (indent == null || indent <= 0) {
             // No point trying to re-calculate the indent if the line isn't on screen:
-            if (editorPane != null && (editorPane.visibleLines.get(doc.offsetToPosition(lineEl.getStartOffset()).getMajor()) || doc.isPrinting()))
+            if (editorPane != null && (editorPane.lineIsVisible(doc.offsetToPosition(lineEl.getStartOffset()).getMajor()) || doc.isPrinting()))
             {
                 indent = getNodeIndent(doc, nap);
                 nodeIndents.put(nap.getNode(), indent);
@@ -1124,7 +1132,7 @@ public class BlueJSyntaxView
                 OptionalInt lboundsX = getLeftEdge(lineEl.getStartOffset() + nws + 1);
                 if (lboundsX.isPresent())
                 {
-                    xpos = Math.max(xpos, lboundsX.getAsInt());
+                    xpos = Math.max(xpos, lboundsX.getAsInt() - PARAGRAPH_MARGIN);
                 }
             }
         }
@@ -1192,7 +1200,7 @@ public class BlueJSyntaxView
                     OptionalInt cboundsX = getLeftEdge(curpos);
                     if (cboundsX.isPresent())
                     {
-                        indent = Math.min(indent, cboundsX.getAsInt());
+                        indent = Math.min(indent, cboundsX.getAsInt() - PARAGRAPH_MARGIN);
                     }
                     curpos = lineEl.getEndOffset();
                 }
@@ -1315,12 +1323,12 @@ public class BlueJSyntaxView
 
                 // Calculate/store indent
                 OptionalInt cboundsX = getLeftEdge(lineEl.getStartOffset() + nws);
-                int indent = cboundsX.orElse(0);
+                int indent = cboundsX.orElse(PARAGRAPH_MARGIN);
                 for (j = scopeStack.listIterator(scopeStack.size()); j.hasPrevious(); ) {
                     NodeAndPosition<ParsedNode> next = j.previous();
                     if (next.getPosition() <= curpos) {
                         // Node is present on this line (begins before curpos)
-                        updateNodeIndent(next, indent, nodeIndents.get(next.getNode()), dmgRange);
+                        updateNodeIndent(next, indent - PARAGRAPH_MARGIN, nodeIndents.get(next.getNode()), dmgRange);
                     }
                     else if (next.getPosition() < lineEl.getEndOffset()) {
                         // Node starts on this line, after curpos.
@@ -1328,8 +1336,8 @@ public class BlueJSyntaxView
                         Integer oindent = nodeIndents.get(next.getNode());
                         if (oindent != null && nws != -1) {
                             cboundsX = getLeftEdge(lineEl.getStartOffset() + nws);
-                            indent = cboundsX.orElse(0);
-                            updateNodeIndent(next, indent, oindent, dmgRange);
+                            indent = cboundsX.orElse(PARAGRAPH_MARGIN);
+                            updateNodeIndent(next, indent - PARAGRAPH_MARGIN, oindent, dmgRange);
                         }
                     }
                     else {
@@ -1362,8 +1370,8 @@ public class BlueJSyntaxView
                                 Integer oindent = nodeIndents.get(nap.getNode());
                                 if (oindent != null && nws != -1) {
                                     cboundsX = getLeftEdge(lineEl.getStartOffset() + nws);
-                                    indent = cboundsX.orElse(0);
-                                    updateNodeIndent(nap, indent, oindent, dmgRange);
+                                    indent = cboundsX.orElse(PARAGRAPH_MARGIN);
+                                    updateNodeIndent(nap, indent - PARAGRAPH_MARGIN, oindent, dmgRange);
                                 }
                             }
                             nap = nap.getNode().findNodeAtOrAfter(nap.getPosition(), nap.getPosition());
@@ -1441,7 +1449,7 @@ public class BlueJSyntaxView
             boolean doContinue = true;
 
             OptionalInt cboundsX = getLeftEdge(dmgPoint);
-            int dpI = cboundsX.orElse(0); // damage point indent
+            int dpI = cboundsX.orElse(PARAGRAPH_MARGIN) - PARAGRAPH_MARGIN; // damage point indent
 
             while (doContinue && ! rscopeStack.isEmpty()) {
                 NodeAndPosition<ParsedNode> rtop = rscopeStack.remove(rscopeStack.size() - 1);
@@ -1490,7 +1498,7 @@ public class BlueJSyntaxView
                     }
 
                     cboundsX = getLeftEdge(nws + lineEl.getStartOffset());
-                    int newIndent = cboundsX.orElse(0);
+                    int newIndent = cboundsX.orElse(PARAGRAPH_MARGIN) - PARAGRAPH_MARGIN;
 
                     if (newIndent < cachedIndent) {
                         nodeIndents.put(rtop.getNode(), newIndent);
@@ -1736,6 +1744,15 @@ public class BlueJSyntaxView
     @OnThread(Tag.FXPlatform)
     public Node getParagraphicGraphic(int lineNumber)
     {
+        // RichTextFX since version 0.9.0 started to generate -1 as a line number, when
+        // constructing new lines before making them visible. Apparently this is not
+        // considered a bug. Since there is no point doing anything in this case, we
+        // just return immediately:
+        if (lineNumber < 0)
+        {
+            return null;
+        }
+        
         // RichTextFX numbers from 0, but javac numbers from 1:
         lineNumber += 1;
         Label label = new Label("" + lineNumber);
@@ -1771,37 +1788,23 @@ public class BlueJSyntaxView
             e.consume();
         });
 
-        WeakReference<Label> weakLabel = new WeakReference<>(label);
-        FXPlatformConsumer<EnumSet<ParagraphAttribute>> listener = attr -> {
-            Label l = weakLabel.get();
-            if (l != null)
-            {
-                for (ParagraphAttribute possibleAttribute : ParagraphAttribute.values())
-                {
-                    JavaFXUtil.setPseudoclass(possibleAttribute.getPseudoclass(), attr.contains(possibleAttribute), l);
-                }
-                stepMarkIcon.setVisible(attr.contains(ParagraphAttribute.STEP_MARK));
-                breakpointIcon.setVisible(attr.contains(ParagraphAttribute.BREAKPOINT));
-                if (stepMarkIcon.isVisible() || breakpointIcon.isVisible() || !editorPane.isShowLineNumbers())
-                {
-                    l.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
-                }
-                else
-                {
-                    l.setContentDisplay(ContentDisplay.TEXT_ONLY);
-                }
-            }
-            else
-                paragraphAttributeListeners.remove(lineNumberFinal);
-        };
-        // Remove any old references to line labels which have been GCed:
-        lineLabels.removeIf(w -> w.get() == null);
-        // Add our line label, to be notified if labels get turned on or off:
-        lineLabels.add(weakLabel);
-
-        listener.accept(paragraphAttributes.getOrDefault(lineNumber, EnumSet.noneOf(ParagraphAttribute.class)));
-        // By replacing the previous listener, it should get GCed:
-        paragraphAttributeListeners.put(lineNumber, listener);
+        EnumSet<ParagraphAttribute> attr = getParagraphAttributes(lineNumber);
+        for (ParagraphAttribute possibleAttribute : ParagraphAttribute.values())
+        {
+            JavaFXUtil.setPseudoclass(possibleAttribute.getPseudoclass(), attr.contains(possibleAttribute), label);
+        }
+        stepMarkIcon.setVisible(attr.contains(ParagraphAttribute.STEP_MARK));
+        breakpointIcon.setVisible(attr.contains(ParagraphAttribute.BREAKPOINT));
+        if (stepMarkIcon.isVisible() || breakpointIcon.isVisible() ||
+                (editorPane != null && !editorPane.isShowLineNumbers()))
+        {
+            label.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
+        }
+        else
+        {
+            label.setContentDisplay(ContentDisplay.TEXT_ONLY);
+        }
+        
         AnchorPane.setLeftAnchor(label, 0.0);
         AnchorPane.setRightAnchor(label, 3.0);
         AnchorPane.setTopAnchor(label, 0.0);
@@ -1851,7 +1854,12 @@ public class BlueJSyntaxView
      */
     public Map<Integer, EnumSet<ParagraphAttribute>> setParagraphAttributes(int lineNumber, Map<ParagraphAttribute, Boolean> alterAttr)
     {
-        EnumSet<ParagraphAttribute> attr = getParagraphAttributes(lineNumber);
+        ScopeInfo paraStyle = editorPane.getParagraph(lineNumber - 1).getParagraphStyle();
+        if (paraStyle == null) {
+            paraStyle = new ScopeInfo(EnumSet.noneOf(ParagraphAttribute.class));
+        }
+        
+        EnumSet<ParagraphAttribute> attr = EnumSet.copyOf(paraStyle.getAttributes());
         boolean changed = false;
         for (Entry<ParagraphAttribute, Boolean> alter : alterAttr.entrySet())
         {
@@ -1866,55 +1874,35 @@ public class BlueJSyntaxView
                 changed = attr.remove(alter.getKey()) || changed;
             }
         }
-        /*
-        if (alterAttr.containsKey(ParagraphAttribute.ERROR))
-        {
-            // Update above/below states by finding nearest error then pointing up
-            // and down accordingly
-            int totalLines = editorPane.getParagraphs().size();
-            int[] errorLines = paragraphAttributes.entrySet().stream().filter(e -> e.getValue().contains(ParagraphAttribute.ERROR)).mapToInt(e -> e.getKey()).sorted().toArray();
-            for (int i = 1; i <= totalLines;i++)
-            {
-                int nearest = Arrays.binarySearch(errorLines, i);
-                if (nearest >= 0)
-                {
-                    // Actually an error; remove above/below designation:
-                    getParaAttr(i).removeAll(Arrays.asList(ParagraphAttribute.ERROR_ABOVE, ParagraphAttribute.ERROR_BELOW));
-                }
-                else
-                {
-                    // Returns insertion point - 1 if not found:
-                    nearest = -nearest - 1;
-                    // Is nearest one above or below?
-                    boolean nearestIsBelow = nearest <= 0 || (nearest < errorLines.length && (errorLines[nearest] - i) < (i - errorLines[nearest - 1]));
-                    getParaAttr(i).remove(nearestIsBelow ? ParagraphAttribute.ERROR_ABOVE : ParagraphAttribute.ERROR_BELOW);
-                    getParaAttr(i).add(nearestIsBelow ? ParagraphAttribute.ERROR_BELOW : ParagraphAttribute.ERROR_ABOVE);
-                }
-            }
-        }
-        */
-
-        FXPlatformConsumer<EnumSet<ParagraphAttribute>> listener = paragraphAttributeListeners.get(lineNumber);
-        if (listener != null)
-        {
-            listener.accept(attr);
-        }
-
+        
         if (changed)
-            return Collections.singletonMap(lineNumber, EnumSet.copyOf(attr.clone()));
+        {
+            editorPane.setParagraphStyle(lineNumber - 1, paraStyle.withAttributes(attr));
+            return Collections.singletonMap(lineNumber, EnumSet.copyOf(attr));
+        }
         else
+        {
             return Collections.emptyMap();
+        }
     }
 
     /**
      * Gets the paragraph attributes for a particular line.  If none found, returns the empty set.
-     * The set is the live set in the map, so updating it will affect the stored attributes for the line.
+     * The set returned should not be modified directly.
      *
-     * First line is one.
+     * @param lineNumber  The line number to retrieve attributes for (the first line is one rather than zero).
      */
     EnumSet<ParagraphAttribute> getParagraphAttributes(int lineNumber)
     {
-        return paragraphAttributes.computeIfAbsent(lineNumber, k -> EnumSet.noneOf(ParagraphAttribute.class));
+        ScopeInfo scopeInfo = editorPane.getParagraph(lineNumber - 1).getParagraphStyle();
+        if (scopeInfo == null)
+        {
+            return EnumSet.noneOf(ParagraphAttribute.class);
+        }
+        else
+        {
+            return scopeInfo.getAttributes();
+        }
     }
 
     /**
@@ -2109,17 +2097,15 @@ public class BlueJSyntaxView
     {
         private final int lhs;
         private final int rhs;
-        private final int padding;
         private final boolean starts;
         private final boolean ends;
         private final Color fillColor;
         private final Color edgeColor;
 
-        public LeftRight(int lhs, int rhs, int padding, boolean starts, boolean ends, Color fillColor, Color edgeColor)
+        public LeftRight(int lhs, int rhs, boolean starts, boolean ends, Color fillColor, Color edgeColor)
         {
             this.lhs = Math.max(0, lhs);
             this.rhs = rhs;
-            this.padding = padding;
             this.starts = starts;
             this.ends = ends;
             this.fillColor = fillColor;
@@ -2136,7 +2122,6 @@ public class BlueJSyntaxView
 
             if (lhs != leftRight.lhs) return false;
             if (rhs != leftRight.rhs) return false;
-            if (padding != leftRight.padding) return false;
             if (starts != leftRight.starts) return false;
             if (ends != leftRight.ends) return false;
             if (!fillColor.equals(leftRight.fillColor)) return false;
@@ -2148,7 +2133,6 @@ public class BlueJSyntaxView
         {
             int result = lhs;
             result = 31 * result + rhs;
-            result = 31 * result + padding;
             result = 31 * result + (starts ? 1 : 0);
             result = 31 * result + (ends ? 1 : 0);
             result = 31 * result + fillColor.hashCode();

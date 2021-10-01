@@ -98,6 +98,9 @@
 .about-team {
     -fx-padding: 0 0 1em 0;
 }
+.about-tabs > .tab-header-area > .tab-header-background {
+    -fx-background-color: white;
+}
 .about-more-info {
     -fx-padding: 1em 0 0 0;
 }
@@ -111,6 +114,23 @@
 }
 .about-info-link {
     -fx-padding: 1em 0 0 0;
+}
+.about-translators-table {
+    -fx-padding: 1em 0.5em 0 0.5em;
+}
+.about-translators-table .column-header-background {
+    -fx-max-height:  0;
+    -fx-pref-height: 0;
+    -fx-min-height:  0;
+}
+.about-translators-table .table-row-cell:empty {
+    -fx-background-color: transparent;
+}
+.about-translators-table .table-row-cell .table-cell {
+    -fx-border-width: 0px;
+}
+.about-contributors-title {
+    -fx-font-weight: bold;
 }
 
 /* Version check dialog */
@@ -128,7 +148,7 @@
     -fx-spacing: 2em;
 }
 .export-dialog-userlibs {
-    -fx-padding: 0 3em 0 3em;
+    -fx-padding: 0.5em;
     -fx-hgap: 1em;
     -fx-vgap: 1em;
 }
@@ -480,8 +500,10 @@
     -fx-spacing: 0.8em;
 }
 
-.team-update-files .main-pane .button-hbox {
+.team-update-files > .button-hbox {
      -fx-spacing: 0.5em;
+     -fx-padding: 0.833em;
+     -fx-alignment: center-right;
 }
 
 .team-status {

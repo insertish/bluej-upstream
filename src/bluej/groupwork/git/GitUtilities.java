@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 2016  Michael Kolling and John Rosenberg 
+ Copyright (C) 2016,2018  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -26,6 +26,7 @@ import bluej.utility.Debug;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -37,12 +38,11 @@ import org.eclipse.jgit.errors.RevisionSyntaxException;
 import org.eclipse.jgit.lib.BranchTrackingStatus;
 import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.lib.ObjectReader;
-import org.eclipse.jgit.lib.ReflogEntry;
-import org.eclipse.jgit.lib.ReflogReader;
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.revwalk.RevCommit;
 import org.eclipse.jgit.revwalk.RevTree;
 import org.eclipse.jgit.revwalk.RevWalk;
+import org.eclipse.jgit.revwalk.filter.RevFilter;
 import org.eclipse.jgit.treewalk.CanonicalTreeParser;
 import threadchecker.OnThread;
 import threadchecker.Tag;
@@ -54,7 +54,6 @@ import threadchecker.Tag;
  */
 public class GitUtilities
 {
-
     /**
      * given a objectID, returns the RevTree it belongs to.
      *
@@ -78,87 +77,83 @@ public class GitUtilities
     }
     
     /**
-     * get the diffs between two revtrees.
-     * @param repo repository
-     * @param masterString 
-     * @param forkPoint
-     * @return 
+     * Get the diffs between two revisions.
+     * 
+     * @param repo reference to the repository
+     * @param revId   the commit (branch, etc) to diff to
+     * @param forkPoint  the commit to diff from
      */
-    public static List<DiffEntry> getDiffs(Git repo, String masterString, RevCommit forkPoint)
+    public static List<DiffEntry> getDiffs(Git repo, String revId, RevCommit forkPoint)
     {
         if (forkPoint == null)
+        {
             return Collections.emptyList();
+        }
 
         List<DiffEntry> diffs = new ArrayList<>();
-        try {
-
-            ObjectId master = repo.getRepository().resolve(masterString);
-
+        try
+        {
+            ObjectId master = repo.getRepository().resolve(revId);
             RevTree masterTree = getTree(repo.getRepository(), master);
-
             ObjectId branchBId = repo.getRepository().resolve(forkPoint.getName());
-
             RevTree ForkTree = getTree(repo.getRepository(), branchBId);
 
-            //Head and  repositories differ. We need to investigate further.
-            if (ForkTree != null) {
-                try (ObjectReader reader = repo.getRepository().newObjectReader()) {
+            // Head and  repositories differ. We need to investigate further.
+            if (ForkTree != null)
+            {
+                try (ObjectReader reader = repo.getRepository().newObjectReader())
+                {
                     CanonicalTreeParser masterTreeIter = new CanonicalTreeParser();
                     masterTreeIter.reset(reader, masterTree);
 
                     CanonicalTreeParser forkTreeIter = new CanonicalTreeParser();
                     forkTreeIter.reset(reader, ForkTree);
 
-                    //perform a diff between the local and remote tree
-                    DiffFormatter df = new DiffFormatter(new ByteArrayOutputStream());
-                    df.setRepository(repo.getRepository());
-                    List<DiffEntry> entries = df.scan(forkTreeIter, masterTreeIter);
+                    // perform a diff between the local and remote tree:
+                    try (DiffFormatter df = new DiffFormatter(new ByteArrayOutputStream()))
+                    {
+                        df.setRepository(repo.getRepository());
+                        List<DiffEntry> entries = df.scan(forkTreeIter, masterTreeIter);
 
-                    entries.stream().forEach((entry) -> {
-                        diffs.add(entry);
-                    });
-
+                        entries.stream().forEach((entry) -> {
+                            diffs.add(entry);
+                        });
+                    }
                 }
             }
-        } catch (IncorrectObjectTypeException ex) {
+        }
+        catch (IncorrectObjectTypeException ex)
+        {
             Debug.reportError(ex.getMessage());
-        } catch (RevisionSyntaxException | IOException ex) {
+        }
+        catch (RevisionSyntaxException | IOException ex)
+        {
             Debug.reportError(ex.getMessage());
         }
         return diffs;
     }
-    
+
     /**
      * Find the last point in two branches where they where the same.
-     * @param repository
-     * @param base
-     * @param tip
-     * @return
-     * @throws IOException 
+     * 
+     * @param repository  the repository
+     * @param base        the name of the first ref
+     * @param tip         the name of the second ref
+     * @return  the merge point, or null if there is none.
+     * @throws IOException  if an IO error occurs
      */
     public static RevCommit findForkPoint(Repository repository, String base, String tip) throws IOException
     {
         try (RevWalk walk = new RevWalk(repository)) {
             RevCommit tipCommit = walk.lookupCommit(repository.resolve(tip));
-            ReflogReader reflogReader = repository.getReflogReader(base);
-            // Can't find base point:
-            if (reflogReader == null)
-                return null;
-            List<ReflogEntry> reflog = reflogReader.getReverseEntries();
-            if (reflog.isEmpty()) {
-                return null; // no fork point.
-            }
-            for (int i = 0; i <= reflog.size(); i++) {
-                ObjectId id = i < reflog.size() ? reflog.get(i).getNewId() : reflog.get(i - 1).getOldId();
-                RevCommit commit = walk.lookupCommit(id);
-                if (walk.isMergedInto(commit, tipCommit)) {
-                    //found the fork point.
-                    walk.parseBody(commit);
-                    return commit;
-                }
-            }
+            RevCommit baseCommit = walk.lookupCommit(repository.resolve(base));
+            
+            walk.setRevFilter(RevFilter.MERGE_BASE);
+            walk.markStart(tipCommit);
+            walk.markStart(baseCommit);
+            RevCommit mergeBase = walk.next();
+            return mergeBase;
         }
-        return null; //no fork point.
     }
     
     public static String getFileNameFromDiff(DiffEntry entry)
@@ -278,5 +273,23 @@ public class GitUtilities
         int behindCount = bts.getBehindCount();
         return behindCount;
     }
-    
+
+    /**
+     * Calculates the path of a file relative to the project. It also makes sure that the
+     * separator is a Unix standard one, i.e. "/", as this is what jGit lib is expecting.
+     * see: http://bugs.bluej.org/browse/BLUEJ-1084
+     *
+     * @param basePath The project path
+     * @param file     The file which relative path is needed
+     * @return         The relative path of the file to the project
+     */
+    public static String getRelativeFileName(Path basePath, File file)
+    {
+        String fileName = basePath.relativize(file.toPath()).toString();
+        if (!File.separator.equals("/"))
+        {
+            fileName = fileName.replace(File.separator, "/");
+        }
+        return fileName;
+    }
 }

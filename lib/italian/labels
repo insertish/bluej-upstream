@@ -772,7 +772,7 @@ team.checkconn.bad=Impossibile connettersi al server
 
 
 menu.help=_Aiuto
-menu.help.about=_Informazioni su BlueJ
+menu.help.about=_Informazioni su $APPNAME
 menu.help.extensions=E_stensioni installate
 menu.help.versionCheck=Verifica della versione
 menu.help.copyright=_Copyright
@@ -800,7 +800,6 @@ graph.tooltip.classBroken=Questa classe non pu\u00f2 essere analizzata attualmen
 #Copyright
 
 menu.help.copyright.title=BlueJ Copyright, Lincenza e ridistribuzione
-menu.help.copyright.line0=BlueJ \u00a9 2000-2017 Michael K\u00F6lling, John Rosenberg.
 menu.help.copyright.line1=BlueJ \u00e8 disponibile sotto la GNU General Public License
 menu.help.copyright.line2=versione 2 con Classpath eccezione.
 menu.help.copyright.line3=Per altre informazioni vedere il file LICENSE.txt
@@ -819,14 +818,14 @@ raspberrypi.error.sudo.title=Nessun accesso all'hardware
 
 # About
 
-about.bluej.version=Versione di BlueJ
+about.version=Versione di $APPNAME
 about.java.version=Java versione
 about.vm=Virtual Machine:
 about.runningOn=Sistema:
 about.javahome=Java Home:
 about.logfile=File di log del debug:
 about.moreInformation=Per maggiori informazioni, vedi
-about.theTeam=Il team BlueJ:
+about.theTeam=Il team $APPNAME:
 
 
 # Work Indicator
