@@ -23,6 +23,7 @@
 
     package bluej.parser.ast.gen;
 	
+	import bluej.parser.ast.LocatableAST;
 
 public interface JavaTokenTypes {
 	int EOF = 1;

@@ -261,8 +261,8 @@ public final class ClassInfo
 
     /**
      * Record where we would insert the string "extends" in a class or interface.
-     * For a class/interface which already extends other classes/interfaces, should
-     * be set to null.
+     * For a class/interface which already extends other classes/interfaces, records
+     * where to insert an additional class/interface (after the existing ones). 
      *
      * @param s the Selection object which records a location to
      *          insert the "extends" keyword or additional interface
@@ -275,7 +275,7 @@ public final class ClassInfo
     /**
      * Returns where we would insert the string "extends" in a class/interface.
      * For a class/interface which already extends other classes/interfaces, returns
-     * null. 
+     * where to insert an additional class/interface (after the existing ones). 
      *
      * @returns s the Selection object which records a location to
      *          insert the "extends" keyword

@@ -49,7 +49,6 @@ public class EscapedUnicodeReader extends Reader
     
     private boolean charIsBuffered;
     private int bufferedChar;
-    private int position; // position within source stream
     
     // tracks whether we need to bump the column count as we read the next character.
     // This is set true after decoding a unicode escape sequence.
@@ -108,9 +107,7 @@ public class EscapedUnicodeReader extends Reader
     private int getChar() throws IOException
     {
         if (bumpColumn) {
-            if (attachedScanner != null) {
-            	attachedScanner.setColumn(attachedScanner.getColumn() + 5);
-            }
+            attachedScanner.setColumn(attachedScanner.getColumn() + 5);
             bumpColumn = false;
         }
         
@@ -121,7 +118,6 @@ public class EscapedUnicodeReader extends Reader
         }
         else {
             rchar = sourceReader.read();
-            position++;
         }
         
         if (rchar == '\\') {
@@ -158,7 +154,6 @@ public class EscapedUnicodeReader extends Reader
         int d2 = sourceReader.read();
         int d3 = sourceReader.read();
         int d4 = sourceReader.read();
-        position += 4;
         
         // Note, any of the above reads might return a non-hex-digit, including the
         // end-of-stream marker, but in this case hexDigitValue() will throw IOException.
@@ -178,11 +173,4 @@ public class EscapedUnicodeReader extends Reader
         return hval;
     }
 
-    /**
-     * Get the position within the source stream (i.e. number of characters read).
-     */
-    public int getPosition()
-    {
-    	return position;
-    }
 }

@@ -27,7 +27,7 @@ public class LocatableToken extends CommonToken
 {
     private int endColumn;
     private int endLine;
-    private LocatableToken hiddenBefore;
+    private Token hiddenBefore;
     
     public LocatableToken() {
         super();
@@ -68,12 +68,12 @@ public class LocatableToken extends CommonToken
         return endColumn - col;
     }
     
-    public void setHiddenBefore(LocatableToken t)
+    public void setHiddenBefore(Token t)
     {
         hiddenBefore = t;
     }
     
-    public LocatableToken getHiddenBefore()
+    public Token getHiddenBefore()
     {
         return hiddenBefore;
     }

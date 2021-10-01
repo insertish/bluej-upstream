@@ -37,23 +37,22 @@ import bluej.prefmgr.PrefMgr;
  *
  * @author  Markus Ostman
  * @author  Michael Kolling
- * @version $Id: FileUtility.java 6215 2009-03-30 13:28:25Z polle $
  */
 public class FileUtility
 {
-	/** 
-	 * Enum used to indicate file write capabilities on Windows.
-	 * @author polle
-	 * @see FileUtility#getVistaWriteCapabilities(File)
-	 */
-	public enum WriteCapabilities {READ_ONLY, NORMAL_WRITE, VIRTUALIZED_WRITE, UNKNOWN};
-	
+    /** 
+     * Enum used to indicate file write capabilities on Windows.
+     * @author polle
+     * @see FileUtility#getVistaWriteCapabilities(File)
+     */
+    public enum WriteCapabilities {READ_ONLY, NORMAL_WRITE, VIRTUALIZED_WRITE, UNKNOWN};
+
     private static final String sourceSuffix = ".java";
 
     private static JFileChooser pkgChooser = null;
     private static JFileChooser pkgChooserNonBlueJ = null;
     private static JFileChooser fileChooser = null;
-    private static JFileChooser directoryChooser = null;
+    private static PackageChooser directoryChooser = null;
     private static JFileChooser multiFileChooser = null;
     
 
@@ -116,10 +115,10 @@ public class FileUtility
      *  If cancelled or an invalid name was specified, return null.
      */
     public static String getFileName(Component parent, String title,
-                                     String buttonLabel, boolean directoryOnly,
-                                     FileFilter filter, boolean rememberDir)
+                                     String buttonLabel, FileFilter filter,
+                                     boolean rememberDir)
     {
-        JFileChooser newChooser = getFileChooser(directoryOnly, filter);
+        JFileChooser newChooser = getFileChooser(false, filter);
         
         newChooser.setDialogTitle(title);
 
@@ -127,12 +126,48 @@ public class FileUtility
 
         if (result == JFileChooser.APPROVE_OPTION) {
             if (rememberDir) {
-                // TODO: It is possible to approve without a selection which
-                // will throw a NPE below.
                 PrefMgr.setProjectDirectory(
                       newChooser.getSelectedFile().getParentFile().getPath());
             }
             return newChooser.getSelectedFile().getPath();
+        }
+        else if (result == JFileChooser.CANCEL_OPTION) {
+            return null;
+        }
+        else {
+            DialogManager.showError(parent, "error-no-name");
+            return null;
+        }
+    }
+    
+    /**
+     *  Get a directory name from the user, using a file selection dialogue.
+     *  If cancelled or an invalid name was specified, return null.
+     *  
+     *  @param parent   The parent component for the dialog display
+     *  @param buttonLabel  The label for the select button
+     *  @param existingOnly  Whether only existing directories should be
+     *                       selectable
+     *  @param rememberDir  Whether to remember the parent directory of
+     *                      the selected directory across sessions 
+     */
+    public static File getDirName(Component parent, String title,
+            String buttonLabel, boolean existingOnly, boolean rememberDir)
+    {
+        PackageChooser newChooser = getDirectoryChooser();
+        newChooser.setFileFilter(newChooser.getAcceptAllFileFilter());
+        newChooser.setAllowNewFiles(! existingOnly);
+        
+        newChooser.setDialogTitle(title);
+
+        int result = newChooser.showDialog(parent, buttonLabel);
+
+        if (result == JFileChooser.APPROVE_OPTION) {
+            if (rememberDir) {
+                PrefMgr.setProjectDirectory(
+                      newChooser.getSelectedFile().getParentFile().getPath());
+            }
+            return newChooser.getSelectedFile();
         }
         else if (result == JFileChooser.CANCEL_OPTION) {
             return null;
@@ -215,7 +250,7 @@ public class FileUtility
     /**
      * return a file chooser for choosing any directory
      */
-    private static JFileChooser getDirectoryChooser()
+    private static PackageChooser getDirectoryChooser()
     {
         if (directoryChooser == null) {
             directoryChooser = new PackageChooser(new File(PrefMgr.getProjectDirectory()), false, false);
@@ -400,7 +435,7 @@ public class FileUtility
     private static File[] actualRecursiveCopyFile(File srcDir, File destDir)
     {
         // remember every file which we don't successfully copy
-        List failed = new ArrayList();
+        List<File> failed = new ArrayList<File>();
 
         // check whether source and dest are the same
         if(srcDir.getAbsolutePath().equals(destDir.getAbsolutePath()))
@@ -566,90 +601,69 @@ public class FileUtility
         return filePath;
     }
 
-	/**
-	 * Get the file write capabilities of the given directory. <br>
-	 * To find the capabilities, this method will try creating a
-	 * temporary file in the directory. <br>
-	 * See trac tickets 147 and 150 for more details.
-	 * 
-	 * @param dir
-	 *            Directory to check.
-	 * @return The capabilities of this directory. Will return
-	 *         {@link WriteCapabilities#UNKNOWN} if the file is not an existing
-	 *         directory.
-	 */
-	public static WriteCapabilities getVistaWriteCapabilities(File dir) 
-	{
-		if(!dir.isDirectory()) {
-			return WriteCapabilities.UNKNOWN;
-		}
-		WriteCapabilities capabilities = WriteCapabilities.UNKNOWN;		
+    /**
+     * Get the file write capabilities of the given directory. <br>
+     * To find the capabilities, this method will try creating a
+     * temporary file in the directory. <br>
+     * See trac tickets 147 and 150 for more details.
+     * 
+     * @param dir
+     *            Directory to check.
+     * @return The capabilities of this directory. Will return
+     *         {@link WriteCapabilities#UNKNOWN} if the file is not an existing
+     *         directory.
+     */
+    public static WriteCapabilities getVistaWriteCapabilities(File dir) 
+    {
+        if(!dir.isDirectory()) {
+            return WriteCapabilities.UNKNOWN;
+        }
+        WriteCapabilities capabilities = WriteCapabilities.UNKNOWN;             
 
-		File tmpFile = null;
-		try {
-		    tmpFile = File.createTempFile("bluej", null, dir);
-			tmpFile.deleteOnExit();
-		    if(isVirtualized(tmpFile)) {
-				capabilities = WriteCapabilities.VIRTUALIZED_WRITE;
-			} else {
-				capabilities = WriteCapabilities.NORMAL_WRITE;
-			}
-		} catch (IOException e) {
-			// We could not write the file
-			capabilities = WriteCapabilities.READ_ONLY;
-		} finally {
-			if(tmpFile != null) {
-				tmpFile.delete();			
-			}
-		}
-		return capabilities;
-	}
+        File tmpFile = null;
+        try {
+            tmpFile = File.createTempFile("bluej", null, dir);
+            tmpFile.deleteOnExit();
+            if(isVirtualized(tmpFile)) {
+                capabilities = WriteCapabilities.VIRTUALIZED_WRITE;
+            } else {
+                capabilities = WriteCapabilities.NORMAL_WRITE;
+            }
+        } catch (IOException e) {
+            // We could not write the file
+            capabilities = WriteCapabilities.READ_ONLY;
+        } finally {
+            if(tmpFile != null) {
+                tmpFile.delete();                       
+            }
+        }
+        return capabilities;
+    }
 
-	/**
-	 * Check whether the given file is virtualized by Windows (Vista).
-	 * 
-	 */
-	private static boolean isVirtualized(File file)
-	{
-		boolean isVirtualized = false;
+    /**
+     * Check whether the given file is virtualized by Windows (Vista).
+     * 
+     */
+    private static boolean isVirtualized(File file)
+    {
+        boolean isVirtualized = false;
 
-		// Virtualization only happens on Windows Vista (or later)
-		if (Config.isWinOSVista()) {
-			try {
-				String canonicalPath = file.getCanonicalPath();
-				int colonIndex = canonicalPath.indexOf(":");
-				if (colonIndex > 0) {
-					String pathPart = canonicalPath.substring(colonIndex + 1);
-					String virtualStore = System.getenv("localappdata") + File.separator  + "VirtualStore";
-					String virtualTmpFilePath = virtualStore + pathPart;
-					isVirtualized = new File(virtualTmpFilePath).exists();
-				}
-			} catch (IOException e) {
-				Debug.reportError(
-						"Error when testing for Windows virtualisation.", e);
-			}
-		}
-		return isVirtualized;
-	}
-
-	/**
-	 * Test if we can create the given file. Remember to delete the file if the
-	 * write was successful.
-	 * 
-	 * @param file
-	 *            The file we try to create. The file must not already exist.
-	 * @return True if we could create the file.
-	 */
-	private static boolean canWrite(File file) {
-		boolean canWrite = false;
-		try {
-			file.createNewFile();
-			canWrite = true;
-		} catch (IOException e) {
-			// If we get any kind of IOException it means that we could not
-			// create the file.
-			canWrite = false;
-		}
-		return canWrite;
-	}
+        // Virtualization only happens on Windows Vista (or later)
+        if (Config.isWinOSVista()) {
+            try {
+                String canonicalPath = file.getCanonicalPath();
+                int colonIndex = canonicalPath.indexOf(":");
+                if (colonIndex > 0) {
+                    String pathPart = canonicalPath.substring(colonIndex + 1);
+                    String virtualStore = System.getenv("localappdata") + File.separator  + "VirtualStore";
+                    String virtualTmpFilePath = virtualStore + pathPart;
+                    isVirtualized = new File(virtualTmpFilePath).exists();
+                }
+            } catch (IOException e) {
+                Debug.reportError(
+                        "Error when testing for Windows virtualisation.", e);
+            }
+        }
+        return isVirtualized;
+    }
 }

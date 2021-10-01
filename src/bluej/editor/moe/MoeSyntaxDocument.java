@@ -30,19 +30,13 @@
 
 package bluej.editor.moe;
 
+import javax.swing.text.*;
+
 import java.awt.Color;
-
-import javax.swing.event.DocumentEvent;
-import javax.swing.text.AttributeSet;
-import javax.swing.text.Element;
-import javax.swing.text.MutableAttributeSet;
-import javax.swing.text.PlainDocument;
-
-import org.syntax.jedit.tokenmarker.Token;
-
 import bluej.Config;
-import bluej.parser.ParsedCUNode;
-import bluej.parser.ParsedNode;
+
+import org.syntax.jedit.*;
+import org.syntax.jedit.tokenmarker.*;
 
 
 /**
@@ -55,7 +49,7 @@ import bluej.parser.ParsedNode;
  * @author Jo Wood (Modified to allow user-defined colours, March 2001)
  *
  */
-public class MoeSyntaxDocument extends PlainDocument
+public class MoeSyntaxDocument extends SyntaxDocument
 {
     public static final String OUTPUT = "output";
     public static final String ERROR = "error";
@@ -65,21 +59,14 @@ public class MoeSyntaxDocument extends PlainDocument
 	private static Color defaultColour = null;
     private static Color backgroundColour = null;
 	
-    private ParsedNode parsedNode = new ParsedCUNode(this);
-    
     public MoeSyntaxDocument()
     {
-        getUserColors();
-        // defaults to 4 if cannot read property
-        int tabSize = Config.getPropInteger("bluej.editor.tabsize", 4);
-        putProperty(tabSizeAttribute, new Integer(tabSize));
+        super(getUserColors());
+         // defaults to 4 if cannot read property
+         int tabSize = Config.getPropInteger("bluej.editor.tabsize", 4);
+         putProperty(tabSizeAttribute, new Integer(tabSize));
     }
 
-    public ParsedNode getParser()
-    {
-        return parsedNode;
-    }
-    
     /**
      * Sets attributes for a paragraph.  This method was added to 
      * provide the ability to replicate DefaultStyledDocument's ability to 
@@ -121,12 +108,6 @@ public class MoeSyntaxDocument extends PlainDocument
     public static Color getBackgroundColor()
     {
         return backgroundColour;
-    }
-    
-    // DAV document
-    public static Color[] getColors()
-    {
-        return getUserColors();
     }
     
     /**
@@ -200,15 +181,6 @@ public class MoeSyntaxDocument extends PlainDocument
         return colors;
     }
     
-    // DAV comment
-    public Token getTokensForLine(int line)
-    {
-        Element lineEl = getDefaultRootElement().getElement(line);
-        int pos = lineEl.getStartOffset();
-        int length = lineEl.getEndOffset() - pos - 1;
-        return parsedNode.getMarkTokensFor(pos, length, 0, this);
-    }
-    
     /**
      * Get an integer value from a property whose value is hex-encoded.
      * @param propName  The name of the property
@@ -225,19 +197,5 @@ public class MoeSyntaxDocument extends PlainDocument
         catch (NumberFormatException nfe) {
             return def;
         }
-    }
-    
-    // DAV comment
-    protected void fireInsertUpdate(DocumentEvent e)
-    {
-        parsedNode.textInserted(this, 0, e.getOffset(), e.getLength());
-        super.fireInsertUpdate(e);
-    }
-    
-    // DAV comment
-    protected void fireRemoveUpdate(DocumentEvent e)
-    {
-        parsedNode.textRemoved(this, 0, e.getOffset(), e.getLength());
-        super.fireRemoveUpdate(e);
     }
 }

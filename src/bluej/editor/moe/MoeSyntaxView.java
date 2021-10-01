@@ -35,23 +35,13 @@ package bluej.editor.moe;
  * to add Syntax highlighting to the BlueJ programming environment.
  */
 
-import java.awt.Color;
-import java.awt.FontMetrics;
-import java.awt.Graphics;
-import java.awt.Image;
-import java.awt.Rectangle;
-import java.awt.Shape;
-import java.util.LinkedList;
-import java.util.List;
+import javax.swing.text.*;
 
-import javax.swing.text.BadLocationException;
-import javax.swing.text.Element;
-import javax.swing.text.Segment;
-
+import java.awt.*;
 import bluej.Config;
-import bluej.parser.ParsedNode;
-import bluej.parser.NodeTree.NodeAndPosition;
 import bluej.prefmgr.PrefMgr;
+import org.syntax.jedit.*;
+import org.syntax.jedit.tokenmarker.*;
 
 /**
  * A Swing view implementation that colorizes lines of a
@@ -64,7 +54,7 @@ import bluej.prefmgr.PrefMgr;
  * @author Bruce Quig
  * @author Michael Kolling
  *
- * @version $Id: MoeSyntaxView.java 6506 2009-08-12 05:39:15Z davmac $
+ * @version $Id: MoeSyntaxView.java 6215 2009-03-30 13:28:25Z polle $
  */
 
 public class MoeSyntaxView extends BlueJSyntaxView
@@ -89,114 +79,39 @@ public class MoeSyntaxView extends BlueJSyntaxView
         super(elem);
     }
 
-    protected void paintLineMarkers(int lineIndex, Graphics g, int x, int y,
-            MoeSyntaxDocument document, Element line)
-    {
-        if(PrefMgr.getFlag(PrefMgr.LINENUMBERS))
-            drawLineNumber(g, lineIndex+1, x, y);
-   
-        // draw breakpoint and/or step image
-   
-        if(hasTag(line, BREAKPOINT)) {
-            if(hasTag(line, STEPMARK)) {
-                g.drawImage(breakStepImage, x-1, y+3-breakStepImage.getHeight(null), 
-                            null);
-            }
-            else {  // break only
-                g.drawImage(breakImage, x-1, y+3-breakImage.getHeight(null), null);
-            }
-        }
-        else if(hasTag(line, STEPMARK)) {
-            g.drawImage(stepImage, x-1, y+3-stepImage.getHeight(null), null);
-        }
-        
-        // draw left margin
-        Color oldColor = g.getColor();
-        g.setColor(Color.GRAY);
-        FontMetrics fm = g.getFontMetrics();
-        int y1 = y - fm.getAscent() - fm.getLeading();
-        int y2 = y + fm.getDescent();
-        g.drawLine(x + LEFT_MARGIN - 1, y1, x + LEFT_MARGIN - 1, y2);
-        g.setColor(oldColor);
-    }
-    
     /**
-     * Pain the scope markers for the given line.
-     */
-    protected void paintScopeMarkers(Graphics g, MoeSyntaxDocument document, int x, int y, Element line)
-    {
-        ParsedNode rootNode = document.getParser();
-        
-        int pos = line.getEndOffset();
-        
-        List<NodeAndPosition> scopeStack = new LinkedList<NodeAndPosition>();
-        rootNode.getNodeStack(scopeStack, pos, 0);
-        
-        List<NodeAndPosition> scopeStackAlt = new LinkedList<NodeAndPosition>();
-        rootNode.getNodeStack(scopeStackAlt, line.getStartOffset(), 0);
-        
-        if (scopeStackAlt.size() > scopeStack.size()) {
-            scopeStack = scopeStackAlt;
-        }
-        
-        for (NodeAndPosition nap: scopeStack) {
-            if (nap.getNode().isContainer()) {
-                int indent = getIndentFor(document, nap);
-                FontMetrics fm = g.getFontMetrics();
-                int ypos = y - fm.getAscent() - fm.getLeading();
-                int ypos2 = y + fm.getDescent();
-                int char_width = fm.charWidth(' ');
-                int xpos = x + LEFT_MARGIN + char_width * indent - 2;
-                g.drawLine(xpos, ypos, xpos, ypos2);
-            }
-        }
-    }
-    
-    /**
-     * Get the scope indent for a given node.
-     */
-    private int getIndentFor(MoeSyntaxDocument document, NodeAndPosition nap)
-    {
-        // For now, just return indent of first line
-        int nodePos = nap.getPosition();
-        int firstLineIndex = document.getDefaultRootElement().getElementIndex(nodePos);
-        Element firstLine = document.getDefaultRootElement().getElement(firstLineIndex);
-        
-        try {
-            String text = document.getText(firstLine.getStartOffset(), firstLine.getEndOffset() - firstLine.getStartOffset());
-            int indent = 0;
-            int lpos = 0;
-            while (lpos < text.length()) {
-                int thechar = text.charAt(lpos++);
-                if (thechar == ' ') {
-                    indent++;
-                }
-                else if (thechar == '\t') {
-                    indent += getTabSize();
-                }
-                else {
-                    break;
-                }
-            }
-            return indent;
-        } catch (BadLocationException e) {
-            return 0;
-        }
-    }
-    
+     * Draw a line for the moe editor.
+	 */
 	public void paintTaggedLine(Segment lineText, int lineIndex, Graphics g, int x, int y, 
-            MoeSyntaxDocument document, Color def, Element line) 
+            SyntaxDocument document, TokenMarker tokenMarker, Color def, Element line) 
     {
-	    paintLineMarkers(lineIndex, g, x, y, document, line);
-	    paintScopeMarkers(g, document, x, y, line);
+		if(PrefMgr.getFlag(PrefMgr.LINENUMBERS))
+		    drawLineNumber(g, lineIndex+1, x, y);
+   
+		// draw breakpoint and/or step image
+   
+		if(hasTag(line, BREAKPOINT)) {
+		    if(hasTag(line, STEPMARK)) {
+		        g.drawImage(breakStepImage, x-1, y+3-breakStepImage.getHeight(null), 
+                            null);
+		    }
+		    else {  // break only
+		        g.drawImage(breakImage, x-1, y+3-breakImage.getHeight(null), null);
+		    }
+		}
+		else if(hasTag(line, STEPMARK)) {
+		    g.drawImage(stepImage, x-1, y+3-stepImage.getHeight(null), null);
+		}
 
-        //if(tokenMarker == null) {
-        //    Utilities.drawTabbedText(lineText, x+BREAKPOINT_OFFSET, y, g, this, 0);            
-        //}
-	    int linePos = document.getDefaultRootElement().getElement(lineIndex).getStartOffset();
-	    paintSyntaxLine(lineText, lineIndex, x + LEFT_MARGIN, y, g, document, def);
-    }
-	
+        if(tokenMarker == null) {
+            Utilities.drawTabbedText(lineText, x+BREAKPOINT_OFFSET, y, g, this, 0);            
+        }
+        else {
+            paintSyntaxLine(lineText, lineIndex, x+BREAKPOINT_OFFSET, y, g, 
+                            document, tokenMarker, def);
+        }
+}
+
    /**
     * redefined paint method to paint breakpoint area
     *

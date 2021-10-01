@@ -80,8 +80,6 @@ import com.apple.eawt.ApplicationEvent;
 
 /**
  * The main user interface frame which allows editing of packages
- * 
- * @version $Id: PkgMgrFrame.java 6349 2009-05-22 14:49:01Z polle $
  */
 public class PkgMgrFrame extends JFrame
     implements BlueJEventListener, MouseListener, PackageEditorListener, FocusListener
@@ -104,6 +102,7 @@ public class PkgMgrFrame extends JFrame
 
     private JPanel buttonPanel;
     private JPanel testPanel;
+    private JPanel javaMEPanel;
     private JPanel teamPanel;
 
     private JCheckBoxMenuItem showUsesMenuItem;
@@ -244,6 +243,7 @@ public class PkgMgrFrame extends JFrame
                 QuitAction.getInstance().actionPerformed(getMostRecent());
             }
             
+            @SuppressWarnings("unused")
             public void handleOpenFile(ApplicationEvent event) 
             {                
                 String projectPath = event.getFilename();                
@@ -683,10 +683,12 @@ public class PkgMgrFrame extends JFrame
             String javaMEflag = p.getProperty( "package.isJavaMEproject", "false" );
             if ( javaMEflag.equals( "true" ) ) {
                 getProject().setJavaMEproject( true );
-                showJavaMEcontrols( );
+                showJavaMEcontrols(true);
+                showTestingTools(false);
             } 
             else {
-                getProject().setJavaMEproject( false ); 
+                getProject().setJavaMEproject( false );
+                showTestingTools(wantToSeeTestingTools());
             }                
         };
 
@@ -694,46 +696,12 @@ public class PkgMgrFrame extends JFrame
     }
     
     /**
-     * In frames that display a Java Micro Edition package, the testing tools
-     * are always hidden, and in their place we display in the testPanel a 
-     * label signalling that the frame is for a Java ME package, and a button
-     * and Project-menu item for deploying the MIDlet project. This label, button,
-     * and menu item show in all frames with Java ME packages, regardless of whether
-     * the java-me checkbox in the preferences panel is ticked or not.
+     * Show or hide the Java ME controls.
      */
-    private void showJavaMEcontrols( )
+    private void showJavaMEcontrols(boolean show )
     {           
-        javaMEdeployMenuItem.setVisible( true );
-        
-        // The contents of testItems are shown/hidden depending on user
-        // preferences specified in the preferences panel. So we
-        // remove testPanel from testItems because it will
-        // always be visible, displaying the Java ME controls.
-        testItems.remove( testPanel );                
-        testPanel.removeAll();
-        
-        JLabel label = new JLabel( "Java ME" );
-        //label.setFont( PkgMgrFont );  
-        //To show Michael how bold looks. 
-        //   fontSize = Config.getPropInteger("bluej.fontsize", 12);
-        //   normalFont = Config.getFont("bluej.font", "SansSerif", fontSize);
-        //should do what the statement below does. Look into it if Michael likes bold.
-        //See assignment of normalFont in PrefMgr.java
-        label.setFont( new Font ("SansSerif", Font.BOLD, 12 ) );
-        label.setHorizontalAlignment( JLabel.CENTER );
-        label.setForeground( label.getBackground( ).darker( ).darker( ) ); 
-        Dimension pref = label.getMinimumSize();
-        pref.width = Integer.MAX_VALUE;
-        label.setMaximumSize(pref);  
-        testPanel.add( label );
-        testPanel.add( Box.createVerticalStrut( 4 ) );   
-        
-        AbstractButton button = createButton( deployMIDletAction, false, false, 4, 4 );        
-        testPanel.add( button );
-        testPanel.add( Box.createVerticalStrut( 4 ) );   
- 
-        testPanel.setVisible( true );              
-        showTestingTools( false ); //Hide the rest of the testing tools
+        javaMEdeployMenuItem.setVisible(show);
+        javaMEPanel.setVisible(show);              
     }
     
     /**
@@ -786,10 +754,12 @@ public class PkgMgrFrame extends JFrame
             editor.removeMouseListener(this);
             editor.removeFocusListener(this);
             this.menuManager.setAttachedObject(pkg);
+            
+            getObjectBench().removeAllObjects(getProject().getUniqueId());
+            clearTextEval();
+            showJavaMEcontrols(false);
+            showTestingTools(wantToSeeTestingTools());
         }
-        
-        getObjectBench().removeAllObjects(getProject().getUniqueId());
-        clearTextEval();
 
         getPackage().closeAllEditors();
 
@@ -1111,7 +1081,7 @@ public class PkgMgrFrame extends JFrame
         }
 
         // add bluej.pkg files through the imported directory structure
-        List dirsToConvert = Import.findInterestingDirectories(getPackage().getPath());
+        List<File> dirsToConvert = Import.findInterestingDirectories(getPackage().getPath());
         Import.convertDirectory(dirsToConvert);
 
         // reload all the packages (which discovers classes which may have
@@ -1178,18 +1148,18 @@ public class PkgMgrFrame extends JFrame
         if ( isJavaMEproject )
             title = Config.getString( "pkgmgr.newMEpkg.title" );
                     
-        String newname = FileUtility.getFileName( this, title,
-                 Config.getString( "pkgmgr.newPkg.buttonLabel" ), true, null, true );
+        File newnameFile = FileUtility.getDirName( this, title,
+                 Config.getString( "pkgmgr.newPkg.buttonLabel" ), false, true );
 
-        if (newname == null)
+        if (newnameFile == null)
             return false;
 
-        if(new File(newname).exists()) {
-            DialogManager.showErrorWithText(null, "directory-exists", newname);
+        if(newnameFile.exists()) {
+            DialogManager.showErrorWithText(null, "directory-exists", newnameFile.getPath());
             return false;
         }
-        else if( ! newProject( newname, isJavaMEproject ) ) {
-            DialogManager.showErrorWithText(null, "cannot-create-directory", newname);
+        else if( ! newProject( newnameFile.getAbsolutePath(), isJavaMEproject ) ) {
+            DialogManager.showErrorWithText(null, "cannot-create-directory", newnameFile.getPath());
             return false;
         }
 
@@ -1669,14 +1639,11 @@ public class PkgMgrFrame extends JFrame
     public void doImport()
     {
         // prompt for the directory to import from
-        File importDir;
-        String importName = FileUtility.getFileName(this, Config.getString("pkgmgr.importPkg.title"), Config
-                .getString("pkgmgr.importPkg.buttonLabel"), true, null, false);
+        File importDir = FileUtility.getDirName(this, Config.getString("pkgmgr.importPkg.title"), Config
+                .getString("pkgmgr.importPkg.buttonLabel"), true, false);
 
-        if (importName == null)
+        if (importDir == null)
             return;
-
-        importDir = new File(importName);
 
         if (!importDir.isDirectory())
             return;
@@ -1687,7 +1654,7 @@ public class PkgMgrFrame extends JFrame
             return;
 
         // recursively copy files from import directory to package directory
-        importProjectDir(new File(importName), true);
+        importProjectDir(importDir, true);
     }
     
     /**
@@ -2206,13 +2173,13 @@ public class PkgMgrFrame extends JFrame
     {
         runButton.setEnabled(false);
 
-        List l = pkg.getTestTargets();
+        List<ClassTarget> l = pkg.getTestTargets();
 
         // Find the number of tests
         int numTests = 0;
-        ListIterator i = l.listIterator();
+        ListIterator<ClassTarget> i = l.listIterator();
         while (i.hasNext()) {
-            ClassTarget ct = (ClassTarget) i.next();
+            ClassTarget ct = i.next();
             if (ct.isCompiled() && ! ct.isAbstract()) {
                 UnitTestClassRole utcr = (UnitTestClassRole) ct.getRole();
                 numTests += utcr.getTestCount(ct);
@@ -2222,7 +2189,7 @@ public class PkgMgrFrame extends JFrame
             }
         }
         
-        final Iterator it = l.iterator();
+        Iterator<ClassTarget> it = l.iterator();
         TestDisplayFrame.getTestDisplay().startMultipleTests(numTests);
 
         TestRunnerThread trt = new TestRunnerThread(this, it);
@@ -2751,6 +2718,31 @@ public class PkgMgrFrame extends JFrame
             }
             teamItems.add(teamPanel);
 
+            javaMEPanel = new JPanel();
+            {
+                javaMEPanel.setLayout(new BoxLayout(javaMEPanel, BoxLayout.Y_AXIS));
+
+                javaMEPanel.setBorder(BorderFactory.createEmptyBorder(5, 5, 14, 5));
+
+                JLabel label = new JLabel( "Java ME" );
+                label.setFont( new Font ("SansSerif", Font.BOLD, 12 ) );
+                label.setHorizontalAlignment( JLabel.CENTER );
+                label.setForeground( label.getBackground( ).darker( ).darker( ) ); 
+                Dimension pref = label.getMinimumSize();
+                pref.width = Integer.MAX_VALUE;
+                label.setMaximumSize(pref);
+                label.setAlignmentX(0.5f);
+                javaMEPanel.add( label );
+                javaMEPanel.add( Box.createVerticalStrut( 4 ) );   
+                
+                AbstractButton button = createButton( deployMIDletAction, false, false, 4, 4 );
+                button.setAlignmentX(0.5f);
+                javaMEPanel.add( button );
+                javaMEPanel.add( Box.createVerticalStrut( 4 ) );   
+                if(!Config.isMacOSLeopard()) javaMEPanel.add(Box.createVerticalStrut(3));
+                javaMEPanel.setAlignmentX(0.5f);
+            }
+            
             machineIcon = new MachineIcon();
             machineIcon.setAlignmentX(0.5f);
             itemsToDisable.add(machineIcon);
@@ -2759,6 +2751,7 @@ public class PkgMgrFrame extends JFrame
             toolPanel.add(buttonPanel);
             toolPanel.add(Box.createVerticalGlue());
             toolPanel.add(teamPanel);
+            toolPanel.add(javaMEPanel);
             toolPanel.add(testPanel);
             toolPanel.add(machineIcon);
         }
@@ -2815,6 +2808,8 @@ public class PkgMgrFrame extends JFrame
         if (! javaMEtoolsShown) {
             showJavaMEtools(false);
         }
+        
+        javaMEPanel.setVisible(false);
         
         // show the text evaluation pane if needed
         if (PrefMgr.getFlag(PrefMgr.SHOW_TEXT_EVAL)) {
@@ -3190,9 +3185,9 @@ public class PkgMgrFrame extends JFrame
         ProjectOpener opener = new ProjectOpener();
         recentProjectsMenu.removeAll();
 
-        List projects = PrefMgr.getRecentProjects();
-        for (Iterator it = projects.iterator(); it.hasNext();) {
-            JMenuItem item = recentProjectsMenu.add((String) it.next());
+        List<String> projects = PrefMgr.getRecentProjects();
+        for (Iterator<String> it = projects.iterator(); it.hasNext();) {
+            JMenuItem item = recentProjectsMenu.add(it.next());
             item.addActionListener(opener);
         }
     }
@@ -3227,6 +3222,8 @@ public class PkgMgrFrame extends JFrame
      */
     public boolean isJavaMEpackage( )
     {
+        if (pkg == null) return false;
+        
         String javaMEflag = 
                pkg.getLastSavedProperties().getProperty( "package.isJavaMEproject", "false" );
         

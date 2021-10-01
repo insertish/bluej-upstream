@@ -54,7 +54,7 @@ import org.syntax.jedit.*;
  * @author Bruce Quig
  * @author Michael Kolling
  *
- * @version $Id: BlueJSyntaxView.java 6506 2009-08-12 05:39:15Z davmac $
+ * @version $Id: BlueJSyntaxView.java 6215 2009-03-30 13:28:25Z polle $
  */
 
 public abstract class BlueJSyntaxView extends PlainView
@@ -62,7 +62,6 @@ public abstract class BlueJSyntaxView extends PlainView
     /**  width of tag area for setting breakpoints */
     public static final short TAG_WIDTH = 14;
     protected static final int BREAKPOINT_OFFSET = TAG_WIDTH + 2;
-    protected static final int LEFT_MARGIN = BREAKPOINT_OFFSET + 8;
 
     // private members
     private Segment line;
@@ -129,8 +128,8 @@ public abstract class BlueJSyntaxView extends PlainView
             initialise(g);
         }
 
-        // SyntaxDocument document = (SyntaxDocument)getDocument();
-        MoeSyntaxDocument document = (MoeSyntaxDocument)getDocument();
+        SyntaxDocument document = (SyntaxDocument)getDocument();
+        TokenMarker tokenMarker = document.getTokenMarker();
 
         Color def = MoeSyntaxDocument.getDefaultColor();
 
@@ -142,7 +141,7 @@ public abstract class BlueJSyntaxView extends PlainView
             document.getText(start, end - (start + 1), line);
             g.setColor(def);
             
-            paintTaggedLine(line, lineIndex, g, x, y, document, def, lineElement);
+            paintTaggedLine(line, lineIndex, g, x, y, document, tokenMarker, def, lineElement);
         }
         catch(BadLocationException bl) {
             // shouldn't happen
@@ -154,7 +153,7 @@ public abstract class BlueJSyntaxView extends PlainView
      * Draw a line for this view, including the tag mark.
 	 */
 	public abstract void paintTaggedLine(Segment line, int lineIndex, Graphics g, int x, int y, 
-            MoeSyntaxDocument document, Color def, Element lineElement);
+            SyntaxDocument document, TokenMarker tokenMarker, Color def, Element lineElement);
 
 	/**
      * Draw the line number in front of the line
@@ -187,12 +186,11 @@ public abstract class BlueJSyntaxView extends PlainView
      *
      */
     protected void paintSyntaxLine(Segment line, int lineIndex, int x, int y,
-                                 Graphics g, MoeSyntaxDocument document, 
-                                 Color def)
+                                 Graphics g, SyntaxDocument document, 
+                                 TokenMarker tokenMarker, Color def)
     {
         Color[] colors = document.getColors();
-        // Token tokens = tokenMarker.markTokens(line, lineIndex);
-        Token tokens = document.getTokensForLine(lineIndex);
+        Token tokens = tokenMarker.markTokens(line, lineIndex);
         int offset = 0;
         for(;;) {
             byte id = tokens.id;
@@ -295,8 +293,8 @@ public abstract class BlueJSyntaxView extends PlainView
         doc.getText(p0, pos - p0, buffer);
         int xOffs = Utilities.getTabbedTextWidth(buffer, metrics, tabBase, this, p0);
 
-        // fill in the results and return, include left margin area
-        lineArea.x += xOffs + LEFT_MARGIN;
+        // fill in the results and return, include breakpoint area offset
+        lineArea.x += xOffs + (TAG_WIDTH + 2);
         lineArea.width = 1;
         lineArea.height = metrics.getHeight();
         return lineArea;
