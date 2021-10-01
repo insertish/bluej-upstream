@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2012,2013, 2014  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2012,2013,2014,2015  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -57,6 +57,7 @@ public class PrefMgr
     public static final String SCOPE_HIGHLIGHTING_STRENGTH = "bluej.editor.scopeHilightingStrength";
     public static final String NAVIVIEW_EXPANDED="bluej.naviviewExpanded.default";
     public static final String ACCESSIBILITY_SUPPORT = "bluej.accessibility.support";
+    public static final String START_WITH_SUDO = "bluej.startWithSudo";
     
     public static final String USE_THEMES = "bluej.useTheme";
     // font property names
@@ -126,7 +127,7 @@ public class PrefMgr
         targetFont = Config.getFont("bluej.target.font", "SansSerif-bold", targetFontSize);
         
         // preferences other than fonts:
-        highlightStrength = initializeHighlighStrengh();
+        highlightStrength = Config.getPropInteger(SCOPE_HIGHLIGHTING_STRENGTH, 20);
         isNaviviewExpanded=initializeisNavivewExpanded();
         
         projectDirectory = Config.getPropString("bluej.projectPath");
@@ -145,6 +146,7 @@ public class PrefMgr
         flags.put(SHOW_TEXT_EVAL, Config.getPropString(SHOW_TEXT_EVAL, "false"));
         flags.put(SHOW_UNCHECKED, Config.getPropString(SHOW_UNCHECKED, "true"));
         flags.put(ACCESSIBILITY_SUPPORT, Config.getPropString(ACCESSIBILITY_SUPPORT, "false"));
+        flags.put(START_WITH_SUDO, Config.getPropString(START_WITH_SUDO, "true"));
     }
 
     /**
@@ -155,19 +157,6 @@ public class PrefMgr
         
     }
     
-    /**
-     * Check if BlueJ is runnung on a ARM processor (Raspberry Pi). If so, sets highlighStrengh to 0.
-     * @return 0 if ARM processor. 20 otherwise
-     */
-    public static int initializeHighlighStrengh()
-    {
-     if (Config.isRaspberryPi()) {
-         return Config.getPropInteger(SCOPE_HIGHLIGHTING_STRENGTH, 0);
-     }else{
-         return Config.getPropInteger(SCOPE_HIGHLIGHTING_STRENGTH, 20);
-     }
-     
-    }
     
     /**
      * Check if BlueJ is runnung on a ARM processor (Raspberry Pi). If so, sets hides the code preview.
@@ -175,12 +164,7 @@ public class PrefMgr
      */
     public static boolean initializeisNavivewExpanded()
     {
-     if (Config.isRaspberryPi()) {
-         return Boolean.parseBoolean(Config.getPropString(NAVIVIEW_EXPANDED, "false"));
-     }else{
-         return Boolean.parseBoolean(Config.getPropString(NAVIVIEW_EXPANDED, "true"));
-     }
-     
+        return Boolean.parseBoolean(Config.getPropString(NAVIVIEW_EXPANDED, String.valueOf(!Config.isRaspberryPi())));
     }
     
     // ----- system interface to read or set prefences: -----
@@ -214,7 +198,7 @@ public class PrefMgr
         recentProjects.add(0, projectName);
         
         for(int i = 0; i < recentProjects.size(); i++) {
-            Config.putPropString("bluej.recentProject" + i, (String)recentProjects.get(i));
+            Config.putPropString("bluej.recentProject" + i, recentProjects.get(i));
         }
     }
     
@@ -260,12 +244,11 @@ public class PrefMgr
      */
     public static boolean getFlag(String flag)
     {
-        String value = (String)flags.get(flag);
+        String value = flags.get(flag);
         if(value == null){
             return false;
         }
-        else
-            return value.equals("true");
+        return value.equals("true");
     }
 
     /**

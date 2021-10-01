@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2011,2012,2013,2014  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2011,2012,2013,2014,2015  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -1057,22 +1057,10 @@ public class ClassTarget extends DependentTarget
     public void compile(final Editor editor)
     {
         if (Config.isGreenfoot()) {
-            // Even though we do a package compile, we must let the editor know when
-            // the compile finishes, so that it updates its status correctly:
-            getPackage().compile(new CompileObserver() {
-                
-                @Override
-                public void startCompile(File[] sources) { }
-                
-                @Override
-                public void endCompile(File[] sources, boolean successful)
-                {
-                    editor.compileFinished(successful);
-                }
-                
-                @Override
-                public boolean compilerMessage(Diagnostic diagnostic) { return false; }
-            });
+            // In Greenfoot compiling always compiles the whole package, and at least
+            // compiles this target:
+            setState(S_INVALID);
+            getPackage().compile();
         }
         else {
             getPackage().compile(this, false, new CompileObserver() {
@@ -1981,11 +1969,12 @@ public class ClassTarget extends DependentTarget
     {
         File srcFile = getSourceFile();
         prepareForRemoval();
-        getPackage().removeTarget(this);
+        Package pkg = getPackage();
+        pkg.removeTarget(this);
         
         // We must remove after the above, because it might involve saving, 
         // and thus recording edits to the file
-        DataCollector.removeClass(getPackage(), srcFile);
+        DataCollector.removeClass(pkg, srcFile);
     }
 
     @Override

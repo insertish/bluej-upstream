@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2011,2012,2013  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2011,2012,2013,2014,2015  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -28,6 +28,7 @@ import java.net.URL;
 import java.net.URLEncoder;
 import java.util.Properties;
 import java.util.UUID;
+import java.io.IOException;
 
 import com.apple.eawt.Application;
 import com.apple.eawt.AppEvent;
@@ -179,7 +180,10 @@ public class Main
             }
         }
 
-        Boot.getInstance().disposeSplashWindow();
+        if (!Config.isGreenfoot())
+        {
+            Boot.getInstance().disposeSplashWindow();
+        }
         ExtensionsManager.getInstance().delegateEvent(new ApplicationEvent(ApplicationEvent.APP_READY_EVENT));
     }
 
@@ -235,6 +239,19 @@ public class Main
                     }
                 }
             });
+        }
+        
+        if (Config.isGreenfoot())
+        {
+            Debug.message("Disabling App Nap");
+            try
+            {
+                Runtime.getRuntime().exec("defaults write org.greenfoot NSAppSleepDisabled -bool YES");
+            }
+            catch (IOException e)
+            {
+                Debug.reportError("Error disabling App Nap", e);
+            }
         }
     }
 

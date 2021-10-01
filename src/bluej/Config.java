@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2011,2012,2013,2014  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2011,2012,2013,2014,2015  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -30,8 +30,6 @@ import java.awt.Rectangle;
 import java.awt.Toolkit;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
-import java.io.BufferedInputStream;
-import java.io.DataInputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
@@ -534,7 +532,7 @@ public final class Config
                                     "/proc/cpuinfo"));
                             while (scanner.hasNextLine()) {
                                 String lineFromFile = scanner.nextLine();
-                                if (lineFromFile.contains("BCM2708")) {
+                                if (lineFromFile.startsWith("Hardware") && lineFromFile.contains("BCM")) {
                                     result = true;
                                     break;
                                 }
@@ -1697,31 +1695,5 @@ public final class Config
     public static final boolean isGreenfoot()
     {
         return isGreenfoot;
-    }
-    
-    /**
-     * Determine whether a file is a ZIP File.
-     */
-    public static boolean isZipFile(File file)
-    {
-        try {
-            if(file.isDirectory()) {
-                return false;
-            }
-            if(!file.canRead()) {
-                throw new IOException();
-            }
-            if(file.length() < 4) {
-                return false;
-            }
-            DataInputStream in = new DataInputStream(new BufferedInputStream(new FileInputStream(file)));
-            int magicNumber = in.readInt();
-            in.close();
-            return magicNumber == 0x504b0304;
-        }
-        catch (IOException exc) {
-            Debug.reportError("Could not read file: " + file.getAbsolutePath(), exc);
-        }
-        return false;
     }
 }

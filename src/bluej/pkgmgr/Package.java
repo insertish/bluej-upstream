@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2010,2011,2012,2013,2014  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2010,2011,2012,2013,2014,2015  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -65,6 +65,7 @@ import bluej.graph.Graph;
 import bluej.parser.AssistContent;
 import bluej.parser.CodeSuggestions;
 import bluej.parser.ParseUtils;
+import bluej.parser.nodes.ParsedCUNode;
 import bluej.parser.symtab.ClassInfo;
 import bluej.parser.symtab.Selection;
 import bluej.pkgmgr.dependency.Dependency;
@@ -399,7 +400,7 @@ public final class Package extends Graph
         PackageTarget pt = null;
 
         for (Iterator<Target> e = targets.iterator(); e.hasNext();) {
-            Target target = (Target) e.next();
+            Target target = e.next();
 
             if (target instanceof ClassTarget)
                 return null;
@@ -496,7 +497,7 @@ public final class Package extends Graph
                 list.add(target);
             }
         }
-        return (Target[]) list.toArray(targetArray);
+        return list.toArray(targetArray);
     }
 
     /**
@@ -743,7 +744,7 @@ public final class Package extends Graph
             Target target = targetIt.next();
             if (target instanceof ClassTarget) {
                 ClassTarget ct = (ClassTarget) target;
-                ct.setState(ClassTarget.S_NORMAL);
+                ct.setState(DependentTarget.S_NORMAL);
             }
         }
 
@@ -773,7 +774,7 @@ public final class Package extends Graph
             if (target instanceof ClassTarget) {
                 ClassTarget ct = (ClassTarget) target;
                 if (ct.isCompiled() && !ct.upToDate()) {
-                    ct.setState(ClassTarget.S_INVALID);
+                    ct.setState(DependentTarget.S_INVALID);
                     invalidated.add(ct);
                 }
             }
@@ -786,7 +787,7 @@ public final class Package extends Graph
                 if (dt instanceof ClassTarget) {
                     ClassTarget dep = (ClassTarget) dt;
                     if (dep.isCompiled()) {
-                        dep.setState(ClassTarget.S_INVALID);
+                        dep.setState(DependentTarget.S_INVALID);
                         invalidated.add(dep);
                     }
                 }
@@ -805,7 +806,7 @@ public final class Package extends Graph
                     ct.determineRole(cl);
                     ct.analyseDependencies(cl);
                     if (cl == null) {
-                        ct.setState(ClassTarget.S_INVALID);
+                        ct.setState(DependentTarget.S_INVALID);
                     }
                 }
                 else {
@@ -947,7 +948,7 @@ public final class Package extends Graph
         }
 
         for (Iterator<Target> it = targets.iterator(); it.hasNext();) {
-            Target target = (Target) it.next();
+            Target target = it.next();
 
             if (target instanceof ClassTarget) {
                 ClassTarget ct = (ClassTarget) target;
@@ -957,7 +958,7 @@ public final class Package extends Graph
         
         //Update class roles, and their state
         for (Iterator<Target> it = targets.iterator(); it.hasNext();) {
-            Target target = (Target) it.next();
+            Target target = it.next();
 
             if (target instanceof ClassTarget) {
                 ClassTarget ct = (ClassTarget) target;
@@ -966,10 +967,10 @@ public final class Package extends Graph
                 if (cl != null) {
                     ct.determineRole(cl);
                     if (ct.upToDate()) {
-                        ct.setState(ClassTarget.S_NORMAL);
+                        ct.setState(DependentTarget.S_NORMAL);
                     }
                     else {
-                        ct.setState(ClassTarget.S_INVALID);
+                        ct.setState(DependentTarget.S_INVALID);
                     }
                 }
             }
@@ -1056,7 +1057,7 @@ public final class Package extends Graph
         t.save(props, "readme");
 
         for (int i = 0; i < usesArrows.size(); i++) { // uses arrows
-            Dependency d = (Dependency) usesArrows.get(i);
+            Dependency d = usesArrows.get(i);
             d.save(props, "dependency" + (i + 1));
         }
 
@@ -1342,7 +1343,7 @@ public final class Package extends Graph
                 // we don't want to try and compile if it is a class target without src
                 if (ct.hasSourceCode()) {
                     ct.ensureSaved();
-                    ct.setState(ClassTarget.S_INVALID);
+                    ct.setState(DependentTarget.S_INVALID);
                     ct.setQueued(true);
                 }
                 else {
@@ -1407,7 +1408,7 @@ public final class Package extends Graph
                 Iterator<? extends Dependency> dependencies = head.dependencies();
 
                 while (dependencies.hasNext()) {
-                    Dependency d = (Dependency) dependencies.next();
+                    Dependency d = dependencies.next();
                     if (!(d.getTo() instanceof ClassTarget)) {
                         continue;
                     }
@@ -1523,7 +1524,7 @@ public final class Package extends Graph
     public void removeStepMarks()
     {
         for (Iterator<Target> it = targets.iterator(); it.hasNext();) {
-            Target target = (Target) it.next();
+            Target target = it.next();
 
             if (target instanceof ClassTarget)
                 ((ClassTarget) target).removeStepMark();
@@ -1776,8 +1777,8 @@ public final class Package extends Graph
                         where = 2;
                     
                     if (where > 0) { // should always be true
-                        s1 = (Selection) vsels.get(where - 1);
-                        s1.combineWith((Selection) vsels.get(where));
+                        s1 = vsels.get(where - 1);
+                        s1.combineWith(vsels.get(where));
                     }
                 }
                 else if (d instanceof ExtendsDependency) {
@@ -1913,7 +1914,7 @@ public final class Package extends Graph
         ArrayList<ClassTarget> risul = new ArrayList<ClassTarget>();
 
         for (Iterator<Target> it = targets.iterator(); it.hasNext();) {
-            Target target = (Target) it.next();
+            Target target = it.next();
 
             if (target instanceof ClassTarget) {
                 risul.add((ClassTarget) target);
@@ -2141,10 +2142,12 @@ public final class Package extends Graph
     public boolean showSource(String sourcename, int lineNo, String threadName, boolean breakpoint)
     {
         String msg = " ";
-
-        if (breakpoint)
-            msg = "Thread \"" + threadName + "\" stopped at breakpoint.";
-
+        
+        if (PrefMgr.getFlag(PrefMgr.ACCESSIBILITY_SUPPORT)) {
+            msg = breakpoint ? Config.getString("debugger.accessibility.breakpoint") : Config.getString("debugger.accessibility.paused");
+            msg = msg.replace("$", threadName);
+        }
+        
         boolean bringToFront = !sourcename.equals(lastSourceName);
         lastSourceName = sourcename;
 
@@ -2156,9 +2159,18 @@ public final class Package extends Graph
         return bringToFront;
     }
     
+    /**
+     * An interface for message "calculators" which can produce enhanced diagnostic messages when
+     * given a reference to the editor in which a compilation error occurred.
+     */
     public static interface MessageCalculator
     {
-        // This should produce something half-way helpful if null is passed:
+        /**
+         * Produce a diagnostic message for the given editor.
+         * This should produce something half-way helpful if null is passed.
+         * 
+         * @param e  The editor where the original error occurred (null if it cannot be determined).
+         */
         public String calculateMessage(Editor e);
     }
     
@@ -2171,6 +2183,7 @@ public final class Package extends Graph
             boolean bringToFront, boolean setStepMark, String help)
     {
         return showEditorMessage(filename, lineNo, new MessageCalculator() {
+            @Override
             public String calculateMessage(Editor e) { return message; }
           }, beep, bringToFront, setStepMark, help);
     }
@@ -2313,7 +2326,7 @@ public final class Package extends Graph
     public void hitHalt(DebuggerThread thread)
     {
         int frame = thread.getSelectedFrame();
-        if (showSource(thread.getClassSourceName(frame), thread.getLineNumber(frame), thread.getName(), false)) {
+        if (showSource(thread.getClassSourceName(frame), thread.getLineNumber(frame), thread.getName(), thread.isAtBreakpoint())) {
             getProject().getExecControls().setVisible(true);
         }
 
@@ -2368,7 +2381,7 @@ public final class Package extends Graph
             }
         }
         if (!done) {
-            SourceLocation loc = (SourceLocation) stack.get(0);
+            SourceLocation loc = stack.get(0);
             showMessageWithText("error-in-file", loc.getClassName() + ":" + loc.getLineNumber() + "\n" + message);
         }
     }
@@ -2504,7 +2517,7 @@ public final class Package extends Graph
 
                     if (t instanceof ClassTarget) {
                         ClassTarget ct = (ClassTarget) t;
-                        ct.setState(ClassTarget.S_COMPILING);
+                        ct.setState(DependentTarget.S_COMPILING);
                     }
                 }
             }
@@ -2630,7 +2643,7 @@ public final class Package extends Graph
                     newCompiledState &= t.upToDate();
                 }
 
-                t.setState(newCompiledState ? ClassTarget.S_NORMAL : ClassTarget.S_INVALID);
+                t.setState(newCompiledState ? DependentTarget.S_NORMAL : DependentTarget.S_INVALID);
                 t.setQueued(false);
                 if (successful && t.editorOpen())
                     t.getEditor().setCompiled(true);
@@ -2748,15 +2761,20 @@ public final class Package extends Graph
             }
             
             String missing = chopAtOpeningBracket(message.substring(message.lastIndexOf(' ') + 1));
-
             String lineText = getLine(e);
+            
+            ParsedCUNode pcuNode = e.getParsedNode();
+            if (pcuNode == null) {
+                return message;
+            }
+            
+            LinkedList<String> maybeTheyMeant = new LinkedList<String>();
             
             // The column from the diagnostic object assumes tabs are 8 spaces; convert to
             // a line position:
             int pos = convertColumn(lineText, column) + getLineStart(e);
-            
-            LinkedList<String> maybeTheyMeant = new LinkedList<String>();
-            CodeSuggestions suggests = e.getParsedNode().getExpressionType(pos, e.getSourceDocument());
+
+            CodeSuggestions suggests = pcuNode.getExpressionType(pos, e.getSourceDocument());
             AssistContent[] values = ParseUtils.getPossibleCompletions(suggests, project.getJavadocResolver(), null);
             if (values != null) {
                 for (AssistContent a : values) {
