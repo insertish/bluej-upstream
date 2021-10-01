@@ -269,6 +269,11 @@ public class ExecControls
     {
         if (threadList != null)
         {
+            if (dt.isKnownSystemThread())
+            {
+                hideSystemThreads.set(false);
+            }
+            
             DebuggerThreadDetails details = threadList.getItems().stream()
                     .filter(d -> d.isThread(dt))
                     .findFirst().orElse(null);
@@ -742,6 +747,7 @@ public class ExecControls
         {
             try {
                 clearThreadDetails();
+                
                 // throws an illegal state exception
                 // if we press this whilst we are already
                 // restarting the remote VM

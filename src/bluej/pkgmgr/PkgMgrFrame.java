@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2010,2011,2012,2013,2014,2015,2016,2017,2018  Michael Kolling and John Rosenberg
+ Copyright (C) 1999-2010,2011,2012,2013,2014,2015,2016,2017,2018,2019  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -63,6 +63,7 @@ import bluej.pkgmgr.target.Target;
 import bluej.pkgmgr.target.role.UnitTestClassRole;
 import bluej.prefmgr.PrefMgr;
 import bluej.prefmgr.PrefMgrDialog;
+import bluej.terminal.Terminal;
 import bluej.testmgr.TestDisplayFrame;
 import bluej.testmgr.record.InvokerRecord;
 import bluej.utility.BlueJFileReader;
@@ -608,18 +609,6 @@ public class PkgMgrFrame
                     if (focused.booleanValue())
                     {
                         recentFrame = frame;
-                    }
-                    else
-                    {
-                        if (Config.isWinOS())
-                        {
-                            // We need to fire ESCAPE key-press and ESCAPE key-release events
-                            // because alt-tab triggers the menu and menu cannot be cancelled programmatically
-                            frame.getFXWindow().getScene().getRoot().fireEvent(
-                                    new KeyEvent(KeyEvent.KEY_PRESSED, "", "", KeyCode.ESCAPE, false, false, false, false));
-                            frame.getFXWindow().getScene().getRoot().fireEvent(
-                                    new KeyEvent(KeyEvent.KEY_RELEASED, "", "", KeyCode.ESCAPE, false, false, false, false));
-                        }
                     }
                 })
         );
@@ -2000,6 +1989,7 @@ public class PkgMgrFrame
                 "Russian",      "Sergey Zemlyannikov",
                 "Slovak",       "Roman Horváth",
                 "Spanish",      "Aldo Mettini, Viviana Marcela Alvarez Tomé, and José Ramón Puente Lerma",
+                "Swedish",      "Daniel Norrman"
         };
 
         String[] previousTeamMembers = {
@@ -2407,18 +2397,16 @@ public class PkgMgrFrame
     }
 
     /**
-     * The user function to remove an arrow from the dagram was invoked.
-     * 
-     * public void doRemoveArrow() { pkg.setState(Package.S_DELARROW);
-     * setStatus(Config.getString("pkgmgr.chooseArrow")); }
-     */
-
-    /**
      * The user function to test all classes in a package
      */
     public void doTest()
     {
         runTestsAction.setAvailable(false);
+        Terminal terminal = this.getPackage().getProject().getTerminal();
+        if (terminal.clearOnMethodCall())
+        {
+            terminal.clear();
+        }
 
         List<ClassTarget> l = getPackage().getTestTargets();
 
@@ -2698,7 +2686,7 @@ public class PkgMgrFrame
      * in.
      */
     @Override
-    public void blueJEvent(int eventId, Object arg)
+    public void blueJEvent(int eventId, Object arg, Project prj)
     {
         switch(eventId) {
             case BlueJEvent.CREATE_VM :
@@ -2743,14 +2731,12 @@ public class PkgMgrFrame
                 if(machineIcon != null) {
                     machineIcon.setIdle();
                 }
-                getProject().getTerminal().activate(false);
                 break;
 
             case Debugger.RUNNING :
                 if(machineIcon != null) {
                     machineIcon.setRunning();
                 }
-                getProject().getTerminal().activate(true);
                 break;
 
             case Debugger.SUSPENDED :

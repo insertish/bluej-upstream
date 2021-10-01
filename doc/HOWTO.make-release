@@ -63,9 +63,7 @@ PART III - RELEASING BLUEJ
         - add section with version, date, changes and download links
      - update the current version information (version.info)
         - change the version number and the release notes' summary.
-     - update the Raspberry Pi page (raspberrypi/index.html)
-        - change file name and download links
-        
+       
 12. In the bugs database (http://bugs.bluej.org/trac/bluej),
 
    1. Add a future release milestone ("Roadmap", "New Milestone").
@@ -82,7 +80,7 @@ PART III - RELEASING BLUEJ
 13. Also in the bugs database, add the new version so that bugs can be reported against
     it.
     
-14. Update the support form at http://www.bluej.org/help/supportform.html - the drop-down
+14. Update the support form at https://www.bluej.org/support.html - the drop-down
     version field should have the new version added as an option.
 
 15. Send a mail message to bluej-announce@bluej.org, announcing the release.

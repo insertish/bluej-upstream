@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 2018  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -21,42 +21,34 @@
  */
 package bluej.debugger.jdi;
 
-import com.sun.jdi.ClassType;
-import com.sun.jdi.Field;
-import com.sun.jdi.LocalVariable;
-import com.sun.jdi.ObjectReference;
-import com.sun.jdi.ReferenceType;
+import bluej.debugger.DebuggerTestResult;
 
-/*
- * Jdi utilities, java 1.4 version.
- *  
- * @author Davin McCall
- * @version $Id: JdiUtils14.java 6215 2009-03-30 13:28:25Z polle $
+import java.util.List;
+
+/**
+ * A class wrapper to maintain the JUnit test results and the execution time of the test
  */
-public class JdiUtils14 extends JdiUtils {
+public class TestResultsWithRunTime {
+    private List<DebuggerTestResult> results;
+    private int totalRunTime;
 
-    public boolean hasGenericSig(ObjectReference obj)
+    public void setResults(List<DebuggerTestResult> results)
     {
-        return false;
+        this.results = results;
     }
-    
-    public String genericSignature(Field f)
+
+    public void setTotalRunTime(int totalRunTime)
     {
-        return null;
+        this.totalRunTime = totalRunTime;
     }
-    
-    public String genericSignature(ReferenceType rt)
+
+    public List<DebuggerTestResult> getResults() 
     {
-        return null;
+        return results;
     }
-    
-    public String genericSignature(LocalVariable lv)
+
+    public int getTotalRunTime()
     {
-        return null;
-    }
-    
-    public boolean isEnum(ClassType ct)
-    {
-        return false;
+        return totalRunTime;
     }
 }

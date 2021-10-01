@@ -47,17 +47,21 @@ public class Installer extends JFrame
 
 
     // File to test for JDK (relative to javaPath):
-    static private String jdkFile = "/lib/tools.jar";
+    static private String jdkFile = "/jmods/jdk.compiler.jmod";
+
+    static private String javaFxFile = "/lib/javafx.graphics.jar";
 
     static final int BUFFER_SIZE=8192;
 
     // user interface components
     JTextField directoryField;
     JTextField javaField;
+    JTextField javaFxField;
     JLabel textLabel1;
     JLabel textLabel2;
     JButton browseDirButton;
     JButton browseJdkButton;
+    JButton browseJavaFxButton;
     //JRadioButton jdk12Button;
     //JRadioButton jdk13Button;
     JButton installButton;
@@ -75,6 +79,7 @@ public class Installer extends JFrame
 
     String installationDir = "";
     String javaPath = "";
+    String javaFxPath = "";
 
     Properties properties;
     long myTotalBytes = 400000;
@@ -221,6 +226,9 @@ public class Installer extends JFrame
         else if(src == browseJdkButton) {
             getJDKDirectory();
         }
+        else if (src == browseJavaFxButton) {
+            getJavaFxDirectory();
+        }
         else if(src == installButton) {
             installButton.setEnabled(false);
             InstallThread p = new InstallThread();
@@ -277,6 +285,21 @@ public class Installer extends JFrame
         }
     }
 
+    /**
+     * Get the JavaFX directory from the user via a file selection
+     * dialogue.
+     */
+    private void getJavaFxDirectory()
+    {
+        String dirName = getDirName("Select JavaFX directory");
+        if(dirName != null) {
+            javaFxPath = dirName;
+            javaFxField.setText(javaFxPath);
+            if (!isJavaFxPath(javaFxPath))
+                javaFxPathProblem();
+        }
+    }
+
     
     
     /**
@@ -287,6 +310,11 @@ public class Installer extends JFrame
         readInputValues();
         if(! isJDKPath(javaPath)) {
             jdkPathProblem();
+            return;
+        }
+        if (!isJavaFxPath(javaFxPath))
+        {
+            javaFxPathProblem();
             return;
         }
 
@@ -336,31 +364,8 @@ public class Installer extends JFrame
     {
         installationDir = directoryField.getText();
         javaPath = javaField.getText();
+        javaFxPath = javaFxField.getText();
         //isJDK12 = jdk12Button.isSelected();
-    }
-
-    /*
-     * Check if it is a Raspberry Pi.
-     */
-    public static boolean isRaspberryPi()
-    {
-        boolean result = false;
-        try {
-            Scanner scanner = new Scanner(new File(
-                    "/proc/cpuinfo"));
-            while (scanner.hasNextLine()) {
-                String lineFromFile = scanner.nextLine();
-                if (lineFromFile.contains("BCM2708")) {
-                    result = true;
-                    break;
-                }
-            }
-            scanner.close();
-        } catch (FileNotFoundException fne) {
-            //it is not unix.
-            return false;
-        }
-        return result;
     }
 
     /**
@@ -378,6 +383,15 @@ public class Installer extends JFrame
             // room here for additional checks should jdk structure change
             return false;
         }
+    }
+
+    /**
+     * Check that the JavaFX path has JavaFX in it
+     */
+    public boolean isJavaFxPath(String path)
+    {
+        String javaFxFilePath = path + javaFxFile;
+        return new File(javaFxFilePath).exists();
     }
 
     /**
@@ -421,10 +435,20 @@ public class Installer extends JFrame
     {
         notifyProblem(
            "The Java directory you have specified is not a valid \n" +
-           "JDK directory. The JDK directory is the directory \n" +
-           "that JDK (aka Java 2 SDK) was installed to. It must \n" +
-           "have a subdirectory \"lib\" with a file named \n" +
-           "\"tools.jar\" in it.");
+           "JDK directory. It must contain the file \n" +
+           jdkFile);
+    }
+
+    /**
+     * Inform user of invalid jdk.
+     */
+    private void javaFxPathProblem()
+    {
+        notifyProblem(
+            "JavaFX must be installed, via package manager or downloaded\n" +
+            "from openjfx.io  The JavaFX directory you have specified\n" + 
+            "is not a valid JavaFX directory. It must contain the file\n" +
+            javaFxFile);
     }
 
     /**
@@ -479,6 +503,7 @@ public class Installer extends JFrame
         EventQueue.invokeLater(new Runnable() {
             public void run() {
                 JOptionPane.showMessageDialog(Installer.this, problem);
+                installButton.setEnabled(true);
             }
         });
     }
@@ -548,6 +573,18 @@ public class Installer extends JFrame
         browseJdkButton.addActionListener(this);
         jdkDirPanel.add(browseJdkButton);
         centrePanel.add(jdkDirPanel);
+
+        centrePanel.add(Box.createVerticalStrut(5));
+
+        Box javaFxDirPanel = new Box(BoxLayout.X_AXIS);
+        javaFxDirPanel.add(Box.createHorizontalGlue());
+        javaFxDirPanel.add(new JLabel("JavaFX directory:"));
+        javaFxField = new JTextField("", 16);
+        javaFxDirPanel.add(javaFxField);
+        browseJavaFxButton = new JButton("Browse");
+        browseJavaFxButton.addActionListener(this);
+        javaFxDirPanel.add(browseJavaFxButton);
+        centrePanel.add(javaFxDirPanel);
 
         // jdk selection radio buttons - currently not used
 
@@ -627,6 +664,7 @@ public class Installer extends JFrame
         out.write("#!/bin/sh\n");
         out.write("APPBASE=\"" + installationDir + "\"\n");
         out.write("JAVAPATH=\"" + javaPath + "\"\n");
+        out.write("JAVAFX_LIB=\"" + javaFxPath + "/lib\"\n");
         String commands;
         String javaName = "$JAVAPATH/bin/java";
         if(isMacOS) {
@@ -634,11 +672,8 @@ public class Installer extends JFrame
         }
         else {
             commands = getProperty("commands.unix").toString();
-            //check if it is a Raspberry Pi.
-            if (isRaspberryPi()) {
-                out.write("export J2D_PIXMAP=shared\n");
-            }
         }
+        commands += "\n" + getProperty("javafx.classpath.unix").toString();
 
         if(commands != null) {
             out.write(commands);
@@ -669,6 +704,7 @@ public class Installer extends JFrame
         FileWriter out = new FileWriter(outputFile.toString());
         out.write("@echo off\r\n");
         out.write("set APPBASE=\"" + installationDir + "\"\r\n");
+        out.write("set JAVAFX_LIB=\"" + javaFxPath + "\\lib\"\r\n");
         String commands = getProperty("commands.win").toString();
         if(commands != null) {
             commands = replace(commands, '~', "%APPBASE%");
@@ -677,6 +713,7 @@ public class Installer extends JFrame
             out.write(commands);
             out.write("\r\n");
         }
+        out.write(getProperty("javafx.classpath.win").toString() + "\r\n");
         out.write("\"" + javaPath + "\\bin\\java\" " +
                   getProperty("javaOpts.win") + " " +
                   getProperty("mainClass") + " " +

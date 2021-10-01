@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 2014,2015,2016,2017,2018 Michael Kölling and John Rosenberg
+ Copyright (C) 2014,2015,2016,2017,2018,2019 Michael Kölling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -40,7 +40,7 @@ import bluej.editor.moe.MoeSyntaxDocument;
 import bluej.prefmgr.PrefMgr.PrintSize;
 import bluej.parser.AssistContent;
 import bluej.parser.AssistContent.CompletionKind;
-import bluej.parser.CodeSuggestions;
+import bluej.parser.ExpressionTypeInfo;
 import bluej.parser.ParseUtils;
 import bluej.parser.PrefixCompletionWrapper;
 import bluej.parser.SourceLocation;
@@ -207,7 +207,8 @@ public class FrameEditor implements Editor
     }
 
     @OnThread(Tag.FX)
-    public FrameEditor(File frameFilename, File javaFilename, EditorWatcher watcher, EntityResolver resolver, JavadocResolver javadocResolver, bluej.pkgmgr.Package pkg, FXPlatformRunnable callbackOnOpen)
+    public FrameEditor(File frameFilename, File javaFilename, EditorWatcher watcher, EntityResolver resolver,
+                       JavadocResolver javadocResolver, bluej.pkgmgr.Package pkg, FXPlatformRunnable callbackOnOpen)
     {
         this.frameFilename = frameFilename;
         this.javaFilename = javaFilename;
@@ -217,19 +218,33 @@ public class FrameEditor implements Editor
         this.pkg = pkg;
         this.javaSource = new SimpleObjectProperty<>();
         this.callbackOnOpen = callbackOnOpen;
-        lastSource = Loader.loadTopLevelElement(frameFilename, resolver);
+        lastSource = Loader.loadTopLevelElement(frameFilename, resolver, pkg.getQualifiedName());
     }
-    
+
+    /**
+     * Create a frame editor tab.
+     *
+     * @param visible Whether to make the FXTabbedEditor window visible
+     * @param toFront Whether to bring the tab to the front (i.e. select the tab)
+     * @param openInNewWindow if this is true, the editor opens in a new window
+     */
     @OnThread(Tag.FXPlatform)
-    private void createPanel(boolean visible, boolean toFront)
+    private void createPanel(boolean visible, boolean toFront, boolean openInNewWindow)
     {
-        //Debug.message("&&&&&& Creating panel: " + System.currentTimeMillis());
         this.panel = new FrameEditorTab(pkg.getProject(), resolver, this, lastSource);
-        //Debug.message("&&&&&& Adding panel to editor: " + System.currentTimeMillis());
         if (visible)
         {
-            // This calls initialiseFX:
-            pkg.getProject().getDefaultFXTabbedEditor().addTab(this.panel, visible, toFront);
+            if (openInNewWindow)
+            {
+                // This calls initialiseFX:
+                pkg.getProject().createNewFXTabbedEditor().addTab(this.panel, visible, toFront);
+            }
+            else
+            {
+                // This calls initialiseFX:
+                pkg.getProject().getDefaultFXTabbedEditor().addTab(this.panel, visible, toFront);
+            }
+
         }
         else
         {
@@ -449,7 +464,10 @@ public class FrameEditor implements Editor
 
             @Override
             @OnThread(Tag.FXPlatform)
-            public void setEditorVisible(boolean vis) { FrameEditor.this.setEditorVisible(vis); }
+            public void setEditorVisible(boolean vis, boolean openInNewWindow)
+            {
+                FrameEditor.this.setEditorVisible(vis, openInNewWindow);
+            }
 
             @Override
             @OnThread(Tag.FXPlatform)
@@ -520,10 +538,10 @@ public class FrameEditor implements Editor
             
             @Override
             @OnThread(Tag.FXPlatform)
-            public void setStepMark(int lineNumber, String message,
+            public boolean setStepMark(int lineNumber, String message,
                     boolean isBreak, DebuggerThread thread)
             {
-                FrameEditor.this.setStepMark(lineNumber, message, isBreak, thread);
+                return FrameEditor.this.setStepMark(lineNumber, message, isBreak, thread);
             }
 
             @Override
@@ -772,7 +790,7 @@ public class FrameEditor implements Editor
     {
         //This is a message from a clickable stack trace following an exception
         JavaFXUtil.onceNotNull(javaSource, js -> JavaFXUtil.runNowOrLater(() -> {
-            setVisibleFX(true, true);
+            setVisibleFX(true, true, false);
             js.handleException(lineNumber);
         }));
     }
@@ -809,21 +827,21 @@ public class FrameEditor implements Editor
 
         if (compileType.showEditorOnError())
         {
-            setVisibleFX(true, true);
+            setVisibleFX(true, true, false);
         }
         return false;
     }
     
     @Override
-    public void setStepMark(int lineNumber, String message, boolean isBreak,
+    public boolean setStepMark(int lineNumber, String message, boolean isBreak,
             DebuggerThread thread)
     {
         // Disable Stride debugger:
         if (true)
-            return;
+            return true;
         
         removeStepMark();
-        setVisibleFX(true, true);
+        setVisibleFX(true, true, false);
         HashMap<String, DebugVarInfo> vars = new HashMap<String, DebugVarInfo>();
         if (thread != null) {
             DebuggerObject currentObject = thread.getCurrentObject(0);
@@ -853,26 +871,39 @@ public class FrameEditor implements Editor
             curBreakpoint.removeHighlight();
             curBreakpoint = null;
         }
-        try {
-            JavaSource js = javaSource.get();
-            if (js == null) {
-                js = saveJava(lastSource, true).javaSource;
-            }
-            curBreakpoint = js.handleStop(lineNumber, debugInfo);
-            if (curBreakpoint.isBreakpointFrame())
+
+        // We only want to show the step mark once the panel is initialised,
+        // which we may need to wait for if we're only now showing the editor
+        // for the first time:
+        JavaFXUtil.onceTrue(panel.initialisedProperty(), b -> {
+            try
             {
-                thread.step();
+                JavaSource js = javaSource.get();
+                if (js == null)
+                {
+                    js = saveJava(lastSource, true).javaSource;
+                }
+                curBreakpoint = js.handleStop(lineNumber, debugInfo);
+                if (curBreakpoint.isBreakpointFrame())
+                {
+                    thread.step();
+                }
+                else
+                {
+                    if (execHistory.isEmpty() || execHistory.get(execHistory.size() - 1) != curBreakpoint)
+                    {
+                        execHistory.add(curBreakpoint);
+                    }
+                    panel.redrawExecHistory(execHistory);
+                }
             }
-            else
+            catch (IOException ioe)
             {
-                if (execHistory.isEmpty() || execHistory.get(execHistory.size() - 1) != curBreakpoint)
-                    execHistory.add(curBreakpoint);
-                panel.redrawExecHistory(execHistory);
+                Debug.reportError("Exception attempting to save Java source for Stride class", ioe);
             }
-        }
-        catch (IOException ioe) {
-            Debug.reportError("Exception attempting to save Java source for Stride class", ioe);
-        }
+        });
+        
+        return true;
     }
 
     @Override
@@ -946,7 +977,7 @@ public class FrameEditor implements Editor
         CompletableFuture<Boolean> inited = new CompletableFuture<>();
         if (panel == null)
         {
-            setVisibleFX(true, false);
+            setVisibleFX(true, false, false);
         }
         JavaFXUtil.onceTrue(panel.initialisedProperty(), init -> {
             inited.complete(init);
@@ -1008,21 +1039,25 @@ public class FrameEditor implements Editor
     }
 
     @Override
-    public void setEditorVisible(boolean vis)
+    public void setEditorVisible(boolean vis, boolean openInNewWindow)
     {
-        setVisibleFX(vis, true);
+        setVisibleFX(vis, true, openInNewWindow);
     }
 
     @OnThread(Tag.FXPlatform)
-    private void setVisibleFX(boolean show, boolean bringToFront)
+    private void setVisibleFX(boolean show, boolean bringToFront, boolean openInNewWindow)
     {
         if (panel == null && show) // No need to create the panel if we don't want to show it
         {
-            createPanel(show, bringToFront);
+            createPanel(show, bringToFront, openInNewWindow);
         }
 
         if (panel != null)
         {
+            if (openInNewWindow && !panel.isWindowVisible())
+            {
+                panel.setParent(pkg.getProject().createNewFXTabbedEditor(), true);
+            }
             panel.setWindowVisible(show, bringToFront);
             if (callbackOnOpen != null && show)
                 callbackOnOpen.run();
@@ -1172,7 +1207,7 @@ public class FrameEditor implements Editor
 
     public AssistContent[] getCompletions(TopLevelCodeElement allCode, PosInSourceDoc pos, ExpressionSlot<?> completing, CodeElement codeEl)
     {
-        CodeSuggestions suggests = allCode.getCodeSuggestions(pos, completing);
+        ExpressionTypeInfo suggests = allCode.getCodeSuggestions(pos, completing);
         
         ArrayList<AssistContent> joined = new ArrayList<>();
         if (suggests != null)
@@ -1193,7 +1228,7 @@ public class FrameEditor implements Editor
             {
                 // TODO in future, only do this if we are importing Greenfoot classes.
                 JavaReflective greenfootClassRef = new JavaReflective(pkg.loadClass("greenfoot.Greenfoot"));
-                CodeSuggestions greenfootClass = new CodeSuggestions(new GenTypeClass(greenfootClassRef), null, null, true, false);
+                ExpressionTypeInfo greenfootClass = new ExpressionTypeInfo(new GenTypeClass(greenfootClassRef), null, null, true, false);
                 AssistContent[] greenfootStatic = ParseUtils.getPossibleCompletions(greenfootClass, javadocResolver, null);
                 Arrays.stream(greenfootStatic).filter(ac -> ac.getKind() == CompletionKind.METHOD).forEach(ac -> joined.add(new PrefixCompletionWrapper(ac, "Greenfoot.")));
             }
@@ -1211,7 +1246,7 @@ public class FrameEditor implements Editor
     // Gets the available fields in this class (i.e. those in this class and all superclasses)
     public List<AssistContent> getAvailableMembers(TopLevelCodeElement allCode, PosInSourceDoc pos, Set<CompletionKind> kinds, boolean includeOverridden)
     {
-        CodeSuggestions suggests = allCode.getCodeSuggestions(pos, null);
+        ExpressionTypeInfo suggests = allCode.getCodeSuggestions(pos, null);
         if (suggests == null)
             return Collections.emptyList();
         List<AssistContent> members;
@@ -1238,7 +1273,7 @@ public class FrameEditor implements Editor
     {
         if (panel == null)
         {
-            createPanel(false, false);
+            createPanel(false, false, false);
         }
         panel.insertAppendMethod(method, after);
         codeModified();
@@ -1249,7 +1284,7 @@ public class FrameEditor implements Editor
     {
         if (panel == null)
         {
-            createPanel(false, false);
+            createPanel(false, false, false);
         }
         panel.insertMethodCallInConstructor(methodName, after);
         codeModified();
@@ -1260,7 +1295,7 @@ public class FrameEditor implements Editor
     {
         if (panel == null)
         {
-            createPanel(false, false);
+            createPanel(false, false, false);
         }
         panel.removeImports(importTargets);
         codeModified();
@@ -1326,7 +1361,7 @@ public class FrameEditor implements Editor
     public void focusMethod(String methodName, List<String> paramTypes)
     {
         if (panel == null) {
-            createPanel(true, true);
+            createPanel(true, true, false);
         }
         panel.focusMethod(methodName);
     }
@@ -1335,11 +1370,6 @@ public class FrameEditor implements Editor
     {
         return javadocResolver;
     }
-
-    //    public void changedName(String oldName, String newName)
-//    {
-//        watcher.changedName(oldName, newName);
-//    }
 
     @OnThread(Tag.Any)
     public EditorWatcher getWatcher()
@@ -1363,7 +1393,7 @@ public class FrameEditor implements Editor
     public void addImplements(String className, ClassInfo classInfo)
     {
         if (panel == null) {
-            createPanel(false, false);
+            createPanel(false, false, false);
         }
         JavaFXUtil.onceTrue(panel.initialisedProperty(), p -> panel.addImplements(className));
     }
@@ -1372,7 +1402,7 @@ public class FrameEditor implements Editor
     public void setExtendsClass(String className, ClassInfo classInfo)
     {
         if (panel == null) {
-            createPanel(false, false);
+            createPanel(false, false, false);
         }
         JavaFXUtil.onceTrue(panel.initialisedProperty(), p -> panel.addExtends(className));
     }
@@ -1381,7 +1411,7 @@ public class FrameEditor implements Editor
     public void removeExtendsClass(ClassInfo classInfo)
     {
         if (panel == null) {
-            createPanel(false, false);
+            createPanel(false, false, false);
         }
         JavaFXUtil.onceTrue(panel.initialisedProperty(), p -> panel.removeExtendsClass());
     }
@@ -1390,7 +1420,7 @@ public class FrameEditor implements Editor
     public void addExtendsInterface(String interfaceName, ClassInfo classInfo)
     {
         if (panel == null) {
-            createPanel(false, false);
+            createPanel(false, false, false);
         }
         JavaFXUtil.onceTrue(panel.initialisedProperty(), p -> panel.addExtends(interfaceName));
     }
@@ -1399,8 +1429,16 @@ public class FrameEditor implements Editor
     public void removeExtendsOrImplementsInterface(String interfaceName, ClassInfo classInfo)
     {
         if (panel == null) {
-            createPanel(false, false);
+            createPanel(false, false, false);
         }
         JavaFXUtil.onceTrue(panel.initialisedProperty(), p -> panel.removeExtendsOrImplementsInterface(interfaceName));
+    }
+    
+    /**
+     * Get the package of the class being edited by this editor.
+     */
+    public bluej.pkgmgr.Package getPackage()
+    {
+        return pkg;
     }
 }

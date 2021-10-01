@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2010,2011,2012,2013,2014,2015,2016,2017,2018  Michael Kolling and John Rosenberg
+ Copyright (C) 1999-2010,2011,2012,2013,2014,2015,2016,2017,2018,2019  Michael Kolling and John Rosenberg
 
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -57,6 +57,7 @@ import threadchecker.Tag;
 import javax.swing.KeyStroke;
 import javax.swing.text.DefaultEditorKit;
 import java.awt.Event;
+import java.awt.event.InputEvent;
 import java.io.*;
 import java.nio.charset.Charset;
 import java.nio.file.Files;
@@ -460,19 +461,16 @@ public final class MoeActions
         MoeSyntaxDocument doc = editor.getSourceDocument();
         Element text = doc.getDefaultRootElement();
 
-        int firstLineIndex = text.getElementIndex(selectionStart);
-        int lastLineIndex = text.getElementIndex(selectionEnd);
-        for (int i = firstLineIndex; i <= lastLineIndex; i++) {
+        int firstLineIndex = editor.getLineColumnFromOffset(selectionStart).getLine() - 1;
+        int lastLineIndex = editor.getLineColumnFromOffset(selectionEnd).getLine();
+        for (int i = firstLineIndex; i < lastLineIndex; i++) {
             Element line = text.getElement(i);
             lineAction.apply(line, doc);
         }
-
-        // Only select the lines afterwards if there was a selection beforehand:
-        if (selectionStart != selectionEnd)
-        {/*
-            editor.setSelection(firstLineIndex + 1, 1,
-            text.getElement(lastLineIndex).getEndOffset()
-                - text.getElement(firstLineIndex).getStartOffset());*/
+        if (selectionStart == selectionEnd)
+        {
+            Element line = text.getElement(selectionStart);
+            editor.getSourcePane().deselect();
         }
     }
 
@@ -657,6 +655,11 @@ public final class MoeActions
         }
     }
 
+    // We can't use the recommended Java 9 replacement of getModifiersEx()
+    // because that is on the key event, and we are loading a KeyStroke
+    // object from a file, saved on an old BlueJ.  So we must continue
+    // checking against the old modifiers:
+    @SuppressWarnings("deprecation")
     private static KeyCodeCombination convertSwingBindingToFX(KeyStroke swing)
     {
         List<Modifier> modifiers = new ArrayList<>();
@@ -988,7 +991,6 @@ public final class MoeActions
 
         MoeAbstractAction[] myActions = {
                 saveAction(),
-                reloadAction(),
                 printAction(),
                 closeAction(),
 
@@ -1113,7 +1115,6 @@ public final class MoeActions
 
 
         addKeyCombinationForAction(new KeyCodeCombination(KeyCode.S, SHORTCUT_MASK), "save");
-        // "reload" not bound
         addKeyCombinationForAction(new KeyCodeCombination(KeyCode.P, SHORTCUT_MASK), "print");
         // "page-setup" not bound
         addKeyCombinationForAction(new KeyCodeCombination(KeyCode.W, SHORTCUT_MASK), "close");
@@ -1223,17 +1224,6 @@ public final class MoeActions
     private MoeAbstractAction saveAction()
     {
         return action("save", Category.CLASS, () -> getEditor().userSave());
-    }
-
-    // --------------------------------------------------------------------
-
-    /**
-     * Reload has been chosen. Ask "Really?" and call "doReload" if the answer
-     * is yes.
-     */
-    private MoeAbstractAction reloadAction()
-    {
-        return action("reload", Category.CLASS, () -> getEditor().reload());
     }
 
     // --------------------------------------------------------------------
@@ -1508,22 +1498,34 @@ public final class MoeActions
     private MoeAbstractAction cutAction()
     {
         return action("cut-to-clipboard", Category.EDIT, () -> {
-            editor.getSourcePane().cut();
+            // Menu shortcut can trigger when e.g. find pane is focused, don't act if not focused:
+            if (editor.getSourcePane().isFocused())
+            {
+                editor.getSourcePane().cut();
+            }
         });
     }
 
     private MoeAbstractAction copyAction()
     {
         return action("copy-to-clipboard", Category.EDIT, () -> {
-            editor.getSourcePane().copy();
+            // Menu shortcut can trigger when e.g. find pane is focused, don't act if not focused:
+            if (editor.getSourcePane().isFocused())
+            {
+                editor.getSourcePane().copy();
+            }
         });
     }
 
     private MoeAbstractAction pasteAction()
     {
         return action("paste-from-clipboard", Category.EDIT, () -> {
-            editor.getSourcePane().paste();
-            editor.getSourcePane().requestFollowCaret();
+            // Menu shortcut can trigger when e.g. find pane is focused, don't act if not focused:
+            if (editor.getSourcePane().isFocused())
+            {
+                editor.getSourcePane().paste();
+                editor.getSourcePane().requestFollowCaret();
+            }
         });
     }
 
@@ -1531,8 +1533,8 @@ public final class MoeActions
     {
         return action("copy-line", Category.EDIT, () -> {
             boolean addToClipboard = lastActionWasCut;
-            editor.getSourcePane().paragraphStart(SelectionPolicy.CLEAR);
-            editor.getSourcePane().paragraphEnd(SelectionPolicy.EXTEND);
+            editor.getSourcePane().lineStart(SelectionPolicy.CLEAR);
+            editor.getSourcePane().lineEnd(SelectionPolicy.EXTEND);
             editor.getSourcePane().nextChar(SelectionPolicy.EXTEND);
             if (addToClipboard) {
                 addSelectionToClipboard(editor);
@@ -1553,8 +1555,8 @@ public final class MoeActions
     {
         return action("cut-line", Category.EDIT, () -> {
             boolean addToClipboard = lastActionWasCut;
-            editor.getSourcePane().paragraphStart(SelectionPolicy.CLEAR);
-            editor.getSourcePane().paragraphEnd(SelectionPolicy.EXTEND);
+            editor.getSourcePane().lineStart(SelectionPolicy.CLEAR);
+            editor.getSourcePane().lineEnd(SelectionPolicy.EXTEND);
             editor.getSourcePane().nextChar(SelectionPolicy.EXTEND);
             if (addToClipboard) {
                 addSelectionToClipboard(editor);

@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2012,2013,2014,2015,2016,2017,2018  Michael Kolling and John Rosenberg
+ Copyright (C) 1999-2009,2012,2013,2014,2015,2016,2017,2018,2019  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -60,7 +60,6 @@ public class PrefMgr
     public static final String HIGHLIGHTING = "bluej.editor.syntaxHilighting";
     public static final String AUTO_INDENT = "bluej.editor.autoIndent";
     public static final String LINENUMBERS = "bluej.editor.displayLineNumbers";
-    public static final String MAKE_BACKUP = "bluej.editor.makeBackup";
     public static final String MATCH_BRACKETS = "bluej.editor.matchBrackets";
     public static final String LINK_LIB = "doctool.linkToStandardLib";
     public static final String SHOW_TEST_TOOLS = "bluej.testing.showtools";
@@ -148,15 +147,6 @@ public class PrefMgr
         
     }
 
-    /**
-     * Check if BlueJ is runnung on a ARM processor (Raspberry Pi). If so, sets hides the code preview.
-     * @return false if ARM processor. true otherwise.
-     */
-    public static boolean initializeisNavivewExpanded()
-    {
-        return Boolean.parseBoolean(Config.getPropString(NAVIVIEW_EXPANDED, String.valueOf(!Config.isRaspberryPi())));
-    }
-    
     @OnThread(Tag.Any)
     public static File getProjectDirectory()
     {
@@ -429,7 +419,6 @@ public class PrefMgr
 
         // preferences other than fonts:
         highlightStrength.set(Config.getPropInteger(SCOPE_HIGHLIGHTING_STRENGTH, 20));
-        isNaviviewExpanded=initializeisNavivewExpanded();
         
         projectDirectory = Config.getPropString("bluej.projectPath", System.getProperty("user.home"));
         recentProjects = readRecentProjects();
@@ -437,7 +426,6 @@ public class PrefMgr
         flags.put(HIGHLIGHTING, Config.getPropString(HIGHLIGHTING, "true"));
         flags.put(AUTO_INDENT, Config.getPropString(AUTO_INDENT, "false"));
         flags.put(LINENUMBERS, Config.getPropString(LINENUMBERS, "false"));
-        flags.put(MAKE_BACKUP, Config.getPropString(MAKE_BACKUP, "false"));
         flags.put(MATCH_BRACKETS, Config.getPropString(MATCH_BRACKETS, "true"));
         flags.put(LINK_LIB, Config.getPropString(LINK_LIB, "true"));
         flags.put(SHOW_TEST_TOOLS, Config.getPropString(SHOW_TEST_TOOLS, "false"));
