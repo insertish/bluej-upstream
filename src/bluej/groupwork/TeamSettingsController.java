@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2016  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -37,7 +37,7 @@ import bluej.utility.Debug;
  * the top-level folder of a team project, and the bluej.properties
  *
  * @author fisker
- * @version $Id: TeamSettingsController.java 7492 2010-05-05 05:25:30Z davmac $
+ * @version $Id: TeamSettingsController.java 15461 2016-02-10 15:15:57Z fdlh $
  */
 public class TeamSettingsController
 {
@@ -239,7 +239,36 @@ public class TeamSettingsController
             e.printStackTrace();
         }
     }
-
+    /**
+     * checks if a project has a team.defs if it doesn't, then return false
+     * @param projectDir File object representing the directory where team.defs is located.
+     * @return true if there is a valid vcs. false otherwise.
+     */
+    public static boolean isValidVCSfound(File projectDir)
+    {
+        File teamdefs = new File(projectDir, "team.defs");
+        Properties p = new Properties();
+        String providerName = null;
+        try {
+            p.load(new FileInputStream(teamdefs));
+            providerName = p.getProperty("bluej.teamsettings.vcs");
+            if (providerName == null){
+                providerName = p.getProperty("bluej.teamsettings.vcs", "cvs");
+            }
+        } catch (IOException e){
+        }
+        
+        if (providerName != null) {
+            for (int index = 0; index < teamProviders.size(); index++) {
+                TeamworkProvider prov = (TeamworkProvider) teamProviders.get(index);
+                if (prov.getProviderName().equalsIgnoreCase(providerName)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+    
     private void initSettings()
     {
         String user = getPropString("bluej.teamsettings.user");
@@ -509,4 +538,13 @@ public class TeamSettingsController
     {
         return project;
     }
+    
+    /**
+     * Method to get working copy version.
+     * @return version number. -1 if not applicable or not subversion.
+     */
+    public double getWorkingCopyVersion(){
+        return settings.getProvider().getWorkingCopyVersion(projectDir);
+    }
+
 }

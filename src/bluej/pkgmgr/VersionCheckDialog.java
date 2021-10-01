@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2014,2016  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -21,29 +21,44 @@
  */
 package bluej.pkgmgr;
 
-import java.awt.*;
-import java.awt.event.*;
-import java.io.*;
+import java.awt.FlowLayout;
+import java.awt.Font;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.net.URL;
 
-import javax.swing.*;
+import javax.swing.Box;
+import javax.swing.BoxLayout;
+import javax.swing.JButton;
+import javax.swing.JLabel;
+import javax.swing.JPanel;
+import javax.swing.JScrollPane;
+import javax.swing.JTextArea;
+import javax.swing.SwingUtilities;
+import javax.swing.WindowConstants;
 
-import bluej.*;
-import bluej.utility.*;
+import bluej.BlueJTheme;
+import bluej.Boot;
+import bluej.Config;
+import bluej.utility.Debug;
+import bluej.utility.DialogManager;
+import bluej.utility.EscapeDialog;
+
 
 /**
  * Dialog implementing version check functionality.
  *
  * @author  Michael Kolling
- * @version $Id: VersionCheckDialog.java 7055 2010-01-27 13:58:55Z plcs $
  */
-
 final public class VersionCheckDialog extends EscapeDialog
      implements ActionListener
 {
     // Internationalisation
     private static final String close = Config.getString("close");
-    private static final String check = Config.getString("pkgmgr.versionDlg.check");
     private static final String dialogTitle = Config.getString("pkgmgr.versionDlg.title");
     private static final String helpLine1 = Config.getString("pkgmgr.versionDlg.helpLine1");
     private static final String helpLine2 = Config.getString("pkgmgr.versionDlg.helpLine2");
@@ -73,11 +88,7 @@ final public class VersionCheckDialog extends EscapeDialog
     public void actionPerformed(ActionEvent evt)
     {
         String cmd = evt.getActionCommand();
-        if(check.equals(cmd)) {
-            doVersionCheck();
-            getRootPane().setDefaultButton(closeButton);
-        }
-        else if(close.equals(cmd))
+        if(close.equals(cmd))
             doClose();
     }
 
@@ -95,6 +106,7 @@ final public class VersionCheckDialog extends EscapeDialog
      */
     private void doVersionCheck()
     {
+        textArea.setText(Config.getString("pkgmgr.checkingVersion"));
         versionThread = new VersionChecker();
         //versionThread.setPriority(Thread.MIN_PRIORITY);
         versionThread.start();
@@ -137,21 +149,12 @@ final public class VersionCheckDialog extends EscapeDialog
             {
                 buttonPanel.setAlignmentX(LEFT_ALIGNMENT);
 
-                JButton checkButton = new JButton(check);
-                checkButton.addActionListener(this);
-
                 closeButton = new JButton(close);
                 closeButton.addActionListener(this);
 
-                DialogManager.addOKCancelButtons(buttonPanel, checkButton, closeButton);
-
-                getRootPane().setDefaultButton(checkButton);
-                checkButton.requestFocus();
-
-                // try to make the OK and cancel buttons have equal width
-                closeButton.setPreferredSize(
-                                 new Dimension(checkButton.getPreferredSize().width,
-                                 closeButton.getPreferredSize().height));
+                buttonPanel.add(closeButton);
+                getRootPane().setDefaultButton(closeButton);
+                closeButton.requestFocus();
             }
 
             mainPanel.add(buttonPanel);
@@ -161,25 +164,36 @@ final public class VersionCheckDialog extends EscapeDialog
         pack();
 
         DialogManager.centreDialog(this);
+
+        doVersionCheck();
     }
 
+    /**
+     * Set the text area message (callable from any thread).
+     * @param txt   The message to display
+     */
+    private void setTextLater(String txt)
+    {
+        final String text = txt;
+        SwingUtilities.invokeLater(new Runnable() {
+            public void run() {
+                textArea.setText(text);                
+            };
+        });
+    }
 
     /**
      * Private class to run the actual version checking in separate thread.
      */
     private class VersionChecker extends Thread
     {
-        public VersionChecker()
-        {
-        }
-
         /**
          * Do a version check. That is: open a URL connection to the remote 
          * version file and read it. Display version info as appropriate.
          */
+        
         public void run()
         {
-            textArea.setText(Config.getString("pkgmgr.checkingVersion"));
             try {
                 InputStream is = new URL(versionURL).openStream();
                 BufferedReader reader = new BufferedReader(new InputStreamReader(is));
@@ -190,12 +204,12 @@ final public class VersionCheckDialog extends EscapeDialog
                 }
                 else {
                     if(!isClosed)
-                        textArea.setText(Config.getString("pkgmgr.versionDlg.upToDate"));
+                        setTextLater(Config.getString("pkgmgr.versionDlg.upToDate"));
                 }
             }
             catch(IOException exc) {
                 if(!isClosed)
-                    textArea.setText("Error: could not access remote version information");
+                    setTextLater("Error: could not access remote version information");
                 Debug.reportError("IO error when trying to access URL\n" + exc);
             }
         }
@@ -205,6 +219,7 @@ final public class VersionCheckDialog extends EscapeDialog
          * version is out of date. We know that the first line of the version
          * file contains the up-to-date version number.
          */
+        
         private boolean isOutOfDate(BufferedReader versionReader)
         {
             try {
@@ -213,7 +228,7 @@ final public class VersionCheckDialog extends EscapeDialog
                     newVersion = newVersion.trim();
             }
             catch(IOException exc) {
-                textArea.setText("Error: could not read remote version information");
+                setTextLater("Error: could not read remote version information");
                 Debug.reportError("IO error when reading remote version info\n" + exc);
             }
             return ! Boot.BLUEJ_VERSION.equals(newVersion);
@@ -223,32 +238,39 @@ final public class VersionCheckDialog extends EscapeDialog
          * Given a reader for the (remote) version file, read the version
          * info text out of it and display it in the text area.
          */
+        
         private void displayNewVersionInfo(BufferedReader versionReader)
         {
             if(newVersion == null)
-                textArea.setText("Error: could not read remote version info");
+                setTextLater("Error: could not read remote version info");
             else {
-                textArea.setText(Config.getString("pkgmgr.versionDlg.currentVersion"));
-                textArea.append(" ");
-                textArea.append(Boot.BLUEJ_VERSION);
-                textArea.append("\n");
-                textArea.append(Config.getString("pkgmgr.versionDlg.newVersion"));
-                textArea.append(" ");
-                textArea.append(newVersion);
-                textArea.append("\n");
+                StringBuffer text = new StringBuffer(Config.getString("pkgmgr.versionDlg.currentVersion"));
+                text.append(" ");
+                text.append(Boot.BLUEJ_VERSION);
+                text.append("\n");
+                text.append(Config.getString("pkgmgr.versionDlg.newVersion"));
+                text.append(" ");
+                text.append(newVersion);
+                text.append("\n");
 
                 try {
                     String line = versionReader.readLine();
                     while(line != null) {
-                        textArea.append(line);
-                        textArea.append("\n");
+                        text.append(line);
+                        text.append("\n");
                         line = versionReader.readLine();
                     }
                 }
                 catch(IOException exc) {
                     Debug.reportError("IO error when reading from version file");
                 }
-                textArea.setCaretPosition(0);
+                final StringBuffer txt = text;
+                SwingUtilities.invokeLater(new Runnable() {
+                    public void run() {
+                        textArea.setText(txt.toString());
+                        textArea.setCaretPosition(0);
+                    }
+                });
             }
         }
 

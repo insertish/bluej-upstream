@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2011  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2011,2016  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -112,25 +112,40 @@ public class SvnStatusCommand extends SvnCommand
                         rinfo = new TeamStatusInfo(file, rev, "", TeamStatusInfo.STATUS_DELETED);
                     }
                 }
-                else if (textStat == StatusKind.unversioned) {
+                else if ((textStat == StatusKind.unversioned)
+                        || (textStat == StatusKind.none && reposStat == StatusKind.none)) {
+                    // Bug in SVNKit 1.8.11 returns a local and remote status of "none" for unversioned local
+                    // files which do not exist in the repository.
+                    // https://issues.tmatesoft.com/issue/SVNKIT-643
                     if (filter.accept(file)) {
                         if (reposStat != StatusKind.added) {
                             rinfo = new TeamStatusInfo(file, "", "", TeamStatusInfo.STATUS_NEEDSADD);
+                            if (file.isDirectory()) {
+                                statLocalDir(file);
+                            }
                         }
                         else {
                             // conflict: added locally and in repository
                             rinfo = new TeamStatusInfo(file, "", "" + status[i].getReposLastCmtRevisionNumber(), TeamStatusInfo.STATUS_CONFLICT_ADD);
                         }
-                        if (file.isDirectory()) {
-                            statLocalDir(file);
-                        }
                     }
                 }
                 else if (textStat == StatusKind.normal) {
-                    if (filter.accept(file)) {
+                    if (reposStat == StatusKind.none && status[i].getRevisionNumber() == -1) {
+                        // Bug in SVNKit
+                        rinfo = new TeamStatusInfo(file, "", "", TeamStatusInfo.STATUS_NEEDSCOMMIT);
+                    }
+                    else if (filter.accept(file)) {
                         String rev = "" + status[i].getLastChangedRevisionNumber();
                         if (reposStat == StatusKind.deleted) {
                             rinfo = new TeamStatusInfo(file, rev, "", TeamStatusInfo.STATUS_REMOVED);
+                        }
+                        else if (reposStat == StatusKind.none && !file.exists()) {
+                            //Bug in SVNKit
+                            //File status in the repository is normal, 
+                            //but the file status is none and the file
+                            //doesn't exists locally anymore.
+                            rinfo = new TeamStatusInfo(file, rev, "", TeamStatusInfo.STATUS_DELETED);
                         }
                         else if (reposStat == StatusKind.modified) {
                             rinfo = new TeamStatusInfo(file, rev,

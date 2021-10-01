@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2016  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -63,4 +63,13 @@ public interface TeamworkProvider
      * Get a repository from the given settings
      */
     public Repository getRepository(File projectDir, TeamSettings settings);
+    
+    /**
+     * Get a repository's working copy version number. This method is intended 
+     * to be used by SVN.
+     * @param projectDir project's directory.
+     * @return working copy version if applicable. -1 if not applicable, or if
+     * version cannot be found.
+     */
+    public double getWorkingCopyVersion(File projectDir);
 }

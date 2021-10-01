@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2013,2014,2015  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2013,2014,2015,2016  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -177,7 +177,7 @@ public class Project implements DebuggerListener, InspectorManager
     private StatusFrame statusFrame = null;
     
     /** If true, this project is connected with a source repository */
-    private boolean isSharedProject;
+    private Boolean isSharedProject = null;
 
     // team actions
     private TeamActionGroup teamActions;  
@@ -260,8 +260,7 @@ public class Project implements DebuggerListener, InspectorManager
         debugger.launch();
 
         // Check whether this is a shared project
-        File ccfFile = new File(projectDir.getAbsoluteFile(), "team.defs");
-        isSharedProject = ccfFile.isFile();
+        isSharedProject = isTeamProject();
         teamActions = new TeamActionGroup(isSharedProject);
     }
 
@@ -446,6 +445,12 @@ public class Project implements DebuggerListener, InspectorManager
 
         if (proj == null) {
             proj = new Project(projectDir);
+
+            //if is shared project, check for svn working copy version.
+            if (proj.isTeamProject() && proj.getTeamSettingsController().getWorkingCopyVersion() != 1.6) {
+                DialogManager.showMessage(parent, "SVNWorkingCopyNot16");
+            }
+
             projects.put(projectDir, proj);
         }
 
@@ -726,12 +731,16 @@ public class Project implements DebuggerListener, InspectorManager
         }
         
         // See if it is on the bench:
-        if (! Config.isGreenfoot()) {
+        // (Also check pkg != null since the data collection mechanism can't deal with null pkg).
+        if (! Config.isGreenfoot() && pkg != null) {
             String benchName = null;
-            for (ObjectWrapper ow : PkgMgrFrame.findFrame(pkg).getObjectBench().getObjects())
-            {
-                if (ow.getObject().equals(obj)){
-                    benchName = ow.getName();
+            PkgMgrFrame pmf = PkgMgrFrame.findFrame(pkg);
+            if (pmf != null) {
+                for (ObjectWrapper ow : PkgMgrFrame.findFrame(pkg).getObjectBench().getObjects())
+                {
+                    if (ow.getObject().equals(obj)){
+                        benchName = ow.getName();
+                    }
                 }
             }
 
@@ -1915,6 +1924,20 @@ public class Project implements DebuggerListener, InspectorManager
      */
     public boolean isTeamProject()
     {
+        if (this.isSharedProject == null){
+            //checks if it is a valid team project
+            File ccfFile = new File(projectDir.getAbsoluteFile(), "team.defs");
+            if (ccfFile.isFile()){
+                //checks for valid vcs config.
+                if (TeamSettingsController.isValidVCSfound(projectDir)){
+                    return true;
+                } else {
+                    return false;
+                }
+            } else {
+                return false;
+            }
+        }
         return isSharedProject;
     }
 

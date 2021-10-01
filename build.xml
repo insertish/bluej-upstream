@@ -15,7 +15,7 @@
      After changing the version number the target "update-version-number" should be run -->
     <property name="bluej.version.major" value="3" />
     <property name="bluej.version.minor" value="1" />
-    <property name="bluej.version.release" value="6" />
+    <property name="bluej.version.release" value="7" />
     <property name="bluej.version.suffix" value="" />
 	<!-- suffix with no spaces, eg "pre2" -->
 	<property name="bluej.version.nonspace.suffix" value="" />
@@ -52,6 +52,7 @@
         <pathelement location="${bluej_home}/lib/junit-4.8.2.jar"/>
         <pathelement location="${bluej_home}/lib/org-netbeans-lib-cvsclient.jar"/>
         <pathelement location="${bluej_home}/lib/svnkit-javahl.jar"/>
+        <pathelement location="${bluej_home}/lib/svnkit.jar"/>
         <pathelement location="${bluej_home}/lib/trilead.jar"/>
         <pathelement location="${bluej_home}/lib/antlr-runtime-3.4.jar"/>
         <pathelement location="${bluej_home}/lib/sequence-library-1.0.3.jar"/>

@@ -28,7 +28,7 @@ import java.io.File;
  * Team status information for a file
  * 
  * @author Davin McCall
- * @version $Id: TeamStatusInfo.java 6215 2009-03-30 13:28:25Z polle $
+ * @version $Id: TeamStatusInfo.java 6215 2016-01-21 12:14:10Z polle $
  */
 public class TeamStatusInfo
 {
