@@ -23,8 +23,7 @@
 
     package bluej.parser.ast.gen;
 	
-	import bluej.parser.ast.LocatableAST;
-
+	
 import java.io.InputStream;
 import antlr.TokenStreamException;
 import antlr.TokenStreamIOException;
@@ -1069,7 +1068,7 @@ tryAgain:
 		} while (true);
 		}
 		if ( inputState.guessing==0 ) {
-			_ttype = Token.SKIP;
+			//_ttype = Token.SKIP;
 		}
 		if ( _createToken && _token==null && _ttype!=Token.SKIP ) {
 			_token = makeToken(_ttype);

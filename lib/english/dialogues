@@ -528,3 +528,11 @@ Do you want to overwrite it?
 Overwrite
 Cancel
 null
+
+stuck-at-breakpoint
+Your program is already running, and stopped at a breakpoint.
+You cannot start another execution while the current one is still
+active.
+    
+Use the debugger Controls to either continue or terminate the
+current execution first.

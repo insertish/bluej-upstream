@@ -81,7 +81,7 @@ import com.apple.eawt.ApplicationEvent;
 /**
  * The main user interface frame which allows editing of packages
  * 
- * @version $Id: PkgMgrFrame.java 6269 2009-04-21 07:47:57Z polle $
+ * @version $Id: PkgMgrFrame.java 6349 2009-05-22 14:49:01Z polle $
  */
 public class PkgMgrFrame extends JFrame
     implements BlueJEventListener, MouseListener, PackageEditorListener, FocusListener
@@ -242,6 +242,12 @@ public class PkgMgrFrame extends JFrame
             public void handleQuit(ApplicationEvent e)
             {
                 QuitAction.getInstance().actionPerformed(getMostRecent());
+            }
+            
+            public void handleOpenFile(ApplicationEvent event) 
+            {                
+                String projectPath = event.getFilename();                
+                PkgMgrFrame.doOpen(new File(projectPath), null);                
             }
         });
 
@@ -1191,21 +1197,50 @@ public class PkgMgrFrame extends JFrame
     }
    
     /**
+     * Opens either a project from a directory or an archive.
+     * 
+     * @param pmf Optional parameter. Used for displaying dialogs and reuse
+     *            if it is the empty frame.
+     */
+    public static boolean doOpen(File projectPath, PkgMgrFrame pmf)
+    {     
+        boolean createdNewFrame = false;
+        if(pmf == null && PkgMgrFrame.frames.size() > 0) {
+            pmf = PkgMgrFrame.frames.get(0);
+        }
+        else if(pmf == null) {
+            pmf = PkgMgrFrame.createFrame();
+            createdNewFrame = true;
+        }
+
+        boolean openedProject = false;
+        if (projectPath != null) {
+            if (projectPath.isDirectory() || Project.isProject(projectPath.toString())) {
+                if(pmf.openProject(projectPath.getAbsolutePath())) {
+                    openedProject = true;
+                }
+            }
+            else {
+                if(pmf.openArchive(projectPath)) {
+                    openedProject = true;
+                }
+            }
+        }
+        if(createdNewFrame && !openedProject) {
+            // Close newly created frame if it was never used.
+            PkgMgrFrame.closeFrame(pmf);
+        }
+        return openedProject;
+    }
+    
+    /**
      * Open a dialog that lets the user choose a project. The project selected
      * is opened in a frame.
      */
     public void doOpen()
     {
         File dirName = FileUtility.getPackageName(this);
-
-        if (dirName != null) {
-            if (dirName.isDirectory()) {
-                openProject(dirName.getAbsolutePath());
-            }
-            else {
-                openJar(dirName);
-            }
-        }
+        PkgMgrFrame.doOpen(dirName, this);
     }
 
     /**
@@ -1221,9 +1256,9 @@ public class PkgMgrFrame extends JFrame
         else {
             Package pkg = openProj.getPackage(openProj.getInitialPackageName());
 
-            PkgMgrFrame pmf;
+            PkgMgrFrame pmf = findFrame(pkg);
 
-            if ((pmf = findFrame(pkg)) == null) {
+            if (pmf == null) {
                 if (isEmptyFrame()) {
                     pmf = this;
                     openPackage(pkg);
@@ -1279,16 +1314,16 @@ public class PkgMgrFrame extends JFrame
         }
         else {
             // Presumably it's an archive file
-            openJar(absDirName);
+            openArchive(absDirName);
         }
     }
 
     /**
-     * Open a jar file as a BlueJ project.
-     * The file contents are extracted, the containing directory is then
-     * converted into a BlueJ project if necessary, and opened.
+     * Open an archive file (jar or same contents with other extensions) as a
+     * BlueJ project. The file contents are extracted, the containing directory
+     * is then converted into a BlueJ project if necessary, and opened.
      */
-    private void openJar(File jarName)
+    private boolean openArchive(File archive)
     {
         JarInputStream jarInStream = null;
 
@@ -1299,38 +1334,45 @@ public class PkgMgrFrame extends JFrame
             // all entries have a common ancestor, extract to that directory
             // (after checking it doesn't exist).
             
-            String prefixFolder = getArchivePrefixFolder(jarName);
+            String prefixFolder = getArchivePrefixFolder(archive);
             
             // Determine the output path.
-            File oPath = jarName.getParentFile();
+            File oPath = archive.getParentFile();
             if (prefixFolder == null) {
                 // Try to extract to directory which has same name as the jar
-                // file, with the .jar extension stripped.
-                
-                oPath = new File(oPath, jarName.getName().substring(0, jarName.getName().length() - 4));
+                // file, with the .jar or .bjar extension stripped.
+                String archiveName = archive.getName();
+                int dotIndex = archiveName.lastIndexOf('.');
+                String strippedName = null;
+                if(dotIndex != -1) {
+                    strippedName = archiveName.substring(0, dotIndex);
+                } else {
+                    strippedName = archiveName;
+                }
+                oPath = new File(oPath, strippedName);
                 if (oPath.exists()) {
                     DialogManager.showErrorWithText(this, "jar-output-dir-exists", oPath.toString());
-                    return;
+                    return false;
                 }
                 else if (! oPath.mkdir()) {
-                    DialogManager.showErrorWithText(this, "jar-output-no-write", jarName.toString());
-                    return;
+                    DialogManager.showErrorWithText(this, "jar-output-no-write", archive.toString());
+                    return false;
                 }
             }
             else {
                 File prefixFolderFile = new File(oPath, prefixFolder);
                 if (prefixFolderFile.exists()) {
                     DialogManager.showErrorWithText(this, "jar-output-dir-exists", prefixFolderFile.toString());
-                    return;
+                    return false;
                 }
                 if (! prefixFolderFile.mkdir()) {
-                    DialogManager.showErrorWithText(this, "jar-output-no-write", jarName.toString());
-                    return;
+                    DialogManager.showErrorWithText(this, "jar-output-no-write", archive.toString());
+                    return false;
                 }
             }
             
             // Need to extract the project somewhere, then open it
-            FileInputStream is = new FileInputStream(jarName);
+            FileInputStream is = new FileInputStream(archive);
             jarInStream = new JarInputStream(is);
             
             // Extract entries in the jar file
@@ -1365,15 +1407,14 @@ public class PkgMgrFrame extends JFrame
             if (prefixFolder != null)
                 oPath = new File(oPath, prefixFolder);
             if (Project.isProject(oPath.getPath())) {
-                openProject(oPath.getPath());
+                return openProject(oPath.getPath());
             }
             else {
                 // Convert to a BlueJ project
-                if (Import.convertNonBlueJ(this, oPath))
-                    openProject(oPath.getPath());
-            }
-            return;
-            
+                if (Import.convertNonBlueJ(this, oPath)) {
+                    return openProject(oPath.getPath());
+                }
+            }            
         }
         catch (Exception e) {
             e.printStackTrace();
@@ -1386,6 +1427,8 @@ public class PkgMgrFrame extends JFrame
             }
             catch (IOException ioe) {}
         }
+
+        return false;
     }
     
     /**
@@ -1569,7 +1612,7 @@ public class PkgMgrFrame extends JFrame
         for (int i = 1; dir != null; i++) {
             dir = Config.getPropString(Config.BLUEJ_OPENPACKAGE + i, null);
             if (dir != null) {
-                if(Project.isBlueJProject(dir)) {
+                if(Project.isProject(dir)) {
                     return true;
                 }
             }

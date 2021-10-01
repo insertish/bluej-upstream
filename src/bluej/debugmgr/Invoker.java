@@ -61,7 +61,7 @@ import bluej.views.MethodView;
  * resulting class file and executes a method in a new thread.
  * 
  * @author Michael Kolling
- * @version $Id: Invoker.java 6215 2009-03-30 13:28:25Z polle $
+ * @version $Id: Invoker.java 6475 2009-07-31 14:30:38Z davmac $
  */
 
 public class Invoker
@@ -95,6 +95,7 @@ public class Invoker
     private Map<?, ?> typeMap; // map type parameter names to types
     private ValueCollection localVars;
     private String imports; // import statements to include in shell file
+    private boolean doTryAgain = false; // whether to re-try
     
     /**
      * The instance name for any object we create. For a constructed object the
@@ -165,29 +166,17 @@ public class Invoker
 
         // in the case of a constructor, we need to construct an object name
         if (member instanceof ConstructorView) {
-
             this.objName = pmf.getProject().getDebugger().guessNewName(member.getClassName());
-
             constructing = true;
-            executionEvent = new ExecutionEvent(member.getClassName(),null);
+            executionEvent = new ExecutionEvent(pkg, member.getClassName(), null);
         }
         else if (member instanceof MethodView) {
-
-            // in the case of a static method call, we use the class name as an
-            // object name
-            if (((MethodView) member).isStatic()) {
-                this.objName = JavaNames.stripPrefix(member.getClassName());
-                executionEvent = new ExecutionEvent(member.getClassName(), null );
-            }
-            else {
-                executionEvent = new ExecutionEvent(member.getClassName(), objName);
-            }
-
             constructing = false;
+        	executionEvent = new ExecutionEvent(pkg, member.getClassName(), null );
         }
-        else
+        else {
             Debug.reportError("illegal member type in invocation");
-        executionEvent.setPackage(pkg);
+        }
     }
 
     /**
@@ -227,10 +216,9 @@ public class Invoker
         this.objName = objWrapper.getName();
         this.typeMap = objWrapper.getObject().getGenType().mapToSuper(member.getClassName()).getMap();
 
-        executionEvent = new ExecutionEvent(member.getClassName(), objName);
+        executionEvent = new ExecutionEvent(pkg, member.getClassName(), objName);
         
         constructing = false;
-        executionEvent.setPackage(pkg);
     }
 
     /**
@@ -258,6 +246,14 @@ public class Invoker
         if(constructing && Config.isGreenfoot()) {     
             instanceName = objName;
         }
+        
+        if (!Config.isGreenfoot()) {
+            boolean isStatic = constructing || member.isStatic();
+            if (!pkg.getProject().getExecControls().processDebuggerState(pmf, isStatic)) {
+                return;
+            }
+        }
+        
         // check for a method call with no parameter
         // if so, just do it
         if ((!constructing || Config.isGreenfoot()) && !member.hasParameters()) {
@@ -285,11 +281,11 @@ public class Invoker
     /**
      * After attempting a free form invocation, and getting an error, we try
      * again. First time round, we tried interpreting the input as an
-     * expression, now we try as a statement.
+     * expression, the second time we try as a statement (i.e. without a result type).
      */
-    public synchronized void tryAgain()
+    public void tryAgain()
     {
-        doFreeFormInvocation(null);
+    	doTryAgain = true;
     }
 
     // -- CallDialogWatcher interface --
@@ -327,6 +323,8 @@ public class Invoker
 
     /**
      * Invokes a constructor or method with the given parameters.
+     * 
+     * @param params The arguments to the method/constructor (Java expressions)
      */
     public void invokeDirect(String[] params)
     {
@@ -509,6 +507,12 @@ public class Invoker
             // goes into an infinite loop can hang BlueJ.
             new Thread() {
                 public void run() {
+                	EventQueue.invokeLater(new Runnable() {
+                		public void run() {
+                            closeCallDialog();
+                		}
+                	});
+                	
                     final DebuggerResult result = pkg.getProject().getDebugger().instantiateClass(className);
                     
                     EventQueue.invokeLater(new Runnable() {
@@ -518,7 +522,6 @@ public class Invoker
                             
                             handleResult(result); // handles error situations
                                 
-                            closeCallDialog();
                             pmf.setWaitCursor(false);
                             
                             // update all open inspect windows
@@ -1069,6 +1072,12 @@ public class Invoker
         }
 
         deleteShellFiles();
+        
+        if (! successful && doTryAgain) {
+        	doTryAgain = false;
+        	doFreeFormInvocation(null);
+        	return;
+        }
         
         if (! successful && dialog != null) {
             // Re-enable call dialog: use can try again with

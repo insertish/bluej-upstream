@@ -38,12 +38,13 @@ import bluej.debugger.DebuggerThreadTreeModel.SyncMechanism;
 import bluej.debugmgr.inspector.ObjectInspector;
 import bluej.pkgmgr.Project;
 import bluej.utility.Debug;
+import bluej.utility.DialogManager;
 
 /**
  * Window for controlling the debugger
  *
  * @author  Michael Kolling
- * @version $Id: ExecControls.java 6215 2009-03-30 13:28:25Z polle $
+ * @version $Id: ExecControls.java 6491 2009-08-06 23:20:51Z davmac $
  */
 public class ExecControls extends JFrame
     implements ListSelectionListener, TreeSelectionListener, TreeModelListener
@@ -626,9 +627,11 @@ public class ExecControls extends JFrame
         // Close Action when close button is pressed
         addWindowListener(new WindowAdapter() {
             public void windowClosing(WindowEvent event){
-                Window win = (Window)event.getSource();
-                win.setVisible(false);
+            	
+                    Window win = (Window)event.getSource();
+                    win.setVisible(false);
             }
+            	
         });
 
         // save position when window is moved
@@ -824,4 +827,26 @@ public class ExecControls extends JFrame
             debugger.hideSystemThreads(systemThreadItem.isSelected());
         }
     }
+    
+    /** 
+     * This method provides the user with an elegant way to decide on how to proceed if there is
+     * a debugger running in the background (Bug#138)
+     * returns boolean to whether it should continue processing original request
+     * (dependent on user choice)
+     * 
+     * @param dialogParent specifies the parent component for any necessary dialog
+     * @param canContinue specifies whether the "terminate (and continue)" option is allowed.
+     */
+    public boolean processDebuggerState(Component dialogParent, boolean canContinue)
+    {
+    	//only need to give user warnings if debugger is already initiated, double check status
+	    if (debugger.getStatus()==Debugger.IDLE || debugger.getStatus()==Debugger.NOTREADY) {
+	    	return true;
+	    }
+	    
+	    setVisible(true);
+        DialogManager.showError(dialogParent, "stuck-at-breakpoint");
+       	return false;
+    }
+
 }

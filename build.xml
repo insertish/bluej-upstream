@@ -15,7 +15,7 @@
      After changing the version number the target "update-version-number" should be run -->
     <property name="bluej.version.major" value="2" />
     <property name="bluej.version.minor" value="5" />
-    <property name="bluej.version.release" value="1" />
+    <property name="bluej.version.release" value="2" />
     <property name="bluej.version.suffix" value="" />
     <property name="bluej.version" value="${bluej.version.major}.${bluej.version.minor}.${bluej.version.release}${bluej.version.suffix}" />
     <property name="bluej.version.nodots" value="${bluej.version.major}${bluej.version.minor}${bluej.version.release}${bluej.version.suffix}" />
@@ -48,9 +48,8 @@
         <pathelement location="${bluej_home}/lib/antlr.jar"/>
         <pathelement location="${bluej_home}/lib/junit.jar"/>
         <pathelement location="${bluej_home}/lib/org-netbeans-lib-cvsclient.jar"/>
-        <pathelement location="${bluej_home}/lib/jsch.jar"/>
-        <pathelement location="${bluej_home}/lib/sshconnection.jar"/>
         <pathelement location="${bluej_home}/lib/svnkit-javahl.jar"/>
+        <pathelement location="${bluej_home}/lib/trilead.jar"/>
     </path>
     
     <!-- If you change the first or last lines of this license you might want

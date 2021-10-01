@@ -26,7 +26,8 @@ import antlr.*;
 public class LocatableToken extends CommonToken
 {
     private int endColumn;
-    private Token hiddenBefore;
+    private int endLine;
+    private LocatableToken hiddenBefore;
     
     public LocatableToken() {
         super();
@@ -43,6 +44,13 @@ public class LocatableToken extends CommonToken
     public void setEndColumn(int c)
     {
         endColumn = c;
+        endLine = line;
+    }
+    
+    public void setEndLineAndCol(int l, int c)
+    {
+        endLine = l;
+        endColumn = c;
     }
     
     public int getEndColumn()
@@ -50,17 +58,22 @@ public class LocatableToken extends CommonToken
         return endColumn;
     }
     
+    public int getEndLine()
+    {
+        return endLine;
+    }
+    
     public int getLength()
     {
         return endColumn - col;
     }
     
-    public void setHiddenBefore(Token t)
+    public void setHiddenBefore(LocatableToken t)
     {
         hiddenBefore = t;
     }
     
-    public Token getHiddenBefore()
+    public LocatableToken getHiddenBefore()
     {
         return hiddenBefore;
     }
