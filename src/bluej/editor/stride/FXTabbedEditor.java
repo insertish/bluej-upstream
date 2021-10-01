@@ -239,6 +239,7 @@ public @OnThread(Tag.FX) class FXTabbedEditor
         scene = new Scene(new StackPane(menuAndTabPane, dragPane, dragCursorPane, overlayPane.getNode()), 800, 700);
         stage.setScene(scene);
         Config.addEditorStylesheets(scene);
+        JavaFXUtil.addMacMinimiseShortcutHandler(stage);
 
         tabPane.getStyleClass().add("tabbed-editor");
 
@@ -545,8 +546,9 @@ public @OnThread(Tag.FX) class FXTabbedEditor
             {
                 if (startSize != null)
                 {
-                    stage.setX(startSize.getX());
-                    stage.setY(startSize.getY());
+                    Point2D topLeft = Config.ensureOnScreen((int)startSize.getX(), (int)startSize.getY());
+                    stage.setX(topLeft.getX());
+                    stage.setY(topLeft.getY());
                     stage.setWidth(startSize.getWidth());
                     stage.setHeight(startSize.getHeight());
                 }
@@ -913,30 +915,12 @@ public @OnThread(Tag.FX) class FXTabbedEditor
         return Utility.mapList(tabPane.getTabs(), t -> (FXTab)t);
     }
 
-    @OnThread(Tag.Swing)
-    public void setPosition(int x, int y)
-    {
-        Platform.runLater(() -> {
-            stage.setX(x);
-            stage.setY(y);
-        });
-    }
-
-    @OnThread(Tag.Swing)
-    public void setSize(int width, int height)
-    {
-        Platform.runLater(() -> {
-            stage.setWidth(width);
-            stage.setHeight(height);
-        });
-    }
-
     public void setTitleStatus(String status)
     {
         this.titleStatus.set(status);
     }
 
-    public Window getWindow()
+    public Stage getStage()
     {
         return stage;
     }
@@ -993,6 +977,16 @@ public @OnThread(Tag.FX) class FXTabbedEditor
     public boolean hasTutorial()
     {
         return tabPane.getTabs().stream().anyMatch(t -> t instanceof FXTab && ((FXTab)t).isTutorial());
+    }
+
+    public double getRenderScaleX()
+    {
+        return stage.getRenderScaleX();
+    }
+
+    public double getRenderScaleY()
+    {
+        return stage.getRenderScaleY();
     }
 
     public static enum CodeCompletionState

@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 2014,2015,2016,2018,2019,2020 Michael Kölling and John Rosenberg
+ Copyright (C) 2014,2015,2016,2018,2019,2020,2021 Michael Kölling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -31,6 +31,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import bluej.editor.fixes.SuggestionList;
+import bluej.stride.framedjava.elements.LocatableElement.LocationMap;
 import javafx.beans.binding.BooleanBinding;
 import javafx.beans.binding.DoubleBinding;
 import javafx.beans.property.ObjectProperty;
@@ -80,7 +81,7 @@ import threadchecker.Tag;
  * to leave the end of the line; editing the start of a choice slot makes very little sense, especially
  * since it effectively blanks when you enter it.
  */
-public class ChoiceSlot<T extends Enum<T>> implements EditableSlot, CopyableHeaderItem
+public abstract class ChoiceSlot<T extends Enum<T>> implements EditableSlot, CopyableHeaderItem
 {
     private final InteractionManager editor;
     private final Frame parentFrame;
@@ -90,7 +91,7 @@ public class ChoiceSlot<T extends Enum<T>> implements EditableSlot, CopyableHead
     private T previousSelection;
     private T selection;
     private final StackPane pane; // The GUI element that encompasses the whole slot
-    private final SlotLabel curDisplay; // The actual current value
+    protected final SlotLabel curDisplay; // The actual current value
     private final Label futureDisplay; // The grey version of what would be completed
     private final DummyTextField dummyField; // An empty text field, just used to show a cursor and handle input
     private final ErrorUnderlineCanvas errorMarker;
@@ -167,7 +168,6 @@ public class ChoiceSlot<T extends Enum<T>> implements EditableSlot, CopyableHead
             }  
         };
         curDisplay.prefWidthProperty().bind(calcWidth);
-        futureDisplay.prefWidthProperty().bind(calcWidth);
         dummyField.prefWidthProperty().bind(calcWidth);
         dummyField.translateXProperty().bind(new DoubleBinding() {
             { super.bind(curDisplay.fontProperty());
@@ -661,4 +661,7 @@ public class ChoiceSlot<T extends Enum<T>> implements EditableSlot, CopyableHead
         // Not much effort to select choice, and often left as-is; approximate as one keypress:
         return 1;
     }
+
+    @Override
+    public abstract String getXPathForElementAt(double sceneX, double sceneY, LocationMap locationMap, String xpathParent, boolean includePseudoElements, boolean includeSubstringIndex);
 }

@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2011,2012,2013,2014,2016,2017,2018,2019  Michael Kolling and John Rosenberg
+ Copyright (C) 1999-2009,2010,2011,2012,2013,2014,2016,2017,2018,2019,2021  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -46,6 +46,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
 
+import bluej.Config;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.application.Preloader;
@@ -959,7 +960,15 @@ public class ExecServer
 
     private static void runOnTargetThread(RunnableThrows runnable) throws Throwable
     {
-        if (threadToRunOn == RUN_ON_DEFAULT_THREAD)
+        int theThreadToRunOn;
+        Consumer<Runnable> theCustomThreadRunner;
+        synchronized (ExecServer.class)
+        {
+            theThreadToRunOn = ExecServer.threadToRunOn;
+            theCustomThreadRunner = ExecServer.customThreadRunner;
+        }
+
+        if (theThreadToRunOn == RUN_ON_DEFAULT_THREAD)
         {
             runnable.run();
         }
@@ -978,20 +987,20 @@ public class ExecServer
                     f.complete(Optional.of(t));
                 }
             };
-            if (threadToRunOn == RUN_ON_FX_THREAD)
+            if (theThreadToRunOn == RUN_ON_FX_THREAD)
             {
                 // Initialise FX toolkit in case the user hasn't:
                 SwingUtilities.invokeAndWait(() -> new JFXPanel());
                 // Then call runLater:
                 Platform.runLater(wrapped);
             }
-            else if (threadToRunOn == RUN_ON_SWING_THREAD)
+            else if (theThreadToRunOn == RUN_ON_SWING_THREAD)
             {
                 SwingUtilities.invokeLater(wrapped);
             }
-            else if (threadToRunOn == RUN_ON_CUSTOM_THREAD && customThreadRunner != null)
+            else if (theThreadToRunOn == RUN_ON_CUSTOM_THREAD && theCustomThreadRunner != null)
             {
-                customThreadRunner.accept(wrapped);
+                theCustomThreadRunner.accept(wrapped);
             }
             Optional<Throwable> t = f.get();
             if (t.isPresent())
@@ -1064,7 +1073,7 @@ public class ExecServer
     /**
      * Execute user code using the custom "runLater" action.
      */
-    public static void setCustomRunOnThread(Consumer<Runnable> customThreadRunner)
+    public static synchronized void setCustomRunOnThread(Consumer<Runnable> customThreadRunner)
     {
         ExecServer.threadToRunOn = RUN_ON_CUSTOM_THREAD;
         ExecServer.customThreadRunner = customThreadRunner;
@@ -1097,7 +1106,9 @@ public class ExecServer
                 boolean anyAdded = false;
                 while (c.next())
                     anyAdded |= c.wasAdded();
-                if (anyAdded)
+                // On Windows bringing the app to front causes a problem with menubars
+                // not working in the JavaFX app, so we restrict this behaviour to Mac:
+                if (anyAdded && Config.isMacOS())
                 {
                     // We don't bring the window itself to the front as that may
                     // mess up user's program.  We just bring the app to the front:

@@ -75,6 +75,7 @@ import bluej.utility.javafx.FXRunnable;
 import bluej.utility.javafx.JavaFXUtil;
 import javafx.application.Platform;
 import javafx.beans.property.SimpleObjectProperty;
+import javafx.geometry.Rectangle2D;
 import javafx.print.PrinterJob;
 import javafx.scene.image.Image;
 import threadchecker.OnThread;
@@ -180,6 +181,11 @@ public class FrameEditor implements Editor
         return new ArrayList<>(latestBreakpoints);
     }
 
+    public String getXPathForItemAtPosition(int screenX, int screenY, boolean includePseudoElements, boolean includeSubstringIndex)
+    {
+        return panel.getXPathForItemAtPosition(screenX, screenY, includePseudoElements, includeSubstringIndex);
+    }
+
     /**
      * A javac compile error.
      */
@@ -273,7 +279,6 @@ public class FrameEditor implements Editor
         {
             lastSource = panel.getSource();
             panel.setWindowVisible(false, false);
-            panel.cleanup();
             panel = null;
         }
     }
@@ -772,9 +777,34 @@ public class FrameEditor implements Editor
 
             @Override
             @OnThread(Tag.FXPlatform)
+            public Rectangle2D getScreenBoundsIfSelectedTab()
+            {
+                return FrameEditor.this.getScreenBoundsIfSelectedTab();
+            }
+            
+            @Override
+            @OnThread(Tag.FXPlatform)
             public void removeErrorHighlights()
             {
                 FrameEditor.this.removeErrorHighlights();
+            }
+
+            @Override
+            public SourceLocation getTextPositionForScreenPos(int screenX, int screenY)
+            {
+                throw new UnsupportedOperationException("Frame-based editors do not have a text location");
+            }
+
+            @Override
+            public double getFontSizeInPixels()
+            {
+                throw new UnsupportedOperationException("Not applicable to frame-based editor.");
+            }
+
+            @Override
+            public Rectangle2D getScreenBoundsOfLine(int line)
+            {
+                throw new UnsupportedOperationException("Frame-based editors do not have lines");
             }
         };
     }
@@ -1164,7 +1194,7 @@ public class FrameEditor implements Editor
         // We must start these futures going on the FX thread
         List<Future<List<DirectSlotError>>> futures = allElements.flatMap(e -> e.findDirectLateErrors(panel, rootPathMap)).collect(Collectors.toList());
         // Then wait for them on another thread
-        new Thread() {
+        new Thread("Slot error finder") {
             @Override
             @OnThread(Tag.Worker)
             public void run()
@@ -1460,5 +1490,11 @@ public class FrameEditor implements Editor
             panel.flagErrorsAsOld();
             panel.removeOldErrors();
         }
+    }
+
+    @Override
+    public Rectangle2D getScreenBoundsIfSelectedTab()
+    {
+        return panel == null ? null : panel.getScreenBoundsIfSelectedTab();
     }
 }

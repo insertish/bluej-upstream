@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 2014,2015,2016,2017,2018 Michael Kölling and John Rosenberg
+ Copyright (C) 2014,2015,2016,2017,2018,2021 Michael Kölling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -19,10 +19,6 @@
  This file is subject to the Classpath exception as provided in the  
  LICENSE.txt file that accompanied this code.
  */
-/*
- * To change this template, choose Tools | Templates
- * and open the template in the editor.
- */
 package bluej.stride.generic;
 
 
@@ -38,6 +34,7 @@ import java.util.stream.Stream;
 
 import bluej.stride.framedjava.ast.Parser;
 import bluej.stride.framedjava.elements.CodeElement;
+import bluej.stride.framedjava.elements.LocatableElement.LocationMap;
 import bluej.stride.framedjava.frames.BlankFrame;
 
 import bluej.utility.javafx.ScalableHeightLabel;
@@ -54,6 +51,7 @@ import javafx.scene.effect.PerspectiveTransform;
 import javafx.scene.input.DragEvent;
 import javafx.scene.input.MouseButton;
 import javafx.scene.input.TransferMode;
+import javafx.scene.layout.Pane;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 import javafx.scene.shape.Rectangle;
@@ -74,8 +72,9 @@ import threadchecker.Tag;
  *     - "special"
  *     - frame
  *  - One final cursor
+ *  - An empty frame padding pane (used to keep navigation smooth with empty frames, in the sense of how the user sees frames)  
  *
- * Thus, even when there are no subframes, there is always one cursor in the canvas.
+ * Thus, even when there are no subframes, there is always one cursor and the empty frame padding pane in the canvas.
  * 
  * The "special" is a VBox to which you can add extra content between frames,
  * such as error messages or popup meta-information about a frame.
@@ -98,6 +97,8 @@ public class FrameCanvas implements FrameContentItem
 
     private final SimpleBooleanProperty showingProperty = new SimpleBooleanProperty(true);
     private boolean animateLeftMarginScale;
+    
+    private final Pane emptyFramePaddingPane = new Pane(); // the padding pane used to fill up empty frames (cf constructor for details)
 
     private int childBlockIndex(int blockIndex)
     {
@@ -131,7 +132,8 @@ public class FrameCanvas implements FrameContentItem
     {
         if (cursors.size() > 0 && cursors.size() != blockContents.size() + 1)
             throw new IllegalStateException("Canvas: cursors and blocks out of length sync");
-        if (canvas.getChildren().size() != cursors.size() + blockContents.size() + specials.size())
+        // Checks that the children is matching the number of cursors + number of frames + the empty frame pane (+1)
+        if (canvas.getChildren().size() != cursors.size() + blockContents.size() + specials.size() + 1)
             throw new IllegalStateException("Canvas: children out of length sync");
         for (int i = 0; i < cursors.size(); i++)
         {
@@ -243,6 +245,13 @@ public class FrameCanvas implements FrameContentItem
         }
         if (index < 0)
             throw new IllegalArgumentException("insertBlockBefore: canvas does not contain specified cursor");
+
+        // Hides the empty frame pane if the frame is currently empty
+        if(blockContents.size() == 0)
+        {
+            hideEmptyFramePadding();
+        }
+        
         int childIndex = childCursorIndex(index);
         FrameCursor newCursor = editorFrm.createCursor(this);
         VBox special = new VBox();
@@ -280,6 +289,13 @@ public class FrameCanvas implements FrameContentItem
         }
         if (index < 0)
             throw new IllegalArgumentException("insertBlockAfter: canvas does not contain specified cursor");
+        
+        // Hides the empty frame pane if the frame is currently empty
+        if(blockContents.size() == 0)
+        {
+            hideEmptyFramePadding();    
+        }
+        
         int childIndex = childCursorIndex(index);
         FrameCursor newCursor = editorFrm.createCursor(this);
         VBox special = new VBox();
@@ -311,6 +327,11 @@ public class FrameCanvas implements FrameContentItem
         specials.remove(index);
         b.cleanup();
         b.setParentCanvas(null);
+        
+        //if the frame is now empty, we need to show the empty padding pane
+        if(blockContents.size() == 0){
+            showEmptyFramePadding();
+        }
         validate();
     }
     
@@ -791,15 +812,26 @@ public class FrameCanvas implements FrameContentItem
         
         
         FrameCursor topCursor = editor.createCursor(this);
-        //c.setTranslateY(-3);
-        //topCursor.setTranslateX(2);
         cursors.add(topCursor);
         canvas.getChildren().add(0, topCursor.getNode());
         
         VBox topSpecial = new VBox();
         specials.add(topSpecial);
         canvas.getChildren().add(1, topSpecial);
-    
+        
+        // To keep empty frames behaving as any other when the cursor get in/our, 
+        // we use a sort of "padding" node that acts as a filler so that the visual effect of only what is
+        // before/after the current frame moves, instead of the whole page. This filler is added when a frame
+        // is created (so, here) and is shown when the frame is becomes empty* and is hidden when another frame* is added
+        // (*) in the sense of the user's point of view
+        emptyFramePaddingPane.minHeightProperty().bind(canvas.cssMinHeightProperty());
+        emptyFramePaddingPane.maxHeightProperty().bind(canvas.cssMinHeightProperty());
+        emptyFramePaddingPane.prefHeightProperty().bind(canvas.cssMinHeightProperty());
+        canvas.getChildren().add(emptyFramePaddingPane);
+        // Must be mouse transparent to avoid capturing clicks.  It's empty, but should probably also be invisible just in case:
+        emptyFramePaddingPane.setMouseTransparent(true);
+        emptyFramePaddingPane.setVisible(false);
+       
         editorFrm = editor;
     }
     
@@ -826,39 +858,6 @@ public class FrameCanvas implements FrameContentItem
         });
     }
     
-    /**
-     * Get the code inside this section, as text
-     * @return code contained in this container
-     */
-    /*
-    @Override
-    public String toCode(String prefix)
-    {
-        String code = "";
-        for (CodeFrame b : getBlocksSubtype(CodeFrame.class))
-        {
-            //If it's code
-            code += b.toCode("    " + prefix) + "\n";
-        }
-        return code;
-    }
-    */
-    /*
-    public void setSelectionScope(SelectionScope scope)
-    {
-        selectionScope = scope;
-        for (Block bl : getBlocksSubtype(Block.class))
-        {
-            bl.setSelectionScope(scope);
-        }
-    }
-    
-    public SelectionScope getSelectionScope()
-    {
-        return selectionScope;
-    }
-    */
-    
     public void focusTopCursor()
     {
         FrameCursor firstCursor = getFirstCursor();
@@ -880,42 +879,19 @@ public class FrameCanvas implements FrameContentItem
             return false;
     }
 
-    /*
-    @Override
-    public boolean acceptsType(Class<? extends Block> blockClass) {
-        //Don't accept blocks for the parameter-canvas
-        if (blockClass.equals(MethodParameter.class))
-        {
-            return false;
-        }
-        //Don't put methods inside other things - unless it's a class or a commented-out section (you can't put a method in a loop)
-        if (MethodBlock.class.isAssignableFrom(blockClass) && !allowsMethods())
-        {
-            return false;
-        }
-        //Only allow certain statements inside a class?
-        if (isClassCanvas())
-        {
-            if (MethodBlock.class.isAssignableFrom(blockClass))
-                return true;
-            if (blockClass.equals(CommentBlock.class))
-                return true;
-            if (blockClass.equals(MultiCommentBlock.class))
-                return true;
-            if (blockClass.equals(VarBlock.class))
-                return true;
-            if (blockClass.equals(ObjectBlock.class))
-                return true;
-            return false;
-        }
-        //Otherwise
-        return true;
-    }
-    */
-
     public void cleanup()
     {
         getBlockContents().forEach(f -> f.cleanup());        
+    }
+    
+    public void showEmptyFramePadding()
+    {
+        emptyFramePaddingPane.setManaged(true);
+    }
+
+    public void hideEmptyFramePadding()
+    {
+        emptyFramePaddingPane.setManaged(false);
     }
 
     public Stream<HeaderItem> getHeaderItems()
@@ -1217,5 +1193,18 @@ public class FrameCanvas implements FrameContentItem
             default:
                 return Parser.JavaContext.CLASS_MEMBER;
         }
+    }
+
+    @Override
+    public String getXPathForElementAt(double sceneX, double sceneY, LocationMap locationMap, String xpathParent, int canvasesBefore, boolean includePseudoElements, boolean includeSubstringIndex)
+    {
+        if (JavaFXUtil.containsScenePoint(canvas, sceneX, sceneY))
+        {
+            return blockContents.stream()
+                .flatMap(f -> Stream.ofNullable(f.getXPathForElementAt(sceneX, sceneY, locationMap, includePseudoElements, includeSubstringIndex)))
+                .findFirst()
+                .orElse(xpathParent + (includePseudoElements ? "/_canvas[" + (1 + canvasesBefore) + "]" : ""));
+        }
+        return null;
     }
 }

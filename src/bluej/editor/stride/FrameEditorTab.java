@@ -1,6 +1,6 @@
 /*
  This file is part of the Greenfoot program. 
- Copyright (C) 2012,2013,2014,2015,2016,2017,2018,2019,2020  Michael Kolling and John Rosenberg
+ Copyright (C) 2012,2013,2014,2015,2016,2017,2018,2019,2020,2021  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -513,7 +513,7 @@ public class FrameEditorTab extends FXTab implements InteractionManager, Suggest
 
         loading = true;
         FrameEditor frameEditor = getFrameEditor();
-        new Thread() {
+        new Thread("Load Stride class " + titleLabel.getText()) {
             @OnThread(value = Tag.FX, ignoreParent = true)
             public void run()
             {
@@ -685,11 +685,6 @@ public class FrameEditorTab extends FXTab implements InteractionManager, Suggest
 
     }
 
-    public void cleanup()
-    {
-        FrameCursor.editorClosing(this);
-    }
-
     private TopLevelFrame<? extends TopLevelCodeElement> getTopLevelFrame()
     {
         return topLevelFrameProperty.getValue();
@@ -859,6 +854,33 @@ public class FrameEditorTab extends FXTab implements InteractionManager, Suggest
         editor.getWatcher().scheduleCompilation(false, CompileReason.MODIFIED, CompileType.INDIRECT_USER_COMPILE);
     }
 
+    public String getXPathForItemAtPosition(int screenX, int screenY, boolean includePseudoElements, boolean includeSubstringIndex)
+    {
+        TopLevelFrame<? extends TopLevelCodeElement> topLevelFrame = getTopLevelFrame();
+        if (topLevelFrame == null)
+            return null;
+        Node frameNode = topLevelFrame.getNode();
+        FXTabbedEditor fxTabbedEditor = parent.get();
+
+        // This is the same computation as in FlowEditor.getTextPositionForScreenPos;
+        // see the comment there for more info.
+        int windowX = fxTabbedEditor.getX();
+        int windowY = fxTabbedEditor.getY();
+        double sceneX = frameNode.getScene().getX();
+        double sceneY = frameNode.getScene().getY();
+        double renderScaleX = fxTabbedEditor.getRenderScaleX();
+        double renderScaleY = fxTabbedEditor.getRenderScaleY();
+        Point2D sceneLocation = new Point2D(
+            (screenX / renderScaleX) - windowX,
+            (screenY / renderScaleY) - windowY
+        ).subtract(
+            sceneX,
+            sceneY
+        );
+
+        return topLevelFrame.getXPathForElementAt(sceneLocation.getX(), sceneLocation.getY(), getLocationMap(), includePseudoElements, includeSubstringIndex);
+    }
+
     @OnThread(Tag.Any)
     private static enum ShowVars
     {
@@ -949,6 +971,12 @@ public class FrameEditorTab extends FXTab implements InteractionManager, Suggest
     void resetFontSize()
     {
         PrefMgr.strideFontSizeProperty().set(PrefMgr.DEFAULT_STRIDE_FONT_SIZE);
+        // Update the bird view current focused frame if bird view is enabled
+        // The frame isn't change right away so we need to do it at the next next layout
+        if(viewProperty.get().isBirdseye())
+        {
+            JavaFXUtil.runAfterNextLayout(getTabPane().getScene(), () -> JavaFXUtil.runAfterNextLayout(getTabPane().getScene(),() -> calculateBirdseyeRectangle()));
+        }
     }
 
     @OnThread(Tag.FXPlatform)
@@ -1970,6 +1998,12 @@ public class FrameEditorTab extends FXTab implements InteractionManager, Suggest
     {
         final IntegerProperty fontSize = PrefMgr.strideFontSizeProperty();
         Utility.decreaseFontSize(fontSize);
+        // Update the bird view current focused frame if bird view is enabled
+        // The frame isn't change right away so we need to do it at the next next layout
+        if(viewProperty.get().isBirdseye())
+        {
+            JavaFXUtil.runAfterNextLayout(getTabPane().getScene(), () -> JavaFXUtil.runAfterNextLayout(getTabPane().getScene(),() -> calculateBirdseyeRectangle()));
+        }
     }
 
     //package-visible
@@ -1978,6 +2012,12 @@ public class FrameEditorTab extends FXTab implements InteractionManager, Suggest
     {
         final IntegerProperty fontSize = PrefMgr.strideFontSizeProperty();
         Utility.increaseFontSize(fontSize);
+        // Update the bird view current focused frame if bird view is enabled
+        // The frame isn't change right away so we need to do it at the next next layout
+        if(viewProperty.get().isBirdseye())
+        {
+            JavaFXUtil.runAfterNextLayout(getTabPane().getScene(), () -> JavaFXUtil.runAfterNextLayout(getTabPane().getScene(),() -> calculateBirdseyeRectangle()));
+        }
     }
 
     @Override
