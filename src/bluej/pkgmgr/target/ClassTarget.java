@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2011,2012,2013,2014,2015  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2011,2012,2013,2014,2015,2016,2017  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -21,48 +21,60 @@
  */
 package bluej.pkgmgr.target;
 
-import java.awt.Color;
-import java.awt.EventQueue;
-import java.awt.Paint;
-import java.awt.Rectangle;
-import java.awt.event.ActionEvent;
-import java.awt.event.MouseEvent;
+
 import java.io.File;
 import java.io.FileFilter;
 import java.io.IOException;
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
+import java.nio.charset.Charset;
+import java.nio.file.Files;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Properties;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
-import javax.swing.AbstractAction;
-import javax.swing.JPopupMenu;
+import javax.swing.SwingUtilities;
 
 import bluej.Config;
 import bluej.collect.DataCollector;
-import bluej.compiler.CompileObserver;
-import bluej.compiler.Diagnostic;
+import bluej.collect.DiagnosticWithShown;
+import bluej.collect.StrideEditReason;
+import bluej.compiler.CompileInputFile;
+import bluej.compiler.CompileReason;
+import bluej.compiler.CompileType;
+import bluej.debugger.Debugger;
 import bluej.debugger.DebuggerClass;
+import bluej.debugger.DebuggerObject;
+import bluej.debugger.DebuggerResult;
 import bluej.debugger.gentype.Reflective;
 import bluej.debugmgr.objectbench.InvokeListener;
 import bluej.editor.Editor;
 import bluej.editor.EditorManager;
+import bluej.editor.TextEditor;
+import bluej.editor.stride.FrameEditor;
 import bluej.extensions.BClass;
 import bluej.extensions.BClassTarget;
 import bluej.extensions.BDependency;
 import bluej.extensions.ExtensionBridge;
+import bluej.extensions.SourceType;
 import bluej.extensions.event.ClassEvent;
 import bluej.extensions.event.ClassTargetEvent;
 import bluej.extmgr.ClassExtensionMenu;
 import bluej.extmgr.ExtensionsManager;
-import bluej.extmgr.MenuManager;
-import bluej.graph.GraphEditor;
-import bluej.graph.Moveable;
-import bluej.graph.Vertex;
+import bluej.extmgr.FXMenuManager;
+import bluej.parser.ParseFailure;
 import bluej.parser.entity.EntityResolver;
 import bluej.parser.entity.PackageResolver;
 import bluej.parser.entity.ParsedReflective;
@@ -70,7 +82,9 @@ import bluej.parser.nodes.ParsedCUNode;
 import bluej.parser.nodes.ParsedTypeNode;
 import bluej.parser.symtab.ClassInfo;
 import bluej.parser.symtab.Selection;
+import bluej.pkgmgr.JavadocResolver;
 import bluej.pkgmgr.Package;
+import bluej.pkgmgr.PackageEditor;
 import bluej.pkgmgr.PkgMgrFrame;
 import bluej.pkgmgr.Project;
 import bluej.pkgmgr.SourceInfo;
@@ -79,13 +93,17 @@ import bluej.pkgmgr.dependency.ExtendsDependency;
 import bluej.pkgmgr.dependency.ImplementsDependency;
 import bluej.pkgmgr.dependency.UsesDependency;
 import bluej.pkgmgr.target.role.AbstractClassRole;
-import bluej.pkgmgr.target.role.AppletClassRole;
 import bluej.pkgmgr.target.role.ClassRole;
 import bluej.pkgmgr.target.role.EnumClassRole;
 import bluej.pkgmgr.target.role.InterfaceClassRole;
-import bluej.pkgmgr.target.role.MIDletClassRole;
 import bluej.pkgmgr.target.role.StdClassRole;
 import bluej.pkgmgr.target.role.UnitTestClassRole;
+import bluej.stride.framedjava.ast.Loader;
+import bluej.stride.framedjava.ast.Parser;
+import bluej.stride.framedjava.convert.ConversionWarning;
+import bluej.stride.framedjava.convert.ConvertResultDialog;
+import bluej.stride.framedjava.elements.CodeElement;
+import bluej.stride.framedjava.elements.TopLevelCodeElement;
 import bluej.utility.Debug;
 import bluej.utility.DialogManager;
 import bluej.utility.FileEditor;
@@ -93,8 +111,31 @@ import bluej.utility.FileUtility;
 import bluej.utility.JavaNames;
 import bluej.utility.JavaReflective;
 import bluej.utility.JavaUtils;
+import bluej.utility.Utility;
+import bluej.utility.javafx.FXPlatformConsumer;
+import bluej.utility.javafx.JavaFXUtil;
+import bluej.utility.javafx.ResizableCanvas;
 import bluej.views.ConstructorView;
 import bluej.views.MethodView;
+import javafx.application.Application;
+import javafx.application.Platform;
+import javafx.event.ActionEvent;
+import javafx.scene.canvas.GraphicsContext;
+import javafx.scene.control.ContextMenu;
+import javafx.scene.control.Label;
+import javafx.scene.control.MenuItem;
+import javafx.scene.control.SeparatorMenuItem;
+import javafx.scene.image.Image;
+import javafx.scene.input.MouseEvent;
+import javafx.scene.layout.VBox;
+
+import javafx.scene.paint.Color;
+import javafx.scene.paint.ImagePattern;
+import javafx.stage.Stage;
+import javafx.stage.Window;
+
+import threadchecker.OnThread;
+import threadchecker.Tag;
 
 /**
  * A class target in a package, i.e. a target that is a class file built from
@@ -105,7 +146,7 @@ import bluej.views.MethodView;
  * @author Bruce Quig
  */
 public class ClassTarget extends DependentTarget
-    implements Moveable, InvokeListener
+    implements InvokeListener
 {
     final static int MIN_WIDTH = 60;
     final static int MIN_HEIGHT = 30;
@@ -113,27 +154,34 @@ public class ClassTarget extends DependentTarget
     private final static String compileStr = Config.getString("pkgmgr.classmenu.compile");
     private final static String inspectStr = Config.getString("pkgmgr.classmenu.inspect");
     private final static String removeStr = Config.getString("pkgmgr.classmenu.remove");
+    private final static String convertToJavaStr = Config.getString("pkgmgr.classmenu.convertToJava");
+    private final static String convertToStrideStr = Config.getString("pkgmgr.classmenu.convertToStride");
     private final static String createTestStr = Config.getString("pkgmgr.classmenu.createTest");
+    private final static String launchFXStr = Config.getString("pkgmgr.classmenu.launchFX");
 
-    // Define Background Colours
-    private final static Color compbg = new Color(200,150,100);
+    private static final String STEREOTYPE_OPEN = ""; //"<<";
+    private static final String STEREOTYPE_CLOSE = ""; //">>";
+    private static final double RESIZE_CORNER_GAP = 4;
+
 
     private static String usesArrowMsg = Config.getString("pkgmgr.usesArrowMsg");
 
     // temporary file name extension to trick windows if changing case only in
     // class name
     private static String TEMP_FILE_EXTENSION = "-temp";
-    
+
     // the role object represents the changing roles that are class
     // target can have ie changing from applet to an interface etc
     // 'role' should never be null
     // role should be accessed using getRole() and set using
     // setRole(). A role should not contain important state information
     // because role objects are thrown away at a whim.
+    @OnThread(value = Tag.Any,requireSynchronized = true)
     private ClassRole role = new StdClassRole();
 
     // a flag indicating whether an editor, when opened for the first
     // time, should display the interface of this class
+    @OnThread(value = Tag.Any,requireSynchronized = true)
     private boolean openWithInterface = false;
 
     // cached information obtained by parsing the source code
@@ -143,32 +191,66 @@ public class ClassTarget extends DependentTarget
     
     // caches whether the class is abstract. Only accurate when the
     // classtarget state is normal (ie. the class is compiled).
+    @OnThread(value = Tag.Any,requireSynchronized = true)
     private boolean isAbstract;
     
     // a flag indicating whether an editor should have the naviview expanded/collapsed
-    private Boolean isNaviviewExpanded=null;
+    @OnThread(value = Tag.Any, requireSynchronized = true)
+    private Optional<Boolean> isNaviviewExpanded = Optional.empty();
 
+    @OnThread(value = Tag.Any,requireSynchronized = true)
+    private final List<Integer> cachedBreakpoints = new ArrayList<>();
+    
     // flag to prevent recursive calls to analyseDependancies()
     private boolean analysing = false;
 
-    private int ghostX;
-    private int ghostY;
-    private int ghostWidth;
-    private int ghostHeight;
-    private boolean isDragging = false;
+    @OnThread(Tag.FXPlatform)
     private boolean isMoveable = true;
-    private boolean hasSource;
-    
-    // Whether the source has been modified since it was last compiled. This
-    // starts off as "true", which is a lie, but it prevents setting breakpoints
-    // in an initially uncompiled class.
-    private boolean modifiedSinceCompile = true;
+    private SourceType sourceAvailable;
+    // Part of keeping track of number of editors opened, for Greenfoot phone home:
+    private boolean hasBeenOpened = false;
 
+    @OnThread(value = Tag.Any, requireSynchronized = true)
     private String typeParameters = "";
     
     //properties map to store values used in the editor from the props (if necessary)
+    @OnThread(value = Tag.Any,requireSynchronized = true)
     private Map<String,String> properties = new HashMap<String,String>();
-    
+    // Keep track of whether the editor is open or not; we get a lot of
+    // potential open events, and don't want to keep recording ourselves as re-opening
+    private boolean recordedAsOpen = false;
+    @OnThread(Tag.Any)
+    private final AtomicBoolean visible = new AtomicBoolean(true);
+    private static final String MENU_STYLE_INBUILT = "class-action-inbuilt";
+    @OnThread(Tag.Any)
+    private static String[] pseudos;
+
+    // The body of the class target which goes hashed, etc:
+    @OnThread(Tag.FX)
+    private ResizableCanvas canvas;
+    @OnThread(Tag.FXPlatform)
+    private Label stereotypeLabel;
+    @OnThread(Tag.FXPlatform)
+    private boolean isFront = true;
+    @OnThread(Tag.FX)
+    private static Image greyStripeImage;
+    @OnThread(Tag.FX)
+    private static Image redStripeImage;
+    private static final int GREY_STRIPE_SEPARATION = 12;
+    // How far between rows of stripes:
+    private static final int RED_STRIPE_SEPARATION = 16;
+    private static final int STRIPE_THICKNESS = 3;
+    @OnThread(Tag.FX)
+    private static final Color RED_STRIPE = Color.rgb(170, 80, 60);
+    @OnThread(Tag.FX)
+    private static final Color GREY_STRIPE = Color.rgb(158, 139, 116);
+    @OnThread(value = Tag.Any, requireSynchronized = true)
+    private boolean showingInterface;
+    @OnThread(Tag.FXPlatform)
+    private boolean drawingExtends = false;
+    @OnThread(Tag.FXPlatform)
+    private Label nameLabel;
+
     /**
      * Create a new class target in package 'pkg'.
      * 
@@ -190,38 +272,80 @@ public class ClassTarget extends DependentTarget
     public ClassTarget(Package pkg, String baseName, String template)
     {
         super(pkg, baseName);
-        hasSource = getSourceFile().canRead();
+
+        if (pseudos == null)
+        {
+            pseudos = Utility.mapList(Arrays.<Class<? extends ClassRole>>asList(StdClassRole.class, UnitTestClassRole.class, AbstractClassRole.class, InterfaceClassRole.class, EnumClassRole.class), ClassTarget::pseudoFor).toArray(new String[0]);
+        }
+
+        Platform.runLater(() -> {
+            JavaFXUtil.addStyleClass(pane, "class-target");
+
+            nameLabel = new Label(baseName);
+            JavaFXUtil.addStyleClass(nameLabel, "class-target-name");
+            nameLabel.setMaxWidth(9999.0);
+            stereotypeLabel = new Label();
+            stereotypeLabel.setMaxWidth(9999.0);
+            stereotypeLabel.visibleProperty().bind(stereotypeLabel.textProperty().isNotEmpty());
+            stereotypeLabel.managedProperty().bind(stereotypeLabel.textProperty().isNotEmpty());
+            JavaFXUtil.addStyleClass(stereotypeLabel, "class-target-extra");
+            pane.setTop(new VBox(stereotypeLabel, nameLabel));
+            canvas = new ResizableCanvas() {
+                @Override
+                @OnThread(Tag.FX)
+                public void resize(double width, double height)
+                {
+                    super.resize(width, height);
+                    redraw();
+                }
+            };
+            pane.setCenter(canvas);
+        });
+
+        // This must come after GUI init because it might try to affect GUI:
+        calcSourceAvailable();
 
         // we can take a guess at what the role is going to be for the
         // object based on the start of the template name. If we get this
         // wrong, its no great shame as it'll be fixed the first time they
         // successfully analyse/compile the source.
         if (template != null) {
-            if (template.startsWith("applet")) {
-                role = new AppletClassRole();
-            }
-            else if (template.startsWith("unittest")) {
-                role = new UnitTestClassRole(true);
+            if (template.startsWith("unittest")) {
+                setRole(new UnitTestClassRole(true));
             }
             else if (template.startsWith("abstract")) {
-                role = new AbstractClassRole();
+                setRole(new AbstractClassRole());
             }
             else if (template.startsWith("interface")) {
-                role = new InterfaceClassRole();
+                setRole(new InterfaceClassRole());
             }
             else if (template.startsWith("enum")) {
-                role = new EnumClassRole();
+                setRole(new EnumClassRole());
             }
-            else if (template.startsWith("midlet")) {
-                role = new MIDletClassRole();
-            }            
+            else {
+                setRole(new StdClassRole());
+            }
+
         }
-        setGhostPosition(0, 0);
-        setGhostSize(0, 0);
+    }
+    
+    private void calcSourceAvailable()
+    {
+        if (getFrameSourceFile().canRead())
+            sourceAvailable = SourceType.Stride;
+        else if (getJavaSourceFile().canRead())
+            sourceAvailable = SourceType.Java;
+        else
+        {
+            sourceAvailable = SourceType.NONE;
+            // Can't have been modified since compile since there's no source to modify:
+            setState(State.COMPILED);
+        }
     }
 
     private BClass singleBClass;  // Every Target has none or one BClass
     private BClassTarget singleBClassTarget; // Every Target has none or one BClassTarget
+    // Set from Swing thread but read on FX for display:
     
     /**
      * Return the extensions BProject associated with this Project.
@@ -238,8 +362,8 @@ public class ClassTarget extends DependentTarget
     }
 
     /**
-     * Returns the {@link BClassTarget} associated with this {@link ClassTarget}
-     * . There should be only one {@link BClassTarget} object associated with
+     * Returns the {@link BClassTarget} associated with this {@link ClassTarget}.
+     * There should be only one {@link BClassTarget} object associated with
      * each {@link ClassTarget}.
      * 
      * @return The {@link BClassTarget} associated with this {@link ClassTarget}.
@@ -260,6 +384,7 @@ public class ClassTarget extends DependentTarget
      * 
      * @return The qualifiedName value
      */
+    @OnThread(Tag.Any)
     public String getQualifiedName()
     {
         return getPackage().getQualifiedName(getBaseName());
@@ -271,6 +396,7 @@ public class ClassTarget extends DependentTarget
      * 
      * @return The baseName value
      */
+    @OnThread(Tag.Any)
     public String getBaseName()
     {
         return getIdentifierName();
@@ -306,9 +432,11 @@ public class ClassTarget extends DependentTarget
         
         // Not compiled; try to get a reflective from the parser
         ParsedCUNode node = null;
-        getEditor();
-        if (editor != null) {
-            node = editor.getParsedNode();
+        if (getEditor() != null) {
+            TextEditor textEditor = editor.assumeText();
+            if (textEditor != null) {
+                node = textEditor.getParsedNode();
+            }
         }
         
         if (node != null) {
@@ -340,7 +468,8 @@ public class ClassTarget extends DependentTarget
      * 
      * @return The typeParameters value
      */
-    private String getTypeParameters()
+    @OnThread(Tag.Any)
+    private synchronized String getTypeParameters()
     {
         return typeParameters;
     }
@@ -352,28 +481,49 @@ public class ClassTarget extends DependentTarget
      * @param newState The new state value
      */
     @Override
-    public void setState(int newState)
+    public void setState(State newState)
     {
-        if (state != newState) {
-            getPackage().getProject().removeInspectorInstance(getQualifiedName());
+        // Must do this even if state hasn't changed, because if state was HAS_ERROR
+        // and has now become HAS_ERROR then we still need to mark compile as finished:
+        if (editor != null && newState != State.NEEDS_COMPILE) {
+            editor.compileFinished(newState == State.COMPILED, true);
+        }
+
+        if (getState() != newState)
+        {
+            String qualifiedName = getQualifiedName();
+            @OnThread(Tag.Any) Project proj = getPackage().getProject();
+            Platform.runLater(() -> proj.removeInspectorInstance(qualifiedName));
             
-            // Notify extensions if necessary. Note we don't distinguish
-            // S_COMPILING and S_INVALID.
-            if (newState == S_NORMAL) {
-                modifiedSinceCompile = false;
-                if (editor != null) {
+            // Notify extensions if necessary.
+            if (newState == State.COMPILED)
+            {
+                if (editor != null)
+                {
                     editor.reInitBreakpoints();
                 }
-                ClassEvent event = new ClassEvent(ClassEvent.STATE_CHANGED, getPackage(), getBClass(), true);
-                ExtensionsManager.getInstance().delegateEvent(event);
             }
-            else if (state == S_NORMAL) {
-                ClassEvent event = new ClassEvent(ClassEvent.STATE_CHANGED, getPackage(), getBClass(), false);
-                ExtensionsManager.getInstance().delegateEvent(event);
+            ClassEvent event = new ClassEvent(ClassEvent.STATE_CHANGED, getPackage(), getBClass(), newState == State.COMPILED, newState == State.HAS_ERROR);
+            ExtensionsManager.getInstance().delegateEvent(event);
+
+            Platform.runLater(() -> {redraw();});
+            super.setState(newState);
+        }
+    }
+
+    public void markCompiling(boolean clearErrorState)
+    {
+        if (clearErrorState && getState() == State.HAS_ERROR)
+            setState(State.NEEDS_COMPILE);
+
+        if (getSourceType() == SourceType.Stride) {
+            getEditor(); // Create editor if necessary
+        }
+        if (editor != null)
+        {
+            if (editor.compileStarted()) {
+                markKnownError();
             }
-            
-            state = newState;
-            repaint();
         }
     }
 
@@ -382,7 +532,8 @@ public class ClassTarget extends DependentTarget
      * 
      * @return The role value
      */
-    public ClassRole getRole()
+    @OnThread(Tag.Any)
+    public synchronized ClassRole getRole()
     {
         return role;
     }
@@ -394,11 +545,33 @@ public class ClassTarget extends DependentTarget
      * 
      * @param newRole The new role value
      */
-    protected void setRole(ClassRole newRole)
+    protected synchronized final void setRole(ClassRole newRole)
     {
-        if (role.getRoleName() != newRole.getRoleName()) {
+        if (role == null || role.getRoleName() != newRole.getRoleName()) {
             role = newRole;
+
+            String select = pseudoFor(role.getClass());
+            String stereotype = role.getStereotypeLabel();
+            boolean shouldBeFront = role == null || !(role instanceof UnitTestClassRole);
+            Platform.runLater(() -> {
+                isFront = shouldBeFront;
+                JavaFXUtil.selectPseudoClass(pane, Arrays.asList(pseudos).indexOf(select), pseudos);
+                if (stereotype != null)
+                    stereotypeLabel.setText(STEREOTYPE_OPEN + stereotype + STEREOTYPE_CLOSE);
+                else
+                    stereotypeLabel.setText("");
+            });
         }
+    }
+
+    @OnThread(Tag.Any)
+    private static String pseudoFor(Class<? extends ClassRole> aClass)
+    {
+        // AbstractClassRole becomes bj-abstract, etc
+        String name = aClass.getSimpleName();
+        if (name.endsWith("ClassRole"))
+            name = name.substring(0, name.length() - "ClassRole".length());
+        return "bj-" + name.toLowerCase();
     }
 
     /**
@@ -454,15 +627,16 @@ public class ClassTarget extends DependentTarget
      */
     public void determineRole(Class<?> cl)
     {
-        isAbstract = false;
-        
         if (cl != null) {
-            isAbstract = Modifier.isAbstract(cl.getModifiers());
+            boolean isAbs;
+            synchronized (this)
+            {
+                isAbstract = Modifier.isAbstract(cl.getModifiers());
+                isAbs = isAbstract;
+            }
             
             ClassLoader clLoader = cl.getClassLoader();
             Class<?> junitClass = null;
-            Class<?> appletClass = null;
-            Class<?> midletClass = null;
 
             // It shouldn't ever be the case that the class is on the bootstrap
             // class path (and was loaded by the bootstrap class loader), unless
@@ -475,35 +649,16 @@ public class ClassTarget extends DependentTarget
                 }
                 catch (ClassNotFoundException cnfe) {}
                 catch (LinkageError le) {}
-
-                try {
-                    appletClass = clLoader.loadClass("java.applet.Applet");
-                }
-                catch (ClassNotFoundException cnfe) {}
-                catch (LinkageError le) {}
-                
-                try {
-                    midletClass = clLoader.loadClass("javax.microedition.midlet.MIDlet");
-                }
-                catch (ClassNotFoundException cnfe) {}
-                catch (LinkageError le) {}
             }
             
             if (junitClass == null) {
                 junitClass = junit.framework.TestCase.class;
             }
-            
-            if (appletClass == null) {
-                appletClass = java.applet.Applet.class;
-            }
-            
+
             // As cl is non-null, it is the definitive information
             // source ie. if it thinks its an applet who are we to argue
             // with it.
-            if (appletClass.isAssignableFrom(cl)) {
-                setRole(new AppletClassRole());
-            }
-            else if (junitClass.isAssignableFrom(cl)) {
+            if (junitClass.isAssignableFrom(cl)) {
                 setRole(new UnitTestClassRole(false));
             }
             else if (Modifier.isInterface(cl.getModifiers())) {
@@ -512,11 +667,8 @@ public class ClassTarget extends DependentTarget
             else if (JavaUtils.getJavaUtils().isEnum(cl)) {
                 setRole(new EnumClassRole());
             }
-            else if (isAbstract) {
+            else if (isAbs) {
                 setRole(new AbstractClassRole());
-            }
-            else if ( ( midletClass != null )  &&  ( midletClass.isAssignableFrom(cl) ) ) {
-                setRole(new MIDletClassRole());
             }
             else if (isJunit4TestClass(cl)) {
                 setRole(new UnitTestClassRole(true));
@@ -526,17 +678,16 @@ public class ClassTarget extends DependentTarget
             }
         }
         else {
+            synchronized (this)
+            {
+                isAbstract = false;
+            }
+            
             // try the parsed source code
             ClassInfo classInfo = sourceInfo.getInfoIfAvailable();
 
             if (classInfo != null) {
-                if (classInfo.isApplet()) {
-                    setRole(new AppletClassRole());
-                }
-                else if (classInfo.isMIDlet()) {
-                    setRole(new MIDletClassRole());
-                }          
-                else if (classInfo.isUnitTest()) {
+                if (classInfo.isUnitTest()) {
                     setRole(new UnitTestClassRole(false));
                 }
                 else if (classInfo.isInterface()) {
@@ -552,10 +703,12 @@ public class ClassTarget extends DependentTarget
                     // We shouldn't override applet/unit test class roles based only
                     // on source analysis: if they inherit only indirectly from Applet
                     // or UnitTest, source analysis won't give the correct role
-                    if (! (role instanceof AppletClassRole) &&
-                            ! (role instanceof UnitTestClassRole))
+                    synchronized (this)
                     {
-                        setRole(new StdClassRole());
+                        if (!(role instanceof UnitTestClassRole))
+                        {
+                            setRole(new StdClassRole());
+                        }
                     }
                 }
             }
@@ -583,15 +736,12 @@ public class ClassTarget extends DependentTarget
         String type = props.getProperty(prefix + ".type");
 
         String intf = props.getProperty(prefix + ".showInterface");
-        openWithInterface = Boolean.valueOf(intf).booleanValue();
+        synchronized (this)
+        {
+            openWithInterface = Boolean.valueOf(intf).booleanValue();
+        }
 
-        if (AppletClassRole.APPLET_ROLE_NAME.equals(type)) {
-            setRole(new AppletClassRole());
-        }
-        else if (MIDletClassRole.MIDLET_ROLE_NAME.equals(type)) {
-            setRole(new MIDletClassRole());
-        }
-        else if (UnitTestClassRole.UNITTEST_ROLE_NAME.equals(type)) {
+        if (UnitTestClassRole.UNITTEST_ROLE_NAME.equals(type)) {
             setRole(new UnitTestClassRole(false));
         }
         else if (UnitTestClassRole.UNITTEST_ROLE_NAME_JUNIT4.equals(type)) {
@@ -621,7 +771,30 @@ public class ClassTarget extends DependentTarget
             analyseSource();    
         }
         else {
-            typeParameters = typeParams;
+            synchronized (this)
+            {
+                typeParameters = typeParams;
+            }
+        }
+
+        synchronized (this)
+        {
+            cachedBreakpoints.clear();
+            try
+            {
+                for (int i = 0; ; i++)
+                {
+                    String s = props.getProperty(prefix + ".breakpoint." + Integer.toString(i), "");
+                    if (s != null && !s.isEmpty())
+                    {
+                        cachedBreakpoints.add(Integer.parseInt(s));
+                    } else
+                        break;
+                }
+            } catch (NumberFormatException e)
+            {
+                Debug.reportError("Error parsing breakpoint line number", e);
+            }
         }
     }
 
@@ -634,6 +807,7 @@ public class ClassTarget extends DependentTarget
      *            properties in a properties file used by multiple targets.
      */
     @Override
+    @OnThread(Tag.FXPlatform)
     public void save(Properties props, String prefix)
     {
         super.save(props, prefix);
@@ -642,22 +816,45 @@ public class ClassTarget extends DependentTarget
             props.put(prefix + ".type", getRole().getRoleName());
         }
 
-        if (editorOpen()) {
-            openWithInterface = getEditor().isShowingInterface();          
-        }
-        //saving the state of the naviview (open/close) to the props 
-        //setting the value of the expanded according to the value from the editor (if there is)
-        //else if there was a previous setting use that
-        if (editorOpen() && getProperty(NAVIVIEW_EXPANDED_PROPERTY)!=null){
-            props.put(prefix + ".naviview.expanded", String.valueOf(getProperty(NAVIVIEW_EXPANDED_PROPERTY)));
-        }
-        else if (isNaviviewExpanded!=null) {
+        boolean intf;
+        synchronized (this)
+        {
+            openWithInterface = showingInterface;
+            intf = openWithInterface;
+
+            //saving the state of the naviview (open/close) to the props
+            //setting the value of the expanded according to the value from the editor (if there is)
+            //else if there was a previous setting use that
+            if (getProperty(NAVIVIEW_EXPANDED_PROPERTY) != null)
+            {
+                props.put(prefix + ".naviview.expanded", String.valueOf(getProperty(NAVIVIEW_EXPANDED_PROPERTY)));
+            } else if (isNaviviewExpanded.isPresent())
+            {
                 props.put(prefix + ".naviview.expanded", String.valueOf(isNaviviewExpanded()));
+            }
+            props.put(prefix + ".typeParameters", getTypeParameters());
         }
         
-        props.put(prefix + ".showInterface", new Boolean(openWithInterface).toString());
-        props.put(prefix + ".typeParameters", getTypeParameters());
+        props.put(prefix + ".showInterface", Boolean.valueOf(intf).toString());
 
+
+        List<Integer> breakpoints;
+        if (editor != null && editor instanceof FrameEditor)
+        {
+            breakpoints = ((FrameEditor)editor).getBreakpoints();
+        }
+        else
+        {
+            synchronized (this)
+            {
+                breakpoints = cachedBreakpoints;
+            }
+        }
+        for (int i = 0; i < breakpoints.size(); i++)
+        {
+            props.put(prefix + ".breakpoint." + i, breakpoints.get(i).toString());
+        }
+        
         getRole().save(props, 0, prefix);
     }
 
@@ -667,8 +864,8 @@ public class ClassTarget extends DependentTarget
      */
     public void reload()
     {
-        hasSource = getSourceFile().canRead();
-        if (hasSource) {
+        calcSourceAvailable();
+        if (sourceAvailable != SourceType.NONE) {
             if (editor != null) {
                 editor.reloadFile();
             }
@@ -692,7 +889,7 @@ public class ClassTarget extends DependentTarget
         File clss = getClassFile();
 
         // if just a .class file with no src, it better be up to date
-        if (!hasSourceCode()) {
+        if (sourceAvailable == SourceType.NONE) {
             return true;
         }
 
@@ -708,12 +905,11 @@ public class ClassTarget extends DependentTarget
      */
     public void invalidate()
     {
-        setState(S_INVALID);
-        for (Iterator<? extends Dependency> it = dependents(); it.hasNext();) {
-            Dependency d = it.next();
+        markModified();
+        for (Dependency d : dependents()) {
             ClassTarget dependent = (ClassTarget) d.getFrom();
             
-            if (! dependent.isInvalidState()) {    
+            if (dependent.isCompiled()) {
                 // Invalidate the dependent only if it is not already invalidated. 
                 // Will avoid going into an infinite circular loop.
                 dependent.invalidate();
@@ -757,26 +953,10 @@ public class ClassTarget extends DependentTarget
      * 
      * The return is only valid if isCompiled() is true.
      */
-    public boolean isAbstract()
+    @OnThread(Tag.Any)
+    public synchronized boolean isAbstract()
     {
         return isAbstract;
-    }
-    
-    // --- Target interface ---
-
-    /**
-     * Gets the backgroundColour attribute of the ClassTarget object
-     * 
-     * @return The backgroundColour value
-     */
-    public Paint getBackgroundPaint(int width, int height)
-    {
-        if (state == S_COMPILING) {
-            return compbg;
-        }
-        else {
-            return getRole().getBackgroundPaint(width, height);
-        }
     }
 
 
@@ -789,15 +969,79 @@ public class ClassTarget extends DependentTarget
      */
     public boolean hasSourceCode()
     {
-        return hasSource;
+        return sourceAvailable != SourceType.NONE;
+    }
+    
+    public SourceType getSourceType()
+    {
+        return sourceAvailable;
     }
 
     /**
-     * @return the name of the (text) file this target corresponds to.
+     * @return the name of the Java file this target corresponds to. In the case of a Stride target this is
+     *          the file generated during compilation.
      */
+    public File getJavaSourceFile()
+    {
+        return new File(getPackage().getPath(), getBaseName() + "." + SourceType.Java.toString().toLowerCase());
+    }
+    
+    /**
+     * @return the name of the Stride file this target corresponds to. This is only valid for Stride targets.
+     */
+    public File getFrameSourceFile()
+    {
+        return new File(getPackage().getPath(), getBaseName() + "." + SourceType.Stride.toString().toLowerCase());
+    }
+    
+    @SuppressWarnings("incomplete-switch")
+    @Override
     public File getSourceFile()
     {
-        return new File(getPackage().getPath(), getBaseName() + ".java");
+        switch (sourceAvailable)
+        {
+            case Java: return getJavaSourceFile();
+            case Stride: return getFrameSourceFile();
+        }
+        return null;
+    }
+
+    @OnThread(Tag.Any)
+    public boolean isVisible()
+    {
+        return visible.get();
+    }
+
+    public void markCompiled()
+    {
+        setState(State.COMPILED);
+    }
+
+    public static class SourceFileInfo
+    {
+        public final File file;
+        public final SourceType sourceType;
+
+        public SourceFileInfo(File file, SourceType sourceType)
+        {
+            this.file = file;
+            this.sourceType = sourceType;
+        }
+    }
+
+    /**
+     * If this is a Java class, returns the .java source file only.
+     * If this is a Stride class, returns the .stride and .java source files, *in that order*.
+     * This is a strict requirement in the call in DataCollectorImpl, do not change the order.
+     */
+    public Collection<SourceFileInfo> getAllSourceFilesJavaLast()
+    {
+        List<SourceFileInfo> list = new ArrayList<>();
+        if (sourceAvailable.equals(SourceType.Stride)) {
+            list.add(new SourceFileInfo(getFrameSourceFile(), SourceType.Stride));
+        }
+        list.add(new SourceFileInfo(getJavaSourceFile(), SourceType.Java));
+        return list;
     }
 
     /**
@@ -821,7 +1065,9 @@ public class ClassTarget extends DependentTarget
      */
     public File getDocumentationFile()
     {
-        String filename = getSourceFile().getPath();
+        // We ask for Java source file, regardless of source type,
+        // because we're only using it to derive the .html file with the same stub:
+        String filename = getJavaSourceFile().getPath();
         String docFilename = getPackage().getProject().getDocumentationFile(filename);
         return new File(docFilename);
     }
@@ -838,6 +1084,7 @@ public class ClassTarget extends DependentTarget
     /**
      * Description of the Class
      */
+    @OnThread(value = Tag.Swing, ignoreParent = true)
     class InnerClassFileFilter
         implements FileFilter
     {
@@ -847,6 +1094,7 @@ public class ClassTarget extends DependentTarget
          * @param pathname Description of the Parameter
          * @return Description of the Return Value
          */
+        @Override
         public boolean accept(File pathname)
         {
             return pathname.getName().startsWith(getBaseName() + "$");
@@ -858,9 +1106,17 @@ public class ClassTarget extends DependentTarget
      * @return the editor object associated with this target. May be null if
      *         there was a problem opening this editor.
      */
+    @Override
+    // TODO should be Swing_WaitsForFX
+    @OnThread(Tag.Swing)
     public Editor getEditor()
     {
-        return getEditor(openWithInterface);
+        boolean withInterface;
+        synchronized (this)
+        {
+            withInterface = this.openWithInterface;
+        }
+        return getEditor(withInterface);
     }
 
     /**
@@ -871,93 +1127,133 @@ public class ClassTarget extends DependentTarget
      * @return the editor object associated with this target. May be null if
      *         there was a problem opening this editor.
      */
-    private Editor getEditor(boolean showInterface)
+    // TODO should be Swing_WaitsForFX
+    @OnThread(Tag.Swing)
+    private Editor getEditor(boolean showInterface) // TODO remove the ignoreParent = true, and tag calls properly
     {
         // ClassTarget must have source code if it is to provide an editor
         if (editor == null) {
-            String filename = getSourceFile().getPath();
-            String docFilename = getPackage().getProject().getDocumentationFile(filename);
-            if (! hasSourceCode()) {
+            final String filename;
+            String docFilename = getDocumentationFile().getPath();
+            if (sourceAvailable == SourceType.NONE) {
                 filename = null; // no source - show docs only
                 showInterface = true;
                 if (! new File(docFilename).exists()) {
                     return null;
                 }
             }
-            
+            else
+            {
+                filename = getSourceFile().getPath();
+            }
+
             Project project = getPackage().getProject();
             EntityResolver resolver = new PackageResolver(project.getEntityResolver(),
                     getPackage().getQualifiedName());
-            
-            if (editorBounds == null) {
-                PkgMgrFrame frame = PkgMgrFrame.findFrame(getPackage());
-                if (frame != null) {
-                    editorBounds = new Rectangle();
-                    editorBounds.x = frame.getX() + 40;
-                    editorBounds.y = frame.getY() + 20;
+
+            if (sourceAvailable == SourceType.Java || sourceAvailable == SourceType.NONE) {
+                editor = EditorManager.getEditorManager().openClass(filename, docFilename,
+                        project.getProjectCharset(),
+                        getBaseName(), project::getDefaultFXTabbedEditor, this, isCompiled(), resolver,
+                        project.getJavadocResolver(), this::recordEditorOpen);
+            }
+            else if (sourceAvailable == SourceType.Stride) {
+                final CompletableFuture<Editor> q = new CompletableFuture<>();
+                // need to pull some parameters out while on the Swing thread:
+                File frameSourceFile = getFrameSourceFile();
+                File javaSourceFile = getJavaSourceFile();
+                JavadocResolver javadocResolver = project.getJavadocResolver();
+                Package pkg = getPackage();
+                final Runnable openCallback = this::recordEditorOpen;
+                Platform.runLater(() -> {
+                    q.complete(new FrameEditor(frameSourceFile, javaSourceFile, this, resolver, javadocResolver, pkg, openCallback));
+                });
+
+                try {
+                    editor = q.get();
+                } catch (InterruptedException | ExecutionException e) {
+                    Debug.reportError(e);
                 }
             }
-            
-            editor = EditorManager.getEditorManager().openClass(filename, docFilename,
-                    project.getProjectCharset(),
-                    getBaseName() + " - " + project.getProjectName(), this, isCompiled(), editorBounds, resolver,
-                    project.getJavadocResolver());
             
             // editor may be null if source has been deleted
             // for example.
             if (editor != null) {
                 editor.showInterface(showInterface);
-            }           
+            }
         }
         return editor;
     }
 
     /**
+     * Records that the editor for this class target has been opened
+     * (i.e. actually made visible on screen).  Further calls after
+     * the first call will be ignored.
+     */
+    private void recordEditorOpen()
+    {
+        if (!hasBeenOpened)
+        {
+            hasBeenOpened = true;
+            switch (sourceAvailable)
+            {
+                case Java:
+                    Config.recordEditorOpen(Config.SourceType.Java);
+                    break;
+                case Stride:
+                    Config.recordEditorOpen(Config.SourceType.Stride);
+                    break;
+                default:
+                    break;
+            }
+        }
+    }
+
+    /**
      * Ensure that the source file of this class is up-to-date (i.e.
-     * that any possible unsaved changes in an open editor window are 
+     * that any possible unsaved changes in an open editor window are
      * saved).
-     * 
+     *
      * <p>This can cause saveEvent() to be generated, which might move
      * the class to a new package (if the package line has been changed).
      */
     @Override
     public void ensureSaved() throws IOException
     {
-        if(editor != null) {
-            editor.save();
+        // When creating a Stride class, we need to load the editor
+        // in order to save and generate the Java code (or at least,
+        // that's an easy way to do it).  Not necessary for Java classes:
+        if(editor == null && sourceAvailable == SourceType.Stride) {
+            getEditor();
         }
+        super.ensureSaved();
     }
-    
+
     // --- end of EditableTarget interface ---
 
     // --- user interface function implementation ---
 
     /**
+     * Open an inspector window for the class represented by this target.
      */
     private void inspect()
     {
         new Thread() {
             
-            int state = 0;
             DebuggerClass clss;
             
             @Override
             public void run() {
-                switch (state) {
-                    // This is the intial state. Try and load the class.
-                    case 0:
-                        try {
-                            clss = getPackage().getDebugger().getClass(getQualifiedName(), true);
-                            state = 1;
-                            EventQueue.invokeLater(this);
-                        }
-                        catch (ClassNotFoundException cnfe) {}
-                        break;
-                
-                    // Once this state is reached, we're running on the Swing event queue.
-                    case 1:
-                        getPackage().getProject().getClassInspectorInstance(clss, getPackage(), PkgMgrFrame.findFrame(getPackage()));
+                // Try and load the class.
+                try {
+                    DebuggerClass clss = getPackage().getDebugger().getClass(getQualifiedName(), true);
+                    PkgMgrFrame pmf = PkgMgrFrame.findFrame(getPackage());
+                    Project proj = getPackage().getProject();
+                    Platform.runLater(() -> {
+                        proj.getClassInspectorInstance(clss, getPackage(), pmf.getFXWindow(), ClassTarget.this.getNode());
+                    });
                 }
+                catch (ClassNotFoundException cnfe) {}
             }
         }.start();
     }
@@ -968,10 +1264,13 @@ public class ClassTarget extends DependentTarget
     public void modificationEvent(Editor editor)
     {
         invalidate();
-        if (! modifiedSinceCompile) {
+        if (isCompiled()) {
             removeBreakpoints();
-            getPackage().getProject().getDebugger().removeBreakpointsForClass(getQualifiedName());
-            modifiedSinceCompile = true;
+            if (getPackage().getProject().getDebugger() != null)
+            {
+                getPackage().getProject().getDebugger().removeBreakpointsForClass(getQualifiedName());
+            }
+            setState(State.NEEDS_COMPILE);
         }
         sourceInfo.setSourceModified();
     }
@@ -987,10 +1286,11 @@ public class ClassTarget extends DependentTarget
     }
 
     @Override
-    public String breakpointToggleEvent(Editor editor, int lineNo, boolean set)
+    public String breakpointToggleEvent(int lineNo, boolean set)
     {
-        if (isCompiled() || ! modifiedSinceCompile) {
+        if (isCompiled()) {
             String possibleError = getPackage().getDebugger().toggleBreakpoint(getQualifiedName(), lineNo, set, null);
+            Debug.message("Setting breakpoint: " + getQualifiedName() + ":" + lineNo);
             
             if (possibleError == null && getPackage() != null)
             {
@@ -1002,6 +1302,14 @@ public class ClassTarget extends DependentTarget
         else {
             return Config.getString("pkgmgr.breakpointMsg");
         }
+    }
+    
+    @Override
+    public void clearAllBreakpoints()
+    {
+        Package pkg = getPackage();
+        if (pkg != null) // Can happen during removal
+            pkg.getDebugger().removeBreakpointsForClass(getQualifiedName());
     }
 
     // --- end of EditorWatcher interface ---
@@ -1025,6 +1333,22 @@ public class ClassTarget extends DependentTarget
         if (editor != null && isCompiled()) {
             editor.reInitBreakpoints();
         }
+        else if (isCompiled() && sourceAvailable == SourceType.Stride)
+        {
+            // In Stride, breakpoints persist with the saved source,
+            // and we should set them even if the editor is not open.
+            // So we cache them as properties and use that here if
+            // the editor has not been opened yet:
+            List<Integer> breakpoints;
+            synchronized (this)
+            {
+                breakpoints = new ArrayList<>(this.cachedBreakpoints);
+            }
+            for (Integer line : breakpoints)
+            {
+                breakpointToggleEvent(line, true);
+            }
+        }
     }
     
     /**
@@ -1045,40 +1369,17 @@ public class ClassTarget extends DependentTarget
      */
     public boolean isCompiled()
     {
-        return (state == S_NORMAL);
+        return getState() == State.COMPILED;
     }
 
-    /**
-     * Description of the Method
-     * 
-     * @param editor Description of the Parameter
-     */
     @Override
-    public void compile(final Editor editor)
+    @OnThread(Tag.Any)
+    public void scheduleCompilation(boolean immediate, CompileReason reason, CompileType type)
     {
-        if (Config.isGreenfoot()) {
-            // In Greenfoot compiling always compiles the whole package, and at least
-            // compiles this target:
-            setState(S_INVALID);
-            getPackage().compile();
-        }
-        else {
-            getPackage().compile(this, false, new CompileObserver() {
-                
-                @Override
-                public void startCompile(File[] sources) {}
-
-                @Override
-                public boolean compilerMessage(Diagnostic diagnostic) { return false; }
-                
-                @Override
-                public void endCompile(File[] sources, boolean succesful)
-                {
-                    editor.compileFinished(succesful);
-                }
-            });
-        }
-        
+        if (Config.isGreenfoot())
+            getPackage().getProject().scheduleCompilation(immediate, reason, type, getPackage());
+        else
+            getPackage().getProject().scheduleCompilation(immediate, reason, type, this);
     }
 
     /**
@@ -1098,7 +1399,7 @@ public class ClassTarget extends DependentTarget
     /**
      * generates a source code skeleton for this class
      */
-    public boolean generateSkeleton(String template)
+    public boolean generateSkeleton(String template, SourceType sourceType)
     {
         // delegate to role object
         if (template == null) {
@@ -1106,11 +1407,27 @@ public class ClassTarget extends DependentTarget
             return false;
         }
         else {
-            boolean success = role.generateSkeleton(template, getPackage(), getBaseName(), getSourceFile().getPath());
+            boolean success;
+            switch (sourceType) {
+                case Java:
+                    synchronized (this)
+                    {
+                        success = role.generateSkeleton(template, getPackage(), getBaseName(), getJavaSourceFile().getPath());
+                    }
+                    break;
+                case Stride:
+                    addStride(Loader.buildTopLevelElement(template, getPackage().getProject().getEntityResolver(),
+                            getBaseName(), getPackage().getBaseName()));
+                    success = true;
+                    break;
+                default:
+                    success = false;
+            }
+
             if (success) {
                 // skeleton successfully generated
-                setState(S_INVALID);
-                hasSource = true;
+                setState(State.NEEDS_COMPILE);
+                sourceAvailable = sourceType;
                 return true;
             }
             return false;
@@ -1210,7 +1527,7 @@ public class ClassTarget extends DependentTarget
 
         analysing = true;
 
-        ClassInfo info = sourceInfo.getInfo(getSourceFile(), getPackage());
+        ClassInfo info = sourceInfo.getInfo(getJavaSourceFile(), getPackage());
 
         // info will be null if the source was unparseable
         if (info != null) {
@@ -1264,9 +1581,16 @@ public class ClassTarget extends DependentTarget
             }
             newTypeParameters += ">";
         }
-        if (!newTypeParameters.equals(typeParameters)) {
-            typeParameters = newTypeParameters;
-            updateSize();
+        synchronized (this)
+        {
+            if (!newTypeParameters.equals(typeParameters))
+            {
+                typeParameters = newTypeParameters;
+                Platform.runLater(() ->
+                {
+                    updateSize();
+                });
+            }
         }
     }
 
@@ -1306,11 +1630,10 @@ public class ClassTarget extends DependentTarget
      */
     public void analyseDependencies(ClassInfo info)
     {
-        // currently we don't remove uses dependencies, but just warn
-
-        //removeAllOutDependencies();
+        // Now that uses dependencies are calculated-only, we remove all of them
+        // and add back those which remain:
+        removeAllOutDependencies();
         removeInheritDependencies();
-        unflagAllOutDependencies();
 
         String pkgPrefix = getPackage().getQualifiedName();
         pkgPrefix = (pkgPrefix.length() == 0) ? pkgPrefix : pkgPrefix + ".";
@@ -1337,15 +1660,7 @@ public class ClassTarget extends DependentTarget
                     continue;
                 }
 
-                getPackage().addDependency(new UsesDependency(getPackage(), this, used), true);
-            }
-        }
-
-        // check for inconsistent use dependencies
-        for (Iterator<UsesDependency> it = usesDependencies(); it.hasNext();) {
-            UsesDependency usesDep = ((UsesDependency) it.next());
-            if (!usesDep.isFlagged()) {
-                getPackage().setStatus(usesArrowMsg + usesDep);
+                getPackage().addDependency(new UsesDependency(getPackage(), this, used));
             }
         }
     }
@@ -1390,9 +1705,9 @@ public class ClassTarget extends DependentTarget
             superName = superName.substring(prefixLen);
             DependentTarget superclass = getPackage().getDependentTarget(superName);
             if (superclass != null) {
-                getPackage().addDependency(new ExtendsDependency(getPackage(), this, superclass), false);
-                if (superclass.getState() != S_NORMAL) {
-                    setState(S_INVALID);
+                getPackage().addDependency(new ExtendsDependency(getPackage(), this, superclass));
+                if (superclass.getState() != State.COMPILED) {
+                    markModified();
                 }
             }
         }
@@ -1412,9 +1727,9 @@ public class ClassTarget extends DependentTarget
             DependentTarget interfce = getPackage().getDependentTarget(interfaceName);
 
             if (interfce != null) {
-                getPackage().addDependency(new ImplementsDependency(getPackage(), this, interfce), false);
-                if (interfce.getState() != S_NORMAL) {
-                    setState(S_INVALID);
+                getPackage().addDependency(new ImplementsDependency(getPackage(), this, interfce));
+                if (interfce.getState() != State.COMPILED) {
+                    markModified();
                 }
             }
         }
@@ -1431,7 +1746,7 @@ public class ClassTarget extends DependentTarget
             return false;
         }
 
-        File newSourceFile = new File(getPackage().getPath(), newName + ".java");
+        File newSourceFile = new File(getPackage().getPath(), newName + "." + getSourceType().toString().toLowerCase());
         File oldSourceFile = getSourceFile();
         
         try {
@@ -1440,10 +1755,21 @@ public class ClassTarget extends DependentTarget
             getPackage().updateTargetIdentifier(this, getIdentifierName(), newName);
             
             String filename = newSourceFile.getAbsolutePath();
-            String docFilename = getPackage().getProject().getDocumentationFile(filename);
-            getEditor().changeName(newName, filename, docFilename);
+            String javaFilename;
+            if (getSourceType().equals(SourceType.Stride)) {
+                final File javaFile = new File(getPackage().getPath(), newName + "." + SourceType.Java.toString().toLowerCase());
+                javaFilename = javaFile.getAbsolutePath();
 
-            oldSourceFile.delete();
+                // Also copy the Java file across:
+                FileUtility.copyFile(getJavaSourceFile(), javaFile);
+            }
+            else {
+                javaFilename = filename;
+            }
+            String docFilename = getPackage().getProject().getDocumentationFile(javaFilename);
+            getEditor().changeName(newName, filename, javaFilename, docFilename);
+
+            deleteSourceFiles();
             getClassFile().delete();
             getContextFile().delete();
             getDocumentationFile().delete();
@@ -1454,7 +1780,7 @@ public class ClassTarget extends DependentTarget
             String oldName = getIdentifierName();
             setIdentifierName(newName);
             setDisplayName(newName);
-            updateSize();
+            Platform.runLater(() -> {updateSize();});
             
             // Update the BClass object
             BClass bClass = getBClass();
@@ -1465,14 +1791,12 @@ public class ClassTarget extends DependentTarget
             ExtensionBridge.changeBClassTargetName(bClassTarget, getQualifiedName());
             
             // Update all BDependency objects related to this target
-            for (Iterator<? extends Dependency> iterator = dependencies(); iterator.hasNext();) {
-                Dependency outgoingDependency = iterator.next();
+            for (Dependency outgoingDependency : dependencies()) {
                 BDependency bDependency = outgoingDependency.getBDependency();
                 ExtensionBridge.changeBDependencyOriginName(bDependency, getQualifiedName());
             }
             
-            for (Iterator<? extends Dependency> iterator = dependents(); iterator.hasNext();) {
-                Dependency incomingDependency = iterator.next();
+            for (Dependency incomingDependency : dependents()) {
                 BDependency bDependency = incomingDependency.getBDependency();
                 ExtensionBridge.changeBDependencyTargetName(bDependency, getQualifiedName());
             }
@@ -1491,6 +1815,17 @@ public class ClassTarget extends DependentTarget
     }
 
     /**
+     * Delete all the source files (edited and generated) for this target.
+     */
+    private void deleteSourceFiles()
+    {
+        if (getSourceType().equals(SourceType.Stride)) {
+            getJavaSourceFile().delete();
+        }
+        getSourceFile().delete();
+    }
+
+    /**
      * Checks for ClassTarget name equality if case is ignored.
      * 
      * 
@@ -1505,7 +1840,6 @@ public class ClassTarget extends DependentTarget
     /**
      * Change the package of a class target to something else.
      * 
-     * 
      * @param newName the new fully qualified package name
      */
     private void doPackageNameChange(String newName)
@@ -1514,51 +1848,67 @@ public class ClassTarget extends DependentTarget
 
         Package dstPkg = proj.getPackage(newName);
 
-        if (dstPkg == null) {
-            DialogManager.showError(null, "package-name-invalid");
-        }
-        else {
-            // fix for bug #382. Potentially could clash with a package
-            // in the destination package with the same name
-            if (dstPkg.getTarget(getBaseName()) != null) {
-                DialogManager.showError(null, "package-name-clash");
-                // fall through to enforcePackage, below.
+        boolean packageInvalid = dstPkg == null;
+        boolean packageNameClash = dstPkg != null && dstPkg.getTarget(getBaseName()) != null;
+        
+        Platform.runLater(() -> {
+            
+            if (packageInvalid)
+            {
+                DialogManager.showErrorFX(null, "package-name-invalid");
             }
-            else if (DialogManager.askQuestion(null, "package-name-changed") == 0) {
-                dstPkg.importFile(getSourceFile());
-                prepareForRemoval();
-                getPackage().removeTarget(this);
-                close();
-                return;
+            else
+            {
+                // fix for bug #382. Potentially could clash with a package
+                // in the destination package with the same name
+                if (packageNameClash)
+                {
+                    DialogManager.showErrorFX(null, "package-name-clash");
+                    // fall through to enforcePackage, below.
+                }
+                else if (DialogManager.askQuestionFX(null, "package-name-changed") == 0)
+                {
+                    SwingUtilities.invokeLater(() -> {
+                        dstPkg.importFile(getSourceFile());
+                        prepareForRemoval();
+                        getPackage().removeTarget(this);
+                        close();
+                    });
+                    return;
+                }
             }
-        }
 
-        // all non working paths lead here.. lets fix the package line
-        // up so it is back to what we expect
-        try {
-            enforcePackage(getPackage().getQualifiedName());
-            getEditor().reloadFile();
-        }
-        catch (IOException ioe) {}
+            SwingUtilities.invokeLater(() -> {
+                // all non working paths lead here.. lets fix the package line
+                // up so it is back to what we expect
+                try
+                {
+                    enforcePackage(getPackage().getQualifiedName());
+                    getEditor().reloadFile();
+                }
+                catch (IOException ioe)
+                {
+                }
+            });
+        });
     }
 
     /**
      * Resizes the class so the entire classname + type parameter are visible
      *  
      */
+    @OnThread(Tag.FXPlatform)
     private void updateSize()
     {
-        int width = calculateWidth(getDisplayName());
-        setSize(width, getHeight());
-        repaint();
+        SwingUtilities.invokeLater(() -> {
+            String displayName = getDisplayName();
+            Platform.runLater(() -> {
+                int width = calculateWidth(displayName);
+                setSize(width, getHeight());
+                repaint();
+            });
+        });
     }
-
-    /**
-     * Construct a popup menu for the class target, including caching of
-     * results.
-     */
-    protected JPopupMenu menu = null;
-    boolean compiledMenu = false;
 
     /**
      * Post the context menu for this target.
@@ -1567,118 +1917,180 @@ public class ClassTarget extends DependentTarget
      * @param y  the y coordinate for the menu, relative to graph editor
      */
     @Override
-    public void popupMenu(int x, int y, GraphEditor graphEditor)
+    @OnThread(Tag.FXPlatform)
+    public void popupMenu(int x, int y, PackageEditor graphEditor)
     {
-        Class<?> cl = null;
+        SwingUtilities.invokeLater(() ->
+        {
+            Class<?> cl = null;
 
-        if (state == S_NORMAL) {
-            // handle error causes when loading classes which are compiled
-            // but not loadable in the current VM. (Eg if they were compiled
-            // for a later VM).
-            // we detect the error, remove the class file, and invalidate
-            // to allow them to be recompiled
-            cl = getPackage().loadClass(getQualifiedName());
-            if (cl == null) {
-                // trouble loading the class
-                // remove the class file and invalidate the target
-                if (hasSourceCode()) {
-                    getClassFile().delete();
-                    invalidate();
+            if (getState() == State.COMPILED)
+            {
+                // handle error causes when loading classes which are compiled
+                // but not loadable in the current VM. (Eg if they were compiled
+                // for a later VM).
+                // we detect the error, remove the class file, and invalidate
+                // to allow them to be recompiled
+                cl = getPackage().loadClass(getQualifiedName());
+                if (cl == null)
+                {
+                    // trouble loading the class
+                    // remove the class file and invalidate the target
+                    if (sourceAvailable != SourceType.NONE)
+                    {
+                        getClassFile().delete();
+                        invalidate();
+                    }
                 }
             }
-        }
 
-        // check that the class loading hasn't changed out state
-        if (state == S_NORMAL) {
-            menu = createMenu(cl);
-            // editor.add(menu);
-        }
-        else {
-            menu = createMenu(null);
-            // editor.add(menu);
-        }
-
-        if (menu != null) {
-            menu.show(graphEditor, x, y);
-        }
+            // check that the class loading hasn't changed out state
+            if (getState() != State.COMPILED)
+                cl = null;
+            // Need a bunch of info from the Swing thread before hopping to FX:
+            Class<?> clFinal = cl;
+            final ClassRole roleFinal;
+            synchronized (this)
+            {
+                roleFinal = role;
+            }
+            SourceType sourceAvailableFinal = sourceAvailable;
+            boolean docExists = getDocumentationFile().exists();
+            ExtensionsManager extMgr = ExtensionsManager.getInstance();
+            Platform.runLater(() -> {
+                withMenu(clFinal,  roleFinal, sourceAvailableFinal, docExists, menu -> {
+                    showingMenu(menu);
+                    menu.show(pane, x, y);
+                }, extMgr);
+            });
+        });
     }
 
     /**
      * Creates a popup menu for this class target.
      * 
+     * @param extMgr
      * @param cl class object associated with this class target
      * @return the created popup menu object
      */
-    protected JPopupMenu createMenu(Class<?> cl)
+    @OnThread(Tag.FXPlatform)
+    protected void withMenu(Class<?> cl, ClassRole roleRef, SourceType source, boolean docExists, FXPlatformConsumer<ContextMenu> withMenu, ExtensionsManager extMgr)
     {
-        JPopupMenu menu = new JPopupMenu(getBaseName() + " operations");
+        final ContextMenu menu = new ContextMenu();
 
         // call on role object to add any options needed at top
-        role.createRoleMenu(menu, this, cl, state);
+        roleRef.createRoleMenu(menu.getItems(), this, cl, getState());
 
-        if (cl != null) {
-            if (role.createClassConstructorMenu(menu, this, cl)) {
-                menu.addSeparator();
+        if (cl != null)
+        {
+            if (Application.class.isAssignableFrom(cl))
+            {
+                menu.getItems().add(JavaFXUtil.withStyleClass(JavaFXUtil.makeMenuItem(launchFXStr,() -> {
+                    PackageEditor ed = getPackage().getEditor();
+                    Window fxWindow = ed.getFXWindow();
+                    SwingUtilities.invokeLater(() -> {
+                        CompletableFuture<DebuggerResult> result = getPackage().getDebugger().launchFXApp(cl.getName());
+                        putFXLaunchResult(ed, fxWindow, result);
+                    });
+                }, null), MENU_STYLE_INBUILT));
+            }
+            
+            if (roleRef.createClassConstructorMenu(menu.getItems(), this, cl)) {
+                menu.getItems().add(new SeparatorMenuItem());
+            }
+            
+            if (roleRef.createClassStaticMenu(menu.getItems(), this, source != SourceType.NONE, cl)) {
+                menu.getItems().add(new SeparatorMenuItem());
             }
         }
-
-        if (cl != null) {
-            if (role.createClassStaticMenu(menu, this, cl)) {
-                menu.addSeparator();
-            }
-        }
-        boolean sourceOrDocExists = hasSourceCode() || getDocumentationFile().exists();
-        role.addMenuItem(menu, new EditAction(), sourceOrDocExists);
-        role.addMenuItem(menu, new CompileAction(), hasSourceCode());
-        role.addMenuItem(menu, new InspectAction(), cl != null);
-        role.addMenuItem(menu, new RemoveAction(), true);
+        boolean sourceOrDocExists = source != SourceType.NONE || docExists;
+        menu.getItems().add(new EditAction(sourceOrDocExists));
+        menu.getItems().add(new CompileAction(source != SourceType.NONE));
+        menu.getItems().add(new InspectAction(cl != null));
+        menu.getItems().add(new RemoveAction());
+        if (source == SourceType.Stride)
+            menu.getItems().add(new ConvertToJavaAction());
+        else if (source == SourceType.Java && roleRef.canConvertToStride())
+            menu.getItems().add(new ConvertToStrideAction());
 
         // call on role object to add any options needed at bottom
-        role.createRoleMenuEnd(menu, this, state);
+        roleRef.createRoleMenuEnd(menu.getItems(), this, getState());
 
-        MenuManager menuManager = new MenuManager(menu);
-        menuManager.setMenuGenerator(new ClassExtensionMenu(this));
-        menuManager.addExtensionMenu(getPackage().getProject());
+        FXMenuManager menuManager = new FXMenuManager(menu, extMgr, new ClassExtensionMenu(this));
+        SwingUtilities.invokeLater(() -> {
+            menuManager.addExtensionMenu(getPackage().getProject());
 
-        return menu;
+            Platform.runLater(() -> {withMenu.accept(menu);});
+        });
+    }
+
+    @OnThread(Tag.Swing)
+    private void putFXLaunchResult(PackageEditor ed, Window fxWindow, CompletableFuture<DebuggerResult> result)
+    {
+        result.thenAccept(new Consumer<DebuggerResult>()
+        {
+            @Override
+            @OnThread(Tag.Worker)
+            public void accept(DebuggerResult r)
+            {
+                switch (r.getExitStatus())
+                {
+                    case Debugger.NORMAL_EXIT:
+                        SwingUtilities.invokeLater(() ->
+                        {
+                            DebuggerObject obj = r.getResultObject();
+                            ed.raisePutOnBenchEvent(fxWindow, obj, obj.getGenType(), null, false, Optional.empty());
+                        });
+                        break;
+                }
+            }
+        });
     }
 
     /**
      * Action which creates a test
      */
-    public class CreateTestAction extends AbstractAction
+    @OnThread(Tag.FXPlatform)
+    public class CreateTestAction extends MenuItem
     {
         /**
          * Constructor for the CreateTestAction object
          */
         public CreateTestAction()
         {
-            putValue(NAME, createTestStr);
+            super(createTestStr);
+            setOnAction(e -> SwingUtilities.invokeLater(() -> actionPerformed(e)));
+            JavaFXUtil.addStyleClass(this, MENU_STYLE_INBUILT);
         }
-
-        @Override
-        public void actionPerformed(ActionEvent e)
+        
+        @OnThread(Tag.Swing)
+        private void actionPerformed(ActionEvent e)
         {
             PkgMgrFrame pmf = PkgMgrFrame.findFrame(getPackage());
 
             if (pmf != null) {
                 String testClassName = getIdentifierName() + "Test";
-                pmf.createNewClass(testClassName, "unittest", true);
+                pmf.createNewClass(testClassName, "unittest", SourceType.Java, true, -1, -1);
                 // we want to check that the previous called actually
                 // created a unit test class as a name clash with an existing
                 // class would not. This prevents a non unit test becoming
                 // associated with a class unintentionally
                 Target target = getPackage().getTarget(testClassName);
-                ClassTarget ct = null;
+                DependentTarget assoc = null;
                 if (target instanceof ClassTarget) {
-                    ct = (ClassTarget) target;
+                    ClassTarget ct = (ClassTarget) target;
                     if (ct != null && ct.isUnitTest()) {
-                        setAssociation((DependentTarget) getPackage().getTarget(getIdentifierName() + "Test"));
+                        assoc = (DependentTarget) getPackage().getTarget(getIdentifierName() + "Test");
                     }
                 }
-                updateAssociatePosition();
-                getPackage().getEditor().revalidate();
-                getPackage().getEditor().repaint();
+                DependentTarget assocFinal = assoc;
+                PackageEditor pkgEd = getPackage().getEditor();
+                Platform.runLater(() -> {
+                    if (assocFinal != null)
+                        setAssociation(assocFinal);
+                    updateAssociatePosition();
+                    pkgEd.repaint();
+                });
 
             }
         }
@@ -1687,74 +2099,147 @@ public class ClassTarget extends DependentTarget
     /**
      * Action to open the editor for a classtarget
      */
-    private class EditAction extends AbstractAction
+    @OnThread(Tag.FXPlatform)
+    private class EditAction extends MenuItem
     {
-        public EditAction()
+        public EditAction(boolean enable)
         {
-            putValue(NAME, editStr);
-        }
-
-        @Override
-        public void actionPerformed(ActionEvent e)
-        {
-            open();
+            super(editStr);
+            setOnAction(e -> SwingUtilities.invokeLater(() -> open()));
+            setDisable(!enable);
+            JavaFXUtil.addStyleClass(this, MENU_STYLE_INBUILT);
         }
     }
 
     /**
      * Action to compile a classtarget
      */
-    private class CompileAction extends AbstractAction
+    @OnThread(Tag.FXPlatform)
+    private class CompileAction extends MenuItem
     {
-        public CompileAction()
+        public CompileAction(boolean enable)
         {
-            putValue(NAME, compileStr);
-        }
-
-        @Override
-        public void actionPerformed(ActionEvent e)
-        {
-            getPackage().compile(ClassTarget.this);
+            super(compileStr);
+            setOnAction(e -> SwingUtilities.invokeLater(() -> {
+                getPackage().compile(ClassTarget.this, CompileReason.USER, CompileType.EXPLICIT_USER_COMPILE);
+            }));
+            setDisable(!enable);
+            JavaFXUtil.addStyleClass(this, MENU_STYLE_INBUILT);
         }
     }
 
     /**
      * Action to remove a classtarget from its package
      */
-    private class RemoveAction extends AbstractAction
+    @OnThread(Tag.FXPlatform)
+    private class RemoveAction extends MenuItem
     {
         public RemoveAction()
         {
-            putValue(NAME, removeStr);
+            super(removeStr);
+            setOnAction(e -> SwingUtilities.invokeLater(() -> actionPerformed(e)));
+            JavaFXUtil.addStyleClass(this, MENU_STYLE_INBUILT);
         }
 
-        @Override
-        public void actionPerformed(ActionEvent e)
+        @OnThread(Tag.Swing)
+        private void actionPerformed(ActionEvent e)
         {
             PkgMgrFrame pmf = PkgMgrFrame.findFrame(getPackage());
-            if (pmf.askRemoveClass()) {
-                getPackage().getEditor().raiseRemoveTargetEvent(ClassTarget.this);
-            }
+            Platform.runLater(() -> {
+                if (pmf.askRemoveClass())
+                {
+                    SwingUtilities.invokeLater(() -> getPackage().getEditor().raiseRemoveTargetEvent(ClassTarget.this));
+                }
+            });
         }
     }
 
     /**
      * Action to inspect the static members of a class
      */
-    private class InspectAction extends AbstractAction
+    @OnThread(Tag.FXPlatform)
+    private class InspectAction extends MenuItem
     {
-        public InspectAction()
+        public InspectAction(boolean enable)
         {
-            putValue(NAME, inspectStr);
+            super(inspectStr);
+            setOnAction(e -> SwingUtilities.invokeLater(() -> actionPerformed(e)));
+            setDisable(!enable);
+            JavaFXUtil.addStyleClass(this, MENU_STYLE_INBUILT);
         }
 
-        @Override
-        public void actionPerformed(ActionEvent e)
+        @OnThread(Tag.Swing)
+        private void actionPerformed(ActionEvent e)
         {
             if (checkDebuggerState()) {
                 inspect();
             }
         }
+    }
+
+    @OnThread(Tag.FXPlatform)
+    private class ConvertToJavaAction extends MenuItem
+    {
+        public ConvertToJavaAction()
+        {
+            super(convertToJavaStr);
+            setOnAction(this::actionPerformed);
+            JavaFXUtil.addStyleClass(this, MENU_STYLE_INBUILT);
+        }
+
+        private void actionPerformed(ActionEvent e)
+        {
+            if (JavaFXUtil.confirmDialog("convert.to.java.title", "convert.to.java.message", (Stage)ClassTarget.this.pane.getScene().getWindow(), true))
+            {
+                SwingUtilities.invokeLater(() -> removeStride());
+            }
+        }
+    }
+
+    @OnThread(Tag.FXPlatform)
+    public class ConvertToStrideAction extends MenuItem
+    {
+        public ConvertToStrideAction()
+        {
+            super(convertToStrideStr);
+            setOnAction(e -> SwingUtilities.invokeLater(() -> convertToStride()));
+            JavaFXUtil.addStyleClass(this, MENU_STYLE_INBUILT);
+        }
+    }
+    
+    @OnThread(Tag.Swing)
+    public void convertToStride()
+    {
+        File javaSourceFile = getJavaSourceFile();
+        Platform.runLater(() -> {
+            Stage window = null;
+            if (pane.getScene() != null)
+                window = (Stage)pane.getScene().getWindow();
+            if (JavaFXUtil.confirmDialog("convert.to.stride.title", "convert.to.stride.message", window, true))
+            {
+                try
+                {
+                    Parser.ConversionResult javaConvertResult = Parser.javaToStride(Files.readAllLines(javaSourceFile.toPath()).stream().collect(Collectors.joining("\n")), Parser.JavaContext.TOP_LEVEL, false);
+                    if (!javaConvertResult.getWarnings().isEmpty())
+                    {
+                        new ConvertResultDialog(javaConvertResult.getWarnings().stream().map(ConversionWarning::getMessage).collect(Collectors.toList())).showAndWait();
+                    }
+                    List<CodeElement> elements = javaConvertResult.getElements();
+                    
+                    if (elements.size() != 1 || !(elements.get(0) instanceof TopLevelCodeElement))
+                    {
+                        JavaFXUtil.errorDialog("convert.to.stride.error.title", "convert.to.stride.error.message");
+                        return; // Abort
+                    }
+                    SwingUtilities.invokeLater(() -> addStride((TopLevelCodeElement)elements.get(0)));    
+                }
+                catch (IOException | ParseFailure pf)
+                {
+                    new ConvertResultDialog(pf.getMessage()).showAndWait();
+                    // Abort the conversion
+                }
+            }
+        });
     }
 
     /**
@@ -1763,118 +2248,11 @@ public class ClassTarget extends DependentTarget
      * @param evt Description of the Parameter
      */
     @Override
-    public void doubleClick(MouseEvent evt)
+    @OnThread(Tag.FXPlatform)
+    public void doubleClick()
     {
-        open();
+        SwingUtilities.invokeLater(() -> {open();});
     }
-
-    /**
-     * @return Returns the ghostX.
-     */
-    @Override
-    public int getGhostX()
-    {
-        return ghostX;
-    }
-
-    /**
-     * @return Returns the ghostX.
-     */
-    @Override
-    public int getGhostY()
-    {
-        return ghostY;
-    }
-
-    /**
-     * @return Returns the ghostX.
-     */
-    public int getGhostWidth()
-    {
-        return ghostWidth;
-    }
-
-    /**
-     * @return Returns the ghostX.
-     */
-    public int getGhostHeight()
-    {
-        return ghostHeight;
-    }
-
-    /**
-     * Set the position of the ghost image given a delta to the real size.
-     * 
-     * @param deltaX The new ghostPosition value
-     * @param deltaY The new ghostPosition value
-     */
-    @Override
-    public void setGhostPosition(int deltaX, int deltaY)
-    {
-        this.ghostX = getX() + deltaX;
-        this.ghostY = getY() + deltaY;
-    }
-
-    /**
-     * Set the size of the ghost image given a delta to the real size.
-     * 
-     * @param deltaX The new ghostSize value
-     * @param deltaY The new ghostSize value
-     */
-    @Override
-    public void setGhostSize(int deltaX, int deltaY)
-    {
-        ghostWidth = Math.max(getWidth() + deltaX, MIN_WIDTH);
-        ghostHeight = Math.max(getHeight() + deltaY, MIN_HEIGHT);
-    }
-
-    /**
-     * Set the target's position to its ghost position.
-     */
-    @Override
-    public void setPositionToGhost()
-    {
-        super.setPos(ghostX, ghostY);
-        setSize(ghostWidth, ghostHeight);
-        isDragging = false;
-    }
-
-    /**
-     * Ask whether we are currently dragging.
-     * 
-     * @return The dragging value
-     */
-    @Override
-    public boolean isDragging()
-    {
-        return isDragging;
-    }
-
-    /**
-     * Set whether or not we are currently dragging this class (either moving or
-     * resizing).
-     * 
-     * @param isDragging The new dragging value
-     */
-    @Override
-    public void setDragging(boolean isDragging)
-    {
-        this.isDragging = isDragging;
-    }
-
-    /**
-     * Set the position of this target.
-     * 
-     * @param x The new pos value
-     * @param y The new pos value
-     */
-    @Override
-    public void setPos(int x, int y)
-    {
-        super.setPos(x, y);
-        setGhostPosition(0, 0);
-    }
-
     /**
      * Set the size of this target.
      * 
@@ -1882,21 +2260,84 @@ public class ClassTarget extends DependentTarget
      * @param height The new size value
      */
     @Override
+    @OnThread(Tag.FXPlatform)
     public void setSize(int width, int height)
     {
-        super.setSize(Math.max(width, MIN_WIDTH), Math.max(height, MIN_HEIGHT));
-        setGhostSize(0, 0);
+        int w = Math.max(width, MIN_WIDTH);
+        int h = Math.max(height, MIN_HEIGHT);
+        super.setSize(w, h);
+        if(assoc != null)
+            assoc.setSize(w, h);
     }
     
-    @Override
-    public void setVisible(boolean visible)
+    @OnThread(Tag.FXPlatform)
+    public void setVisible(boolean vis)
     {
-        if (visible != isVisible()) {
-            super.setVisible(visible);
+        if (vis != this.visible.get()) {
+            this.visible.set(vis);
+            pane.setVisible(vis);
             
-            // Inform all listeners about the visibility change
-            ClassTargetEvent event = new ClassTargetEvent(this, getPackage(), visible);
-            ExtensionsManager.getInstance().delegateEvent(event);
+            SwingUtilities.invokeLater(() -> {
+                // Inform all listeners about the visibility change
+                ClassTargetEvent event = new ClassTargetEvent(this, getPackage(), vis);
+                ExtensionsManager.getInstance().delegateEvent(event);
+            });
+        }
+    }
+
+    @OnThread(Tag.FX)
+    @Override
+    protected void redraw()
+    {
+        GraphicsContext g = canvas.getGraphicsContext2D();
+        double width = canvas.getWidth();
+        double height = canvas.getHeight();
+        g.clearRect(0, 0, width, height);
+
+        // Draw either grey or red stripes:
+        if (getState() != State.COMPILED)
+        {
+            // We could draw the stripes manually each time, but that
+            // could get quite time-consuming when we have lots of classes.
+            // Instead, we create an image of the given stripes which
+            // we can draw tiled to save time.
+            if (hasKnownError())
+            {
+                // Red stripes
+                int size = RED_STRIPE_SEPARATION * 10;
+                if (redStripeImage == null)
+                {
+                    redStripeImage = JavaFXUtil.createImage((int)size, (int)size, gImage -> {
+                        JavaFXUtil.stripeRect(gImage, 0, 0, size, size, RED_STRIPE_SEPARATION - STRIPE_THICKNESS, STRIPE_THICKNESS, false, RED_STRIPE);
+                        JavaFXUtil.stripeRect(gImage, 0, 0, size, size, RED_STRIPE_SEPARATION - STRIPE_THICKNESS, STRIPE_THICKNESS, true, RED_STRIPE);
+                    });
+                }
+                g.setFill(new ImagePattern(redStripeImage, 0, 0, size, size, false));
+                g.fillRect(0, 0, width, height);
+            }
+            else
+            {
+                int size = GREY_STRIPE_SEPARATION * 10;
+                // Grey stripes
+                if (greyStripeImage == null)
+                {
+                    greyStripeImage = JavaFXUtil.createImage(size, size, gImage -> {
+                        JavaFXUtil.stripeRect(gImage, 0, 0, size, size, GREY_STRIPE_SEPARATION - STRIPE_THICKNESS, STRIPE_THICKNESS, false, GREY_STRIPE);
+                    });
+                }
+                g.setFill(new ImagePattern(greyStripeImage, 0, 0, size, size, false));
+                g.fillRect(0, 0, width, height);
+            }
+        }
+
+        if (this.selected && isResizable())
+        {
+            g.setStroke(javafx.scene.paint.Color.BLACK);
+            g.setLineDashes();
+            g.setLineWidth(1.0);
+            // Draw the marks in the corner to indicate resizing is possible:
+            g.strokeLine(width - RESIZE_CORNER_SIZE, height, width, height - RESIZE_CORNER_SIZE);
+            g.strokeLine(width - RESIZE_CORNER_SIZE + RESIZE_CORNER_GAP, height, width, height - RESIZE_CORNER_SIZE + RESIZE_CORNER_GAP);
         }
     }
 
@@ -1913,24 +2354,21 @@ public class ClassTarget extends DependentTarget
 
         // if this target is the assocation for another Target, remove
         // the association
-        Iterator<? extends Vertex> it = getPackage().getVertices();
-        while (it.hasNext()) {
-            Object o = it.next();
+        for (Target o : getPackage().getVertices())
+        {
             if (o instanceof DependentTarget) {
                 DependentTarget d = (DependentTarget) o;
                 if (this.equals(d.getAssociation())) {
-                    d.setAssociation(null);
+                    Platform.runLater(() -> {d.setAssociation(null);});
                 }
             }
         }
 
         // flag dependent Targets as invalid
         invalidate();
-
         removeAllInDependencies();
         removeAllOutDependencies();
-
-        // remove associated files (.class, .java and .ctxt)
+        // remove associated files (.frame, .class, .java and .ctxt)
         prepareFilesForRemoval();
     }
 
@@ -1975,9 +2413,64 @@ public class ClassTarget extends DependentTarget
         // We must remove after the above, because it might involve saving, 
         // and thus recording edits to the file
         DataCollector.removeClass(pkg, srcFile);
+
+
+        // In Greenfoot we don't do detailed dependency tracking, so we just recompile the whole
+        // package if any class is removed:
+        if (Config.isGreenfoot())
+            pkg.rebuild();
+    }
+    
+    public void removeStride()
+    {
+        if (sourceAvailable != SourceType.Stride)
+            throw new IllegalStateException("Cannot convert non-Stride from Stride to Java");
+
+        if(editor != null) {
+            editor.close();
+            try {
+                editor.saveJavaWithoutWarning();
+            } catch (IOException e) {
+                Debug.reportError(e);
+            }
+            editor = null;
+        }
+
+        File srcFile = getSourceFile();
+        if (srcFile.exists()) {
+            srcFile.delete();
+        }
+        sourceAvailable = SourceType.Java;
+
+        // getSourceFile() will now return the Java file:
+        DataCollector.convertStrideToJava(getPackage(), srcFile, getSourceFile());
+    }
+    
+    public void addStride(TopLevelCodeElement element)
+    {
+        if (editor != null)
+        {
+            editor.close();
+            editor = null;
+        }
+        File strideFile = getFrameSourceFile();
+        try
+        {
+            Files.write(strideFile.toPath(), Arrays.asList(Utility.splitLines(Utility.serialiseCodeToString(element.toXML()))), Charset.forName("UTF-8"));
+        }
+        catch (IOException e)
+        {
+            Debug.reportError(e);
+            Platform.runLater(() ->
+                JavaFXUtil.errorDialog(Config.getString("convert.to.stride.title"), e.getMessage())
+            );
+            return;
+        }
+        sourceAvailable = SourceType.Stride;
+        //DataCollector.convertJavaToStride(getPackage(), srcFile, getSourceFile());
     }
 
-    @Override
+    @OnThread(Tag.FXPlatform)
     public boolean isMoveable()
     {
         return isMoveable;
@@ -1989,7 +2482,7 @@ public class ClassTarget extends DependentTarget
      * 
      * @see bluej.graph.Moveable#setIsMoveable(boolean)
      */
-    @Override
+    @OnThread(Tag.FXPlatform)
     public void setIsMoveable(boolean isMoveable)
     {
         this.isMoveable = isMoveable;
@@ -2022,59 +2515,199 @@ public class ClassTarget extends DependentTarget
      */
     private boolean checkDebuggerState()
     {
-        return PkgMgrFrame.createFrame(getPackage()).checkDebuggerState();
+        return PkgMgrFrame.createFrame(getPackage(), null).checkDebuggerState();
     }
 
     /**
      * Returns the naviview expanded value from the properties file
      * @return 
      */
-    public boolean isNaviviewExpanded() 
+    @OnThread(Tag.Any)
+    public synchronized boolean isNaviviewExpanded()
     {
-        return isNaviviewExpanded;
+        return isNaviviewExpanded.orElse(false);
     }
 
     /**
      * Sets the naviview expanded value from the properties file to this local variable
      * @param isNaviviewExpanded
      */
-    public void setNaviviewExpanded(boolean isNaviviewExpanded) 
+    public synchronized void setNaviviewExpanded(boolean isNaviviewExpanded)
     {
-        this.isNaviviewExpanded=isNaviviewExpanded;  
+        this.isNaviviewExpanded = Optional.of(isNaviviewExpanded);
     }
 
     /**
      * Retrieves a property from the editor
      */
     @Override
-    public String getProperty(String key) 
+    @OnThread(Tag.Any)
+    public synchronized String getProperty(String key)
     {
-        return (String)properties.get(key);
+        return properties.get(key);
     }
 
     /**
      * Sets a property for the editor
      */
     @Override
-    public void setProperty(String key, String value) 
+    public synchronized void setProperty(String key, String value)
     {
         properties.put(key, value);
     }
     
     @Override
-    public String getTooltipText()
+    public void recordEdit(SourceType sourceType, String latest, boolean includeOneLineEdits, StrideEditReason reason)
     {
-        if (!getSourceInfo().isValid()) {
-            return Config.getString("graph.tooltip.classBroken");
-        } else {
-            return null;
+        if (sourceType == SourceType.Java)
+        {
+            DataCollector.edit(getPackage(), getJavaSourceFile(), latest, includeOneLineEdits, null);
+        }
+        else if (sourceType == SourceType.Stride && this.sourceAvailable == SourceType.Stride)
+        {
+            DataCollector.edit(getPackage(), getFrameSourceFile(), latest, includeOneLineEdits, reason);
+        }
+        else
+        {
+            Debug.message("Attempting to send " + sourceType + " source when available is: " + this.sourceAvailable);
         }
     }
-    
+
     @Override
-    public void recordEdit(String latest, boolean includeOneLineEdits)
+    public void recordClose()
     {
-        DataCollector.edit(getPackage(), getSourceFile(), latest, includeOneLineEdits);
+        DataCollector.closeClass(getPackage(), getSourceFile());
+        recordedAsOpen = false;
     }
-   
+
+    @Override
+    public void recordOpen()
+    {
+        if (recordedAsOpen == false)
+        {
+            DataCollector.openClass(getPackage(), getSourceFile());
+            recordedAsOpen = true;
+        }
+    }
+
+    @Override
+    public void recordSelected()
+    {
+        DataCollector.selectClass(getPackage(), getSourceFile());
+    }
+
+    public CompileInputFile getCompileInputFile()
+    {
+        return new CompileInputFile(getJavaSourceFile(), getSourceFile());
+    }
+
+    /**
+     * Mark that there is a known compilation error with this target.
+     * (Mark is cleared when state is set to COMPILING).
+     */
+    public void markKnownError()
+    {
+        // Errors are marked as part of compilation, so we expect that a suitable ClassEvent
+        // is generated when compilation finishes; no need for it here.
+        setState(State.HAS_ERROR);
+    }
+    
+    /**
+     * Check whether there was a compilation error for this target, last time
+     * compilation was attempted.
+     */
+    @OnThread(Tag.Any)
+    public boolean hasKnownError()
+    {
+        return getState() == State.HAS_ERROR;
+    }
+
+    @Override
+    public void recordShowErrorMessage(int identifier, List<String> quickFixes)
+    {
+        DataCollector.showErrorMessage(getPackage(), identifier, quickFixes);
+    }
+
+    @Override
+    public void recordShowErrorIndicator(int identifier)
+    {
+        DataCollector.showErrorIndicator(getPackage(), identifier);
+    }
+
+    @Override
+    public void recordEarlyErrors(List<DiagnosticWithShown> diagnostics)
+    {
+        if (diagnostics.isEmpty())
+            return;
+
+        DataCollector.compiled(getPackage().getProject(), getPackage(), new CompileInputFile[] {getCompileInputFile()}, diagnostics, false, CompileReason.EARLY, SourceType.Stride);
+    }
+
+    @Override
+    public void recordLateErrors(List<DiagnosticWithShown> diagnostics)
+    {
+        if (diagnostics.isEmpty())
+            return;
+
+        DataCollector.compiled(getPackage().getProject(), getPackage(), new CompileInputFile[] {getCompileInputFile()}, diagnostics, false, CompileReason.LATE, SourceType.Stride);
+    }
+
+    @Override
+    public void recordFix(int errorIdentifier, int fixIndex)
+    {
+        DataCollector.fixExecuted(getPackage(), errorIdentifier, fixIndex);
+    }
+
+    @Override
+    public void recordCodeCompletionStarted(Integer lineNumber, Integer columnNumber, String xpath, Integer subIndex, String stem)
+    {
+        DataCollector.codeCompletionStarted(this, lineNumber, columnNumber, xpath, subIndex, stem);
+    }
+
+    @Override
+    public void recordCodeCompletionEnded(Integer lineNumber, Integer columnNumber, String xpath, Integer elementOffset, String stem, String replacement)
+    {
+        DataCollector.codeCompletionEnded(this, lineNumber, columnNumber, xpath, elementOffset, stem, replacement);
+    }
+
+    @Override
+    public void recordUnknownCommandKey(String enclosingFrameXpath, int cursorIndex, char key)
+    {
+        DataCollector.unknownFrameCommandKey(this, enclosingFrameXpath, cursorIndex, key);
+    }
+
+    @Override
+    public @OnThread(Tag.FXPlatform) boolean isFront()
+    {
+        return isFront;
+    }
+
+    @Override
+    public synchronized void showingInterface(boolean showing)
+    {
+        this.showingInterface = showing;
+    }
+
+    @Override
+    public @OnThread(Tag.FXPlatform) void setCreatingExtends(boolean drawingExtends)
+    {
+        // Don't call super; we don't want to darken ourselves
+        this.drawingExtends = drawingExtends;
+    }
+
+    @Override
+    public @OnThread(Tag.FXPlatform) boolean cursorAtResizeCorner(MouseEvent e)
+    {
+        // Don't allow resize if we are picking an extends arrow:
+        return super.cursorAtResizeCorner(e) && !drawingExtends;
+    }
+
+    @Override
+    public void setDisplayName(String name)
+    {
+        super.setDisplayName(name);
+        // Don't just use name; getDisplayName adds template params info
+        String newDisplayName = getDisplayName();
+        Platform.runLater(() -> nameLabel.setText(newDisplayName));
+    }
 }

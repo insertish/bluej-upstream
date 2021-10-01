@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2010,2011,2013,2014  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2010,2011,2013,2014,2016,2017  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -21,47 +21,34 @@
  */
 package bluej.debugmgr.inspector;
 
-import java.awt.AlphaComposite;
-import java.awt.BorderLayout;
-import java.awt.Color;
-import java.awt.Dimension;
-import java.awt.Font;
-import java.awt.GradientPaint;
-import java.awt.Graphics;
-import java.awt.Graphics2D;
-import java.awt.GraphicsConfiguration;
-import java.awt.Insets;
-import java.awt.RenderingHints;
-import java.awt.Transparency;
-import java.awt.event.ActionEvent;
-import java.awt.event.ActionListener;
-import java.awt.geom.Ellipse2D;
-import java.awt.image.BufferedImage;
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Optional;
 
-import javax.swing.BorderFactory;
-import javax.swing.Box;
-import javax.swing.BoxLayout;
-import javax.swing.JButton;
-import javax.swing.JComponent;
-import javax.swing.JFrame;
-import javax.swing.JLabel;
-import javax.swing.JPanel;
-import javax.swing.JScrollPane;
-import javax.swing.JSeparator;
-import javax.swing.border.EmptyBorder;
+import javax.swing.SwingUtilities;
 
-import bluej.BlueJTheme;
+import javafx.beans.property.ReadOnlyDoubleWrapper;
+import javafx.scene.Scene;
+import javafx.scene.control.Button;
+import javafx.scene.control.Label;
+import javafx.scene.layout.BorderPane;
+import javafx.scene.layout.Pane;
+import javafx.scene.layout.Priority;
+import javafx.scene.layout.Region;
+import javafx.scene.layout.StackPane;
+import javafx.scene.layout.VBox;
+import javafx.scene.shape.Rectangle;
+import javafx.stage.StageStyle;
+import javafx.stage.Window;
+
 import bluej.Config;
 import bluej.debugger.DebuggerField;
 import bluej.debugger.DebuggerObject;
 import bluej.debugger.gentype.GenTypeClass;
 import bluej.pkgmgr.Package;
 import bluej.pkgmgr.PackageEditor;
-import bluej.prefmgr.PrefMgr;
 import bluej.testmgr.record.ArrayElementGetRecord;
 import bluej.testmgr.record.ArrayElementInspectorRecord;
 import bluej.testmgr.record.GetInvokerRecord;
@@ -69,6 +56,9 @@ import bluej.testmgr.record.InvokerRecord;
 import bluej.testmgr.record.ObjectInspectInvokerRecord;
 import bluej.utility.DialogManager;
 import bluej.utility.JavaNames;
+import bluej.utility.javafx.JavaFXUtil;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 
 /**
  * A window that displays the fields in an object or a method return value.
@@ -77,6 +67,7 @@ import bluej.utility.JavaNames;
  * @author Poul Henriksen
  * @author Bruce Quig
  */
+@OnThread(Tag.FXPlatform)
 public class ObjectInspector extends Inspector
 {
     // === static variables ===
@@ -84,6 +75,7 @@ public class ObjectInspector extends Inspector
     protected final static String inspectTitle = Config.getString("debugger.inspector.object.title");
     protected final static String noFieldsMsg = Config.getString("debugger.inspector.object.noFields");
     protected final static String numFields = Config.getString("debugger.inspector.numFields");
+    public static final int CORNER_SIZE = 40;
 
     // === instance variables ===
     
@@ -109,7 +101,8 @@ public class ObjectInspector extends Inspector
      * list which is built when viewing an array that records the object slot
      * corresponding to each array index
      */
-    protected List<Integer> indexToSlotList = null; 
+    protected List<Integer> indexToSlotList = null;
+    private StackPane stackPane;
 
     /**
      *  Note: 'pkg' may be null if 'ir' is null.
@@ -126,39 +119,28 @@ public class ObjectInspector extends Inspector
      * @param parent
      *            The parent frame of this frame
      */
-    public ObjectInspector(DebuggerObject obj, InspectorManager inspectorManager, String name, Package pkg, InvokerRecord ir, final JFrame parent)
+    public ObjectInspector(DebuggerObject obj, InspectorManager inspectorManager, String name, Package pkg, InvokerRecord ir, final Window parent)
     {
-        super(inspectorManager, pkg, ir, new Color(244, 158, 158));
+        super(inspectorManager, pkg, ir, StageStyle.TRANSPARENT);
 
         this.obj = obj;
         this.objName = name;
 
-        final ObjectInspector thisInspector = this;
-
         makeFrame();
         update();
-        updateLayout();
-        pack();
-        
+
+        setMinWidth(500);
+        setMinHeight(260);
+
         if (parent instanceof Inspector) {
-            DialogManager.tileWindow(thisInspector, parent);
+            setX(parent.getX() + 40);
+            setY(parent.getY() + 40);
         }
         else {
-            DialogManager.centreWindow(thisInspector, parent);
+            //DialogManager.centreWindow(thisInspector, parent);
         }
 
-        if (Config.isMacOS() || Config.isWinOS()) {
-            // Window translucency doesn't seem to work on linux.
-            // We'll assume that it might not work on any OS other
-            // than those on which it's known to work: MacOS and Windows.
-            thisInspector.setWindowOpaque(false);
-        }
-        if ( !Config.isMacOS() || Config.isJava17() ) {
-            // Java 1.6 on MacOS automatically makes tranparent windows
-            // draggable by their content - no need to do it ourselves.
-            // It has to be done on Java 1.7
-            thisInspector.installListenersForMoveDrag();
-        }
+        installListenersForMoveDrag(20.0);
     }
 
     /**
@@ -166,16 +148,9 @@ public class ObjectInspector extends Inspector
      */
     protected void makeFrame()
     {
-        setUndecorated(true);
-        setLayout(new BorderLayout());
-        setBackground(new Color(232,230,218));
-
         // Create the header
 
-        JComponent header = new JPanel();
-        header.setLayout(new BoxLayout(header, BoxLayout.Y_AXIS));
-        header.setOpaque(false);
-        header.setDoubleBuffered(false);
+        Pane header = new VBox();
         GenTypeClass objType = obj.getGenType();
         String className = objType != null ? objType.toString(true) : "";
 
@@ -188,145 +163,71 @@ public class ObjectInspector extends Inspector
             fullTitle = " : " + className;
             setTitle(inspectTitle);
         }
-        JLabel headerLabel = new JLabel(fullTitle, JLabel.CENTER);
-        Font font = headerLabel.getFont();
-        headerLabel.setFont(font.deriveFont(Font.BOLD));
-        headerLabel.setOpaque(false);
-        headerLabel.setAlignmentX(0.5f);
-        headerLabel.setForeground(Color.white);
-        header.add(headerLabel);
-        header.add(Box.createVerticalStrut(BlueJTheme.generalSpacingWidth));
-        JSeparator sep = new JSeparator();
-        sep.setForeground(new Color(214, 92, 92));
-        if (!Config.isRaspberryPi()) {
-            sep.setBackground(new Color(0, 0, 0, 0));
-        }else{
-            sep.setBackground(new Color (0,0,0));
-        }
-        header.add(sep);
+        Label headerLabel = new Label(fullTitle);
+        header.getChildren().add(headerLabel);
+        //header.getChildren().add(new Separator(Orientation.HORIZONTAL));
 
         // Create the main panel (field list, Get/Inspect buttons)
 
-        JPanel mainPanel = new JPanel(new BorderLayout(10, 10));
-        mainPanel.setOpaque(false);
-        mainPanel.setDoubleBuffered(false);
+        BorderPane mainPanel = new BorderPane();
+        mainPanel.setCenter(fieldList);
+        
+        Label lab = new Label("  " + noFieldsMsg);
+        fieldList.setPlaceholder(lab);
 
-        if (!getListData().isEmpty()) {
-            JScrollPane scrollPane = createFieldListScrollPane();
-            mainPanel.add(scrollPane, BorderLayout.CENTER);
-        } else {
-            JLabel lab = new JLabel("  " + noFieldsMsg);
-            lab.setPreferredSize(new Dimension(200, 30));
-            lab.setFont(PrefMgr.getStandardFont().deriveFont(20.0f));
-            lab.setForeground(new Color(250, 160, 160));
-            mainPanel.add(lab);
-        }
-
-        JPanel inspectAndGetButtons = createInspectAndGetButtons();
-        mainPanel.add(inspectAndGetButtons, BorderLayout.EAST);
-
-        Insets insets = BlueJTheme.generalBorderWithStatusBar.getBorderInsets(mainPanel);
-        mainPanel.setBorder(new EmptyBorder(insets));
+        mainPanel.setRight(createInspectAndGetButtons());
 
         // create bottom button pane with "Close" button
 
-        JPanel bottomPanel = new JPanel();
-        bottomPanel.setOpaque(false);
-        bottomPanel.setLayout(new BoxLayout(bottomPanel, BoxLayout.Y_AXIS));
-        bottomPanel.setBorder(BorderFactory.createEmptyBorder(10, 5, 5, 5));
-
-        JPanel buttonPanel;
-        buttonPanel = new JPanel(new BorderLayout());
-        buttonPanel.setOpaque(false);
-        JButton button = createCloseButton();
-        buttonPanel.add(button, BorderLayout.EAST);
-        JButton classButton = new JButton(showClassLabel);
-        classButton.addActionListener(new ActionListener() {
-            public void actionPerformed(ActionEvent e)
-            {
-                showClass();
-            }
-        });
-        buttonPanel.add(classButton, BorderLayout.WEST);
-        if (!Config.isRaspberryPi()) buttonPanel.setDoubleBuffered(false);
-
-        bottomPanel.add(buttonPanel);
-        if (!Config.isRaspberryPi()) bottomPanel.setDoubleBuffered(false);
-
+        Pane bottomPanel = new VBox();
+        
+        BorderPane buttonPanel = new BorderPane();
+        Button button = createCloseButton();
+        buttonPanel.setRight(button);
+        Button classButton = new Button(showClassLabel);
+        classButton.setOnAction(e -> showClass());
+        buttonPanel.setLeft(classButton);
+        
+        bottomPanel.getChildren().add(buttonPanel);
+        
         // add the components
+        Pane contentPane = new VBox();
+        contentPane.setBackground(null);
 
-        JPanel contentPane = new JPanel() {
+        contentPane.getChildren().addAll(header, mainPanel, bottomPanel);
+        VBox.setVgrow(mainPanel, Priority.ALWAYS);
 
-            @Override
-            protected void paintComponent(Graphics g)
-            {               
-                Graphics2D g2d = (Graphics2D)g.create();
-                {
-                    GraphicsConfiguration gc = g2d.getDeviceConfiguration();
-                    BufferedImage img;
-                    if (!Config.isRaspberryPi()) {
-                        img = gc.createCompatibleImage(getWidth(),
-                              getHeight(),
-                              Transparency.TRANSLUCENT);
-                    }else{
-                        img = gc.createCompatibleImage(getWidth(),
-                                getHeight());
-                    }
-                    Graphics2D imgG = img.createGraphics();
+        JavaFXUtil.addStyleClass(contentPane, "inspector", "inspector-object");
+        JavaFXUtil.addStyleClass(header, "inspector-object-header", "inspector-header");
 
-                    if (!Config.isRaspberryPi()) imgG.setComposite(AlphaComposite.Clear);
-                    imgG.fillRect(0, 0, getWidth(), getHeight());
-    
-                    if (!Config.isRaspberryPi()) imgG.setComposite(AlphaComposite.Src);
-                    if (!Config.isRaspberryPi()) {
-                        imgG.setRenderingHint(
-                             RenderingHints.KEY_ANTIALIASING,
-                             RenderingHints.VALUE_ANTIALIAS_ON);
-                    }
-                    imgG.setColor(Color.WHITE);
-                    imgG.fillRoundRect(0, 0, getWidth(), getHeight(), 30, 30);
-                    
-                    if (!Config.isRaspberryPi()){
-                        imgG.setComposite(AlphaComposite.SrcAtop);
-                        imgG.setPaint(new GradientPaint(getWidth() / 2, getHeight() / 2, new Color(227, 71, 71)
-                                                       ,getWidth() / 2, getHeight(), new Color(205, 39, 39)));
-                        imgG.fillRect(0, 0, getWidth(), getHeight());
-                        
-                        imgG.setPaint(new GradientPaint(getWidth() / 2, 0, new Color(248, 120, 120)
-                                                       ,getWidth() / 2, getHeight() / 2, new Color(231, 96, 96)));
-                    }else{
-                        imgG.setPaint(new Color(216, 95, 83));
-                        imgG.fillRect(0, 0, getWidth(), getHeight());
-                        imgG.setPaint(new Color(239, 108, 67));
-                    }
-                    imgG.fill(new Ellipse2D.Float(-2*getWidth(),-5*getHeight()/2,5*getWidth(),3*getHeight()));
 
-                    imgG.setColor(Color.BLACK);
-                    imgG.drawRoundRect(0, 0, getWidth()-1, getHeight()-1, 30, 30);                    
-                    
-                    imgG.dispose();
-                    g2d.drawImage(img, 0, 0, this);
-                }
-                g2d.dispose();
-            }
-        };
-        add(contentPane);
+        button.setDefaultButton(true);
+        stackPane = new StackPane(new ObjectBackground(CORNER_SIZE, new ReadOnlyDoubleWrapper(3.0)), contentPane);
+        Rectangle clip = new Rectangle();
+        clip.widthProperty().bind(widthProperty());
+        clip.heightProperty().bind(heightProperty());
+        clip.setArcWidth(CORNER_SIZE);
+        clip.setArcHeight(CORNER_SIZE);
+        stackPane.setClip(clip);
+        stackPane.setBackground(null);
+        BorderPane root = new BorderPane(stackPane);
+        root.setBackground(null);
+        Scene scene = new Scene(root);
+        scene.setFill(null);
+        setScene(scene);
+    }
 
-        contentPane.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
-        contentPane.setOpaque(false);
-        contentPane.setDoubleBuffered(false);
-        contentPane.setLayout(new BorderLayout());
-        contentPane.add(header, BorderLayout.NORTH);
-        contentPane.add(mainPanel, BorderLayout.CENTER);
-        contentPane.add(bottomPanel, BorderLayout.SOUTH);
-
-        getRootPane().setDefaultButton(button);
+    @Override
+    public Region getContent()
+    {
+        return stackPane;
     }
 
     /**
      * True if this inspector is used to display a method call result.
      */
     @Override
+    @OnThread(Tag.FXPlatform)
     protected List<FieldInfo> getListData()
     {
         // if is an array (we potentially will compress the array if it is
@@ -353,6 +254,13 @@ public class ObjectInspector extends Inspector
      */
     protected void listElementSelected(int slot)
     {
+        if (slot == -1)
+        {
+            setCurrentObj(null, null, null);
+            setButtonsEnabled(false, false);
+            return;
+        }
+        
         // add index to slot method for truncated arrays
         if (obj.isArray()) {
             slot = indexToSlot(slot);
@@ -398,7 +306,7 @@ public class ObjectInspector extends Inspector
 
         // Non-array
         DebuggerField field = obj.getInstanceField(slot);
-        if (field.isReferenceType() && ! field.isNull()) {
+        if (field != null && field.isReferenceType() && ! field.isNull()) {
             setCurrentObj(field.getValueObject(null), field.getName(), field.getType().toString());
 
             if (Modifier.isPublic(field.getModifiers())) {
@@ -427,7 +335,7 @@ public class ObjectInspector extends Inspector
      */
     protected void showClass()
     {
-        inspectorManager.getClassInspectorInstance(obj.getClassRef(), pkg, this);
+        inspectorManager.getClassInspectorInstance(obj.getClassRef(), pkg, this, null);
     }
 
     @Override
@@ -437,15 +345,15 @@ public class ObjectInspector extends Inspector
             selectArrayElement();
         }
         else if (selectedField != null) {
-            boolean isPublic = getButton.isEnabled();
+            boolean isPublic = !getButton.isDisable();
             
             if (! obj.isArray()) {
                 InvokerRecord newIr = new ObjectInspectInvokerRecord(selectedFieldName, ir);
-                inspectorManager.getInspectorInstance(selectedField, selectedFieldName, pkg, isPublic ? newIr : null, this);
+                inspectorManager.getInspectorInstance(selectedField, selectedFieldName, pkg, isPublic ? newIr : null, this, null);
             }
             else {
                 InvokerRecord newIr = new ArrayElementInspectorRecord(ir, selectedIndex);
-                inspectorManager.getInspectorInstance(selectedField, selectedFieldName, pkg, isPublic ? newIr : null, this);
+                inspectorManager.getInspectorInstance(selectedField, selectedFieldName, pkg, isPublic ? newIr : null, this, null);
             }
         }
     }
@@ -461,10 +369,14 @@ public class ObjectInspector extends Inspector
             else {
                 getIr = new ArrayElementGetRecord(selectedFieldType, selectedIndex, ir);
             }
-                
-            PackageEditor pkgEd = pkg.getEditor();
-            pkgEd.recordInteraction(getIr);
-            pkgEd.raisePutOnBenchEvent(this, selectedField, selectedField.getGenType(), getIr);
+
+            DebuggerObject selField = this.selectedField;
+            SwingUtilities.invokeLater(() -> {
+                PackageEditor pkgEd = pkg.getEditor();
+                pkgEd.recordInteraction(getIr);
+
+                pkgEd.raisePutOnBenchEvent(this, selField, selField.getGenType(), getIr, true, Optional.empty());
+            });
         }
     }
     
@@ -483,7 +395,7 @@ public class ObjectInspector extends Inspector
      */
     private void selectArrayElement()
     {
-        String response = DialogManager.askString(this, "ask-index");
+        String response = DialogManager.askStringFX(this, "ask-index");
 
         if (response != null) {
             try {
@@ -492,11 +404,11 @@ public class ObjectInspector extends Inspector
                 if (slot >= 0 && slot < obj.getElementCount()) {
                     // if its an object set as current object
                     if (! obj.getElementType().isPrimitive() && ! obj.getElementObject(slot).isNullObject()) {
-                        boolean isPublic = getButton.isEnabled();
+                        boolean isPublic = !getButton.isDisable();
                         InvokerRecord newIr = new ArrayElementInspectorRecord(ir, slot);
                         setCurrentObj(obj.getElementObject(slot), "[" + slot + "]", obj.getElementType().toString());
                         inspectorManager.getInspectorInstance(selectedField, selectedFieldName, pkg,
-                                isPublic ? newIr : null, this);
+                                isPublic ? newIr : null, this, null);
                     }
                     else {
                         // it is not an object - a primitive, so lets
@@ -509,13 +421,13 @@ public class ObjectInspector extends Inspector
                     }
                 }
                 else { // not within array bounds
-                    DialogManager.showError(this, "out-of-bounds");
+                    DialogManager.showErrorFX(this, "out-of-bounds");
                 }
             }
             catch (NumberFormatException e) {
                 // input could not be parsed, eg. non integer value
                 setCurrentObj(null, null, null);
-                DialogManager.showError(this, "cannot-access-element");
+                DialogManager.showErrorFX(this, "cannot-access-element");
             }
         }
         else {

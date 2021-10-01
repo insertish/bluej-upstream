@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2013,2014,2015,2016  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2011,2012,2013,2014,2015,2016,2017  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -21,9 +21,13 @@
  */
 package bluej.pkgmgr;
 
-import java.awt.Component;
+import javax.swing.SwingUtilities;
+import javax.swing.Timer;
 import java.awt.EventQueue;
-import java.awt.Window;
+import java.awt.Rectangle;
+import java.awt.SecondaryLoop;
+import java.awt.Toolkit;
+import java.awt.event.ActionListener;
 import java.io.File;
 import java.io.IOException;
 import java.net.MalformedURLException;
@@ -32,28 +36,35 @@ import java.nio.charset.Charset;
 import java.nio.charset.IllegalCharsetNameException;
 import java.nio.charset.UnsupportedCharsetException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Properties;
 import java.util.Set;
 import java.util.StringTokenizer;
 import java.util.TreeMap;
+import java.util.concurrent.atomic.AtomicReference;
 
-import javax.swing.JFileChooser;
-import javax.swing.JFrame;
+import javafx.animation.Interpolator;
+import javafx.animation.ScaleTransition;
+import javafx.application.Platform;
+import javafx.embed.swing.JFXPanel;
 
 import bluej.BlueJEvent;
 import bluej.Boot;
 import bluej.Config;
 import bluej.classmgr.BPClassLoader;
+import bluej.classmgr.ClassMgrPrefPanel;
 import bluej.collect.DataCollector;
+import bluej.compiler.CompileReason;
+import bluej.compiler.CompileType;
 import bluej.debugger.Debugger;
 import bluej.debugger.DebuggerClass;
 import bluej.debugger.DebuggerEvent;
@@ -67,14 +78,19 @@ import bluej.debugmgr.inspector.Inspector;
 import bluej.debugmgr.inspector.InspectorManager;
 import bluej.debugmgr.inspector.ObjectInspector;
 import bluej.debugmgr.inspector.ResultInspector;
+import bluej.debugmgr.objectbench.ObjectBench;
 import bluej.debugmgr.objectbench.ObjectWrapper;
 import bluej.editor.Editor;
+import bluej.editor.stride.FXTabbedEditor;
+import bluej.editor.stride.FrameShelfStorage;
 import bluej.extensions.BProject;
 import bluej.extensions.ExtensionBridge;
 import bluej.extmgr.ExtensionsManager;
 import bluej.groupwork.Repository;
 import bluej.groupwork.TeamSettingsController;
 import bluej.groupwork.actions.TeamActionGroup;
+import bluej.groupwork.ui.CommitAndPushFrame;
+import bluej.groupwork.ui.CommitAndPushInterface;
 import bluej.groupwork.ui.CommitCommentsFrame;
 import bluej.groupwork.ui.StatusFrame;
 import bluej.groupwork.ui.TeamSettingsDialog;
@@ -83,7 +99,6 @@ import bluej.parser.entity.EntityResolver;
 import bluej.pkgmgr.target.ClassTarget;
 import bluej.pkgmgr.target.Target;
 import bluej.prefmgr.PrefMgr;
-import bluej.prefmgr.PrefMgrDialog;
 import bluej.terminal.Terminal;
 import bluej.testmgr.record.ClassInspectInvokerRecord;
 import bluej.testmgr.record.InvokerRecord;
@@ -91,9 +106,19 @@ import bluej.utility.Debug;
 import bluej.utility.DialogManager;
 import bluej.utility.FileUtility;
 import bluej.utility.FileUtility.WriteCapabilities;
+import bluej.utility.ImportScanner;
 import bluej.utility.JavaNames;
 import bluej.utility.Utility;
+import bluej.utility.javafx.FXPlatformSupplier;
 import bluej.views.View;
+import javafx.geometry.Point2D;
+import javafx.scene.Node;
+import javafx.scene.Parent;
+import javafx.scene.Scene;
+import javafx.stage.Window;
+import javafx.util.Duration;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 
 
 /**
@@ -106,49 +131,43 @@ import bluej.views.View;
  */
 public class Project implements DebuggerListener, InspectorManager 
 {
+    public static final int NEW_PACKAGE_DONE = 0;
+    public static final int NEW_PACKAGE_EXIST = 1;
+    public static final int NEW_PACKAGE_BAD_NAME = 2;
+    public static final int NEW_PACKAGE_NO_PARENT = 3;
+    public static final String projectLibDirName = "+libs";
+    /** Property specifying location of JDK source */
+    private static final String JDK_SOURCE_PATH_PROPERTY = "bluej.jdk.source";
+    private static final String PROJECT_CHARSET_PROP = "project.charset";
     /**
      * Collection of all open projects. The canonical name of the project
      * directory (as a File object) is used as the key.
      */
     private static Map<File,Project> projects = new HashMap<File,Project>();
-    public static final int NEW_PACKAGE_DONE = 0;
-    public static final int NEW_PACKAGE_EXIST = 1;
-    public static final int NEW_PACKAGE_BAD_NAME = 2;
-    public static final int NEW_PACKAGE_NO_PARENT = 3;
-
-    public static final String projectLibDirName = "+libs";
-    
-    /** Property specifying location of JDK source */
-    private static final String JDK_SOURCE_PATH_PROPERTY = "bluej.jdk.source";
-    
-    private static final String PROJECT_CHARSET_PROP = "project.charset";
-    private static final String PROJECT_IS_JAVA_ME_PROP = "package.isJavaMEproject";
     
     /* ------------------- end of static declarations ------------------ */
 
     // instance fields
-
     /** the path of the project directory. */
-    private File projectDir;
-
+    private final File projectDir;
+    /** reference to the unnamed package */
+    @OnThread(Tag.Any) private final Package unnamedPackage; 
+    /** Resolve javadoc for this project */
+    private final JavadocResolver javadocResolver;
     /** collection of open packages in this project
       (indexed by the qualifiedName of the package).
        The unnamed package ie root package of the package tree
        can be obtained by retrieving "" from this collection */
     private Map<String, Package> packages;
-
     /** the debugger for this project */
-    private Debugger debugger;
-
+    @OnThread(Tag.Any)
+    private final Debugger debugger;
     /** the ExecControls for this project */
     private ExecControls execControls = null;
-
     /** the Terminal for this project */
     private Terminal terminal = null;
-
     /** the documentation generator for this project. */
     private DocuGenerator docuGenerator;
-
     /** when a project is opened, the user may specify a
        directory deep into the projects directory structure.
        BlueJ will correctly find the top of this package
@@ -158,41 +177,63 @@ public class Project implements DebuggerListener, InspectorManager
        /home/user/foo is the project directory, this variable
        will be set to com.sun */
     private String initialPackageName = "";
-
     /** This holds all object inspectors and class inspectors
         for a project. It should only hold object inspectors that
         have a wrapper on the object bench. Inspectors of fields of
         object inspectors should be handled at the object wrapper level */
+    @OnThread(Tag.FXPlatform)
     private Map<Object,Inspector> inspectors;
-    
+    @OnThread(value = Tag.Any, requireSynchronized = true)
     private boolean inTestMode = false;
     private BPClassLoader currentClassLoader;
     private List<URL> libraryUrls;
-    
     // the TeamSettingsController for this project
     private TeamSettingsController teamSettingsController = null;
-    
-    private CommitCommentsFrame commitCommentsFrame = null;
+    private CommitAndPushInterface commitCommentsFrame = null;
     private UpdateFilesFrame updateFilesFrame = null;
     private StatusFrame statusFrame = null;
-    
     /** If true, this project is connected with a source repository */
-    private Boolean isSharedProject = null;
+    /** If empty, not checked yet */
+    @OnThread(value = Tag.Any, requireSynchronized = true)
+    private Optional<Boolean> isSharedProject = Optional.empty();
 
     // team actions
-    private TeamActionGroup teamActions;  
-    
-    // Flag signalling whether this is a Java Micro Edition project
-    private boolean isJavaMEproject = false;    
-    
-    /** Resolve javadoc for this project */
-    private JavadocResolver javadocResolver;
-    
+    private TeamActionGroup teamActions;
     /** Where to find JDK and other library sources (for extracting javadoc) */
     private List<DocPathEntry> sourcePath;
     
     /** Project character set for source files etc */
+    @OnThread(value = Tag.Any,requireSynchronized = true)
     private Charset characterSet;
+
+    @OnThread(Tag.FX) private final List<FXTabbedEditor> fXTabbedEditors = new ArrayList<>();
+    @OnThread(Tag.FX) private final List<Rectangle> fxCachedEditorSizes = new ArrayList<>();
+    
+    /** 1 second timer before starting auto-compile */
+    @OnThread(value = Tag.Any,requireSynchronized = true)
+    private Timer compilerTimer;
+    // We don't used synchronized here because we could deadlock:
+    @OnThread(Tag.Any)
+    private final AtomicReference<CompileReason> latestCompileReason = new AtomicReference<>(null);
+    // We don't used synchronized here because we could deadlock:
+    @OnThread(Tag.Any)
+    private final AtomicReference<CompileType> latestCompileType = new AtomicReference<>(null);
+    /** Packages scheduled for autocompilation */
+    @OnThread(value = Tag.Any,requireSynchronized = true)
+    private Set<Package> scheduledPkgs = new HashSet<>();
+    /** Targets scheduled for autocompilation */
+    @OnThread(value = Tag.Any,requireSynchronized = true)
+    private Set<ClassTarget> scheduledTargets = new HashSet<>();
+
+    private BProject singleBProject;  // Every Project has none or one BProject
+    private boolean closing = false;
+    /** The scanner for available imports.  May be null if not requested yet. */
+    @OnThread(value = Tag.Any,requireSynchronized = true)
+    private ImportScanner importScanner;
+    
+    /** check if the project is a dvcs project**/
+    private boolean isDVCS=false;
+    private final FrameShelfStorage shelfStorage;
 
     /* ------------------- end of field declarations ------------------- */
 
@@ -201,7 +242,7 @@ public class Project implements DebuggerListener, InspectorManager
      * This must contain the root bluej.pkg of a nested package
      * (this should by its nature be the unnamed package).
      */
-    private Project(File projectDir)
+    private Project(File projectDir) throws IOException
     {
         if (projectDir == null) {
             throw new NullPointerException();
@@ -243,15 +284,20 @@ public class Project implements DebuggerListener, InspectorManager
         packages = new TreeMap<String, Package>();
         docuGenerator = new DocuGenerator(this);
 
-        try {
-            Package unnamed = new Package(this);
-            Properties props = unnamed.getLastSavedProperties();
-            setProjectProperties(props);
-            packages.put("", unnamed);
-            unnamed.refreshPackage();
-        } catch (IOException exc) {
-            Debug.reportError("could not read package file (unnamed package)");
-        }
+        unnamedPackage = new Package(this);
+        Properties props = unnamedPackage.getLastSavedProperties();
+        setProjectProperties(props);
+        packages.put("", unnamedPackage);
+
+        // This line initialises JavaFX:
+        new JFXPanel();
+        // Prevent JavaFX exiting when all JavaFX windows are closed (would prevent re-opening editor):
+        Platform.setImplicitExit(false);
+        shelfStorage = new FrameShelfStorage(this.projectDir);
+        Platform.runLater(() -> createNewFXTabbedEditor());
+
+        // Must do this after the editors have been created:
+        getPackage("").refreshPackage();
 
         debugger = Debugger.getDebuggerImpl(getProjectDir(), getTerminal());
         debugger.setUserLibraries(libraryUrls.toArray(new URL[libraryUrls.size()]));
@@ -260,8 +306,18 @@ public class Project implements DebuggerListener, InspectorManager
         debugger.launch();
 
         // Check whether this is a shared project
-        isSharedProject = isTeamProject();
-        teamActions = new TeamActionGroup(isSharedProject);
+        File ccfFile = new File(projectDir.getAbsoluteFile(), "team.defs");
+        isSharedProject = Optional.of(ccfFile.isFile());
+        isDVCS=false;
+        if (isSharedProject.get()){
+            TeamSettingsController tsc = new TeamSettingsController(this);
+            isSharedProject = Optional.of(TeamSettingsController.isValidVCSfound(projectDir));
+            if (isSharedProject.get()){
+                isDVCS = tsc.isDVCS();
+            }
+        }
+        
+        teamActions = new TeamActionGroup(isSharedProject.get(), isDVCS);
     }
 
     /**
@@ -272,6 +328,7 @@ public class Project implements DebuggerListener, InspectorManager
      *            either be a directory name or the filename of a project
      *            file.
      */
+    @OnThread(Tag.Any)
     public static boolean isProject(String projectPath) 
     {
         File startingDir;
@@ -295,14 +352,11 @@ public class Project implements DebuggerListener, InspectorManager
      * @param projectPath
      *            a string representing the path to open. This can either be a
      *            directory name or the filename of a bluej.pkg file.
-     * @param parent 
-     *            Component used as parent if we need to show any messages.
-     *            Can be null.
      * @return the Project representing the BlueJ project that has this
      *         directory within it or null if there were no bluej.pkg files in
      *         the specified directory.
      */
-    public static Project openProject(String projectPath, Component parent) 
+    public static Project openProject(String projectPath)
     {
         String startingPackageName;
         File projectDir;
@@ -373,7 +427,7 @@ public class Project implements DebuggerListener, InspectorManager
             switch (capabilities) {
             case VIRTUALIZED_WRITE:
                 Utility.bringToFront(null);
-                DialogManager.showMessage(parent, "project-is-virtualized");
+                Platform.runLater(() -> DialogManager.showMessageFX(null, "project-is-virtualized"));
                 break;
             case READ_ONLY:
                 readOnly = true;
@@ -387,71 +441,78 @@ public class Project implements DebuggerListener, InspectorManager
         else if (!projectDir.canWrite()) {
             readOnly = true;
         }
-        
-        String greenfootStartupProjectDir = new File(Config.getBlueJLibDir(), "greenfoot/startupProject").getAbsolutePath();
-        
-        boolean isGreenfootStartupProject = greenfootStartupProjectDir.equals(projectDir.getAbsolutePath()); 
+
+        boolean isGreenfootStartupProject = Config.isGreenfootStartupProject(projectDir); 
         // Suppress the read-only warning if we know they are opening the Greenfoot startup project
         
         if (readOnly && !isGreenfootStartupProject) {
             Utility.bringToFront(null);
-            DialogManager.showMessageWithText(parent, "project-is-readonly", new String [] {projectDir.toString()});
-            
             // Prompt user to "Save elsewhere"
 
-            boolean done = false;
+            SecondaryLoop loop = Toolkit.getDefaultToolkit().getSystemEventQueue().createSecondaryLoop();
+            AtomicReference<File> projDir = new AtomicReference<>(projectDir);
+            Platform.runLater(() -> {
+                DialogManager.showMessageFX(null, "project-is-readonly", new String[]{projDir.get().toString()});
 
-            while (!done)
-            {
-                // Get a file name to save under
-                File newName = FileUtility.getDirName(null,
-                        Config.getString("pkgmgr.saveAs.title"),
-                        Config.getString("pkgmgr.saveAs.buttonLabel"),
-                        new JFileChooser().getFileSystemView().getDefaultDirectory(),
-                        false, true);
+                boolean done = false;
 
-                if (newName != null) {
-                    int result = FileUtility.copyDirectory(projectDir, newName);
+                while (!done)
+                {
+                    // Get a file name to save under
+                    File newName = FileUtility.getSaveProjectFX(null, Config.getString("pkgmgr.saveAs.title"));
 
-                    switch (result) {
-                    case FileUtility.NO_ERROR:
-                        // It worked, use this as the new project:
-                        projectDir = newName;
-                        done = true;
-                        break;
+                    if (newName != null) {
+                        int result = FileUtility.copyDirectory(projDir.get(), newName);
 
-                    case FileUtility.DEST_EXISTS_NOT_DIR:
-                        DialogManager.showError(null, "directory-exists-file");
-                        break;
-                    case FileUtility.DEST_EXISTS_NON_EMPTY:
-                        DialogManager.showError(null, "directory-exists-non-empty");
-                        break;
+                        switch (result) {
+                        case FileUtility.NO_ERROR:
+                            // It worked, use this as the new project:
+                            projDir.set(newName);
+                            done = true;
+                            break;
 
-                    case FileUtility.SRC_NOT_DIRECTORY:
-                    case FileUtility.COPY_ERROR:
-                        DialogManager.showError(null, "cannot-save-project");
+                        case FileUtility.DEST_EXISTS_NOT_DIR:
+                            DialogManager.showErrorFX(null, "directory-exists-file");
+                            break;
+                        case FileUtility.DEST_EXISTS_NON_EMPTY:
+                            DialogManager.showErrorFX(null, "directory-exists-non-empty");
+                            break;
 
-                        break;
+                        case FileUtility.SRC_NOT_DIRECTORY:
+                        case FileUtility.COPY_ERROR:
+                            DialogManager.showErrorFX(null, "cannot-save-project");
+
+                            break;
+                        }
+                    }
+                    else {
+                        done = true; // if they pressed cancel, just continue with old project
                     }
                 }
-                else {
-                    done = true; // if they pressed cancel, just continue with old project
-                }
-            }
+                loop.exit();
+            });
+
+            loop.enter();
+            projectDir = projDir.get();
         }
 
         // check whether it already exists
-        Project proj = (Project) projects.get(projectDir);
+        Project proj = projects.get(projectDir);
 
         if (proj == null) {
-            proj = new Project(projectDir);
+            try {
+                proj = new Project(projectDir);
 
             //if is shared project, check for svn working copy version.
-            if (proj.isTeamProject() && proj.getTeamSettingsController().getWorkingCopyVersion() != 1.6) {
-                DialogManager.showMessage(parent, "SVNWorkingCopyNot16");
+            if (proj.isTeamProject() && !proj.getTeamSettingsController().isDVCS() && proj.getTeamSettingsController().getWorkingCopyVersion() != 1.6) {
+                Platform.runLater(() -> DialogManager.showMessageFX(null, "SVNWorkingCopyNot16"));
             }
 
-            projects.put(projectDir, proj);
+                projects.put(projectDir, proj);
+            }
+            catch (IOException ioe) {
+                return null;
+            }
         }
 
         if (startingPackageName.equals("")) {
@@ -475,7 +536,10 @@ public class Project implements DebuggerListener, InspectorManager
         
         ExtensionsManager.getInstance().projectOpening(proj);
         DataCollector.projectOpened(proj, ExtensionsManager.getInstance().getLoadedExtensions(proj));
-        
+
+        proj.getImportScanner().startScanning();
+
+        PrefMgr.addRecentProject(proj.getProjectDir());
 
         return proj;
     }
@@ -489,10 +553,11 @@ public class Project implements DebuggerListener, InspectorManager
         DataCollector.projectClosed(project);
         
         if (project.hasExecControls()) {
-            project.getExecControls().dispose();
+            project.getExecControls().hide();
         }
 
         if (project.terminal != null) {
+            project.terminal.cleanup();
             project.terminal.dispose();
         }
         
@@ -500,26 +565,23 @@ public class Project implements DebuggerListener, InspectorManager
             project.statusFrame.dispose();
         }
 
-        project.removeAllInspectors();
+        Platform.runLater(() -> project.removeAllInspectors());
         project.getDebugger().removeDebuggerListener(project);
         project.getDebugger().close(false);
 
-        PrefMgr.addRecentProject(project.getProjectDir().getAbsolutePath());
         projects.remove(project.getProjectDir());
     }
 
     /**
      * Create a new project in the directory specified by projectPath.
      * This name must be a directory that does not already exist.
-     * For Java ME projects, create directory res/icons in the project folder,
-     * and copy the default icon file for midlets from lib/images into res/icons.
      *
      * @param   projectPath     a string representing the path in which
      *                          to make the new project
-     * @param   isJavaMEproj    whether or not the project is a Java Micro Edition project
      * @return                  a boolean indicating success or failure
      */
-    public static boolean createNewProject(String projectPath, boolean isJavaMEproj ) 
+    @OnThread(Tag.Any)
+    public static boolean createNewProject(String projectPath)
     {
         if (projectPath != null) {
             // check whether name is already in use
@@ -531,30 +593,22 @@ public class Project implements DebuggerListener, InspectorManager
 
             if (dir.exists() || dir.mkdir()) {
                 File newreadmeFile = new File(dir, Package.readmeName);
-                
-                if ( isJavaMEproj ) {
-                    File iconsDirectory = new File( dir, MIDletDeployer.ICONS_DIR );   
-                    if ( iconsDirectory.mkdirs( ) ) {                        
-                        File defaultMidletIconFile = new File( iconsDirectory, 
-                                                               MIDletDeployer.DEFAULT_MIDLET_ICON );
-                        File iconDefaultSource     = new File( Config.getBlueJLibDir( ), 
-                                                               MIDletDeployer.DEFAULT_LIB_ME_ICON );
-                        try {
-                            FileUtility.copyFile( iconDefaultSource, defaultMidletIconFile );
-                        }
-                        catch (IOException ioe) {
-                            Debug.reportError( "Could not copy default icon file into Project directory.");
-                        }
-                    } 
-                }
+
                 PackageFile pkgFile = PackageFileFactory.getPackageFile(dir);
                 try {
                     if (pkgFile.create()) {
                         Properties props = new Properties();
-                        props.put(PROJECT_CHARSET_PROP, "UTF-8");
-                        if (isJavaMEproj) {
-                            props.put(PROJECT_IS_JAVA_ME_PROP, "true");
+                        if (Config.isGreenfoot())
+                        {
+                            // Set the size to contain the default new world size, to avoid
+                            // annoying sizing up and down when loading a new project:
+                            props.put("mainWindow.width", "850");
+                            props.put("mainWindow.height", "600");
+                            // Must set x and y, or width and height don't take effect:
+                            props.put("mainWindow.x", "40");
+                            props.put("mainWindow.y", "40");
                         }
+                        props.put(PROJECT_CHARSET_PROP, "UTF-8");
                         try {
                             pkgFile.save(props);
                             FileUtility.copyFile(Config.getTemplateFile(
@@ -583,7 +637,7 @@ public class Project implements DebuggerListener, InspectorManager
     {
         return projects.size();
     }
-
+   
     /**
      * Gets the set of currently open projects. It is an accessor only.
      * @return a Set containing all open projects.
@@ -592,69 +646,13 @@ public class Project implements DebuggerListener, InspectorManager
     {
         return projects.values();
     }
-
+    
     /**
      * Given a Projects key returns the Project objects describing this projects.
      */
     public static Project getProject(File projectKey) 
     {
-        return (Project) projects.get(projectKey);
-    }
-   
-    /**
-     * Check whether the project is a Java Micro Edition project.
-     */
-    public boolean isJavaMEProject()
-    {
-        return isJavaMEproject;
-    }
-    
-    /**
-     * Get the character set that should be used for reading and writing source files
-     * in this project. 
-     */
-    public Charset getProjectCharset()
-    {
-        return characterSet;
-    }
-    
-    /**
-     * Get the project properties to be written to storage when the project is saved.
-     */
-    public Properties getProjectProperties()
-    {
-        Properties p = new Properties();
-        p.put(PROJECT_CHARSET_PROP, characterSet.name());
-        if (isJavaMEproject) {
-            p.put(PROJECT_IS_JAVA_ME_PROP, "true");
-        }
-        return p;
-    }
-    
-    /**
-     * Restore project properties (called just after project is opened). 
-     */
-    private void setProjectProperties(Properties props)
-    {
-        String charsetName = props.getProperty(PROJECT_CHARSET_PROP);
-        if (charsetName != null) {
-            try {
-                characterSet = Charset.forName(charsetName);
-            }
-            catch (IllegalCharsetNameException icne) {
-                Debug.log("Illegal project character set name: " + charsetName);
-            }
-            catch (UnsupportedCharsetException ucse) {
-                Debug.log("Unsupported project character set: " + charsetName);
-            }
-        }
-        if (characterSet == null) {
-            characterSet = Charset.defaultCharset();
-            props.put(PROJECT_CHARSET_PROP, characterSet.name());
-        }
-        
-        String isJavaMe = props.getProperty(PROJECT_IS_JAVA_ME_PROP, "false");
-        isJavaMEproject = isJavaMe.equals("true");
+        return projects.get(projectKey);
     }
     
     /**
@@ -664,6 +662,7 @@ public class Project implements DebuggerListener, InspectorManager
      * the file. Returns null if file is not a bluej.pkg file or if the
      * directory/file does not exist.
      */
+    @OnThread(Tag.Any)
     private static File pathIntoStartingDirectory(String projectPath)
         throws IOException 
     {
@@ -686,20 +685,124 @@ public class Project implements DebuggerListener, InspectorManager
 
         return null;
     }
+    
+    /**
+     * Attempts to add a library to the given list of libraries.
+     * A valid library file is one that is a file, readable, ends either with zip or jar.
+     * Before addition the file is transformed to a URL.
+     * @param risul where to add the file
+     * @param aFile the file to be added.
+     */
+    @OnThread(Tag.Any)
+    private static final void attemptAddLibrary (List<URL> risul, File aFile) 
+    {
+        if ( aFile == null ) return;
+        
+        // Is this a normal file and is it readable ?
+        if ( ! (aFile.isFile() && aFile.canRead()) ) return;
+        
+        String libname = aFile.getName().toLowerCase();
+        if ( ! (libname.endsWith(".jar") || libname.endsWith(".zip")) ) return;
+        
+        try {
+            risul.add(aFile.toURI().toURL());
+        }
+        catch(MalformedURLException mue) { 
+            Debug.reportError("Project.attemptAddLibrary() malformaed file="+aFile);
+        }
+    }
+    
+    /**
+     * Returns an array of URLs for all the JAR files located in the lib/userlib directory.
+     * The result is calculated every time the method is called, in this way it is possible
+     * to capture a change in the library content in a reasonable timing.
+     *
+     * @return  URLs of the discovered JAR files
+     */
+    @OnThread(Tag.Any)
+    public static final List<URL> getUserlibContent() 
+    {
+        List<URL> risul = new ArrayList<URL>();
+        File userLibDir;
+        
+        // The userlib location may be specified in bluej.defs
+        String userLibSetting = Config.getPropString("bluej.userlibLocation", null);
+        if (userLibSetting == null) {
+            userLibDir = new File(Boot.getBluejLibDir(), "userlib");
+        }
+        else {
+            userLibDir = new File(userLibSetting);
+        }
 
+        File[] files = userLibDir.listFiles();
+        if (files == null) {
+            return risul;
+        }
+        
+        for (int index = 0; index < files.length; index++) {
+            attemptAddLibrary(risul, files[index]);
+        }
+ 
+        return risul;
+    }
+
+    /**
+     * Get the character set that should be used for reading and writing source files
+     * in this project. 
+     */
+    public synchronized Charset getProjectCharset()
+    {
+        return characterSet;
+    }
+    
+    /**
+     * Get the project properties to be written to storage when the project is saved.
+     */
+    @OnThread(Tag.Any)
+    public synchronized Properties getProjectProperties()
+    {
+        Properties p = new Properties();
+        p.put(PROJECT_CHARSET_PROP, characterSet.name());
+        return p;
+    }
+
+    /**
+     * Restore project properties (called just after project is opened). 
+     */
+    private synchronized void setProjectProperties(Properties props)
+    {
+        String charsetName = props.getProperty(PROJECT_CHARSET_PROP);
+        if (charsetName != null) {
+            try {
+                characterSet = Charset.forName(charsetName);
+            }
+            catch (IllegalCharsetNameException icne) {
+                Debug.log("Illegal project character set name: " + charsetName);
+            }
+            catch (UnsupportedCharsetException ucse) {
+                Debug.log("Unsupported project character set: " + charsetName);
+            }
+        }
+        if (characterSet == null) {
+            characterSet = Charset.defaultCharset();
+            props.put(PROJECT_CHARSET_PROP, characterSet.name());
+        }
+    }
+    
     /**
      * Update an inspector, make sure it's visible, and bring it to
      * the front.
      * 
      * @param inspector  The inspector to update and show
      */
+    @OnThread(Tag.FXPlatform)
     private void updateInspector(final Inspector inspector)
     {
         inspector.update();
-        inspector.setVisible(true);
+        inspector.show();
         inspector.bringToFront();
     }
-    
+
     /**
      * Return an ObjectInspector for an object.
      *
@@ -708,23 +811,31 @@ public class Project implements DebuggerListener, InspectorManager
      * @param name
      *            The name of this object or "null" if the name is unobtainable
      * @param pkg
-     *            The package all this belongs to
+     *            The package all this belongs to (may be null)
      * @param ir
      *            the InvokerRecord explaining how we got this result/object if
      *            null, the "get" button is permanently disabled
      * @param parent
      *            The parent frame of this frame
+     * @param animateFromCentre If non-null, animate from the centre of this node.
      * @return The Viewer value
      */
+    @OnThread(Tag.FXPlatform)
     public ObjectInspector getInspectorInstance(DebuggerObject obj,
-        String name, Package pkg, InvokerRecord ir, JFrame parent) 
+                                                String name, Package pkg, InvokerRecord ir, Window parent, Node animateFromCentre)
     {
         ObjectInspector inspector = (ObjectInspector) inspectors.get(obj);
 
         if (inspector == null) {
             inspector = new ObjectInspector(obj, this, name, pkg, ir, parent);
             inspectors.put(obj, inspector);
-            inspector.setVisible(true);
+            if (animateFromCentre != null)
+            {
+                animateInspector(animateFromCentre, inspector, true);
+            }
+            inspector.show();
+
+            //org.scenicview.ScenicView.show(inspector.getScene());
         }
         else {
             updateInspector(inspector);
@@ -733,23 +844,74 @@ public class Project implements DebuggerListener, InspectorManager
         // See if it is on the bench:
         // (Also check pkg != null since the data collection mechanism can't deal with null pkg).
         if (! Config.isGreenfoot() && pkg != null) {
-            String benchName = null;
-            PkgMgrFrame pmf = PkgMgrFrame.findFrame(pkg);
-            if (pmf != null) {
-                for (ObjectWrapper ow : PkgMgrFrame.findFrame(pkg).getObjectBench().getObjects())
+            ObjectInspector inspectorFinal = inspector;            
+            SwingUtilities.invokeLater(() -> {
+                String benchName = null;
+                PkgMgrFrame pmf = PkgMgrFrame.findFrame(pkg);
+                if (pmf != null)
                 {
-                    if (ow.getObject().equals(obj)){
-                        benchName = ow.getName();
+                    for (ObjectWrapper ow : PkgMgrFrame.findFrame(pkg).getObjectBench().getObjects())
+                    {
+                        if (ow.getObject().equals(obj))
+                        {
+                            benchName = ow.getName();
+                        }
                     }
                 }
-            }
-
-            DataCollector.inspectorObjectShow(pkg, inspector, benchName, obj.getClassName(), name);
+                DataCollector.inspectorObjectShow(pkg, inspectorFinal, benchName, obj.getClassName(), name);
+            });
         }
 
         return inspector;
     }
-    
+
+    @OnThread(Tag.FXPlatform)
+    private void animateInspector(Node animateFromCentre, Inspector inspector, boolean fromBottom)
+    {
+        // First we must get the root and make sure it's sized for our later calculations:
+        Parent root = inspector.getContent();
+        root.applyCss();
+        root.layout();
+        
+        ScaleTransition t = null;
+        // Odd JavaFX behaviour on Linux messes up animation, so don't animate on Linux:
+        if (!Config.isLinux())
+        {
+            // Start it at zero size, animating to full size:
+            root.setScaleX(0.0);
+            root.setScaleY(0.0);
+            t = new ScaleTransition(Duration.millis(600), root);
+            t.setInterpolator(Interpolator.EASE_OUT);
+            t.setToX(1.0);
+            t.setToY(1.0);
+            // To animate from left, need to start at position -0.5 of width, then animate to 0.0
+            root.translateXProperty().bind(inspector.getScene().widthProperty().multiply(root.scaleXProperty().multiply(0.5).add(-0.5)));
+            if (fromBottom)
+            {
+                // To animate from bottom, need to start at position 0.5 of height, then animate to 0.0
+                root.translateYProperty().bind(inspector.getScene().heightProperty().multiply(root.scaleYProperty().multiply(-0.5).add(0.5)));
+            } else
+            {
+                // To animate from top, need to start at position -0.5 of height, then animate to 0.0
+                root.translateYProperty().bind(inspector.getScene().heightProperty().multiply(root.scaleYProperty().multiply(0.5).add(-0.5)));
+            }
+        }
+        // Position its bottom left at centre of animateFromCentre:
+        Scene afcScene = animateFromCentre.getScene();
+        final Point2D windowCoord = new Point2D(afcScene.getWindow().getX(), afcScene.getWindow().getY());
+        final Point2D sceneCoord = new Point2D(afcScene.getX(), afcScene.getY());
+        final Point2D nodeCoord = animateFromCentre.localToScene(animateFromCentre.getBoundsInLocal().getWidth()/2.0, animateFromCentre.getBoundsInLocal().getHeight()/2.0);
+        
+        // Set position:
+        inspector.setX(windowCoord.getX() + sceneCoord.getX() + nodeCoord.getX());
+        inspector.setY(windowCoord.getY() + sceneCoord.getY() + nodeCoord.getY() + (fromBottom ? -root.prefHeight(-1) : 0));
+        
+        if (t != null)
+        {
+            t.play();
+        }
+    }
+
     /**
      * Get the inspector for the given object. Object can be a DebuggerObject, or a
      * fully-qualified class name.
@@ -757,29 +919,32 @@ public class Project implements DebuggerListener, InspectorManager
      * @param obj  The object whose inspector to retrieve
      * @return the inspector, or null if no inspector is open
      */
+    @OnThread(Tag.FXPlatform)
     public Inspector getInspector(Object obj) 
     {
-        return (Inspector) inspectors.get(obj);
+        return inspectors.get(obj);
     }
 
     /**
      * Remove an inspector from the list of inspectors for this project
      * @param obj the inspector.
      */
+    @OnThread(Tag.FXPlatform)
     public void removeInspector(DebuggerObject obj) 
     {
         Inspector inspector = inspectors.remove(obj);
-        DataCollector.inspectorHide(this, inspector);
+        SwingUtilities.invokeLater(() -> DataCollector.inspectorHide(this, inspector));
     }
-    
+
     /**
      * Remove an inspector from the list of inspectors for this project
      * @param obj the inspector. 
      */
+    @OnThread(Tag.FXPlatform)
     public void removeInspector(DebuggerClass cls) 
     {
         Inspector inspector = inspectors.remove(cls.getName());
-        DataCollector.inspectorHide(this, inspector);
+        SwingUtilities.invokeLater(() -> DataCollector.inspectorHide(this, inspector));
     }
 
     /**
@@ -788,6 +953,7 @@ public class Project implements DebuggerListener, InspectorManager
      * then calls its doClose method.
      * @param obj
      */
+    @OnThread(Tag.FXPlatform)
     public void removeInspectorInstance(Object obj) 
     {
         Inspector inspect = getInspector(obj);
@@ -802,12 +968,12 @@ public class Project implements DebuggerListener, InspectorManager
      * This is used when VM is reset or the project is recompiled.
      *
      */
+    @OnThread(Tag.FXPlatform)
     public void removeAllInspectors() 
     {
         for (Inspector inspector : inspectors.values()) {
-            inspector.setVisible(false);
-            inspector.dispose();
-            DataCollector.inspectorHide(this, inspector);
+            inspector.hide();
+            SwingUtilities.invokeLater(() -> DataCollector.inspectorHide(this, inspector));
         }
 
         inspectors.clear();
@@ -816,21 +982,23 @@ public class Project implements DebuggerListener, InspectorManager
     /**
      * Return a ClassInspector for a class. The inspector is visible.
      *
-     * @param clss
-     *            The class displayed by this viewer
      * @param name
      *            The name of this object or "null" if it is not on the object
      *            bench
-     * @param pkg
-     *            The package all this belongs to
      * @param getEnabled
      *            if false, the "get" button is permanently disabled
+     * @param clss
+     *            The class displayed by this viewer
+     * @param pkg
+     *            The package all this belongs to
      * @param parent
      *            The parent frame of this frame
+     * @param animateFromCentre
      * @return The Viewer value
      */
+    @OnThread(Tag.FXPlatform)
     public ClassInspector getClassInspectorInstance(DebuggerClass clss,
-        Package pkg, JFrame parent) 
+                                                    Package pkg, Window parent, Node animateFromCentre)
     {
         ClassInspector inspector = (ClassInspector) inspectors.get(clss.getName());
 
@@ -838,13 +1006,16 @@ public class Project implements DebuggerListener, InspectorManager
             ClassInspectInvokerRecord ir = new ClassInspectInvokerRecord(clss.getName());
             inspector = new ClassInspector(clss, this, pkg, ir, parent);
             inspectors.put(clss.getName(), inspector);
-            inspector.setVisible(true);
+            if (animateFromCentre != null)
+                animateInspector(animateFromCentre, inspector, false);
+            inspector.show();
         }
         else {
             updateInspector(inspector);
         }
-        
-        DataCollector.inspectorClassShow(pkg, inspector, clss.getName());
+
+        ClassInspector inspectorFinal = inspector;
+        SwingUtilities.invokeLater(() -> DataCollector.inspectorClassShow(pkg, inspectorFinal, clss.getName()));
 
         return inspector;
     }
@@ -867,24 +1038,27 @@ public class Project implements DebuggerListener, InspectorManager
      *            The parent frame of this frame
      * @return The Viewer value
      */
+    @OnThread(Tag.FXPlatform)
     public ResultInspector getResultInspectorInstance(DebuggerObject obj,
         String name, Package pkg, InvokerRecord ir, ExpressionInformation info,
-        JFrame parent) 
+        javafx.stage.Window parent)
     {
         final ResultInspector inspector = new ResultInspector(obj, this, name, pkg, ir, info);
         inspectors.put(obj, inspector);
 
-        DialogManager.centreWindow(inspector, parent);
-        inspector.setVisible(true);
+        inspector.initOwner(parent);
+        inspector.centerOnOwner();
+        inspector.show();
         inspector.bringToFront();
 
         return inspector;
     }
-
+    
     /**
      * Iterates through all inspectors and updates them
      *
      */
+    @OnThread(Tag.FXPlatform)
     public void updateInspectors() 
     {
         for (Iterator<Inspector> it = inspectors.values().iterator(); it.hasNext();) {
@@ -892,10 +1066,11 @@ public class Project implements DebuggerListener, InspectorManager
             inspector.update();
         }
     }
-
+        
     /**
      * Return the name of the project.
      */
+    @OnThread(Tag.Any)
     public String getProjectName() 
     {
         return projectDir.getName();
@@ -904,6 +1079,7 @@ public class Project implements DebuggerListener, InspectorManager
     /**
      * Return the location of the project.
      */
+    @OnThread(Tag.Any)
     public File getProjectDir() 
     {
         return projectDir;
@@ -918,29 +1094,35 @@ public class Project implements DebuggerListener, InspectorManager
     {
         return sourcePath;
     }
-    
+
     /**
      * Get the project repository. If the user cancels the credentials dialog,
      * or this is not a team project, returns null.
      */
     public Repository getRepository()
     {
-        if (isSharedProject) {
+        boolean shared;
+        synchronized (this)
+        {
+            shared = isSharedProject.orElse(false);
+        }
+        if (shared) {
             return getTeamSettingsController().getRepository(true);
         }
         else {
             return null;
         }
     }      
-        
+
     /**
      * A string which uniquely identifies this project
      */
+    @OnThread(Tag.Any)
     public String getUniqueId() 
     {
         return String.valueOf(new String("BJID" + getProjectDir().getPath()).hashCode());
     }
-
+    
     /**
      * Get the name of the package represented by the directory which was specified
      * as the directory to open when this project was opened.
@@ -950,6 +1132,15 @@ public class Project implements DebuggerListener, InspectorManager
         return initialPackageName;
     }
 
+    /**
+     * Get a reference to the "unnamed" package
+     */
+    @OnThread(Tag.Any)
+    public Package getUnnamedPackage()
+    {
+        return unnamedPackage;
+    }
+    
     /**
      * Get an existing package from the project. The package is opened (i.e a new
      * Package object is constructed) if it's not already open. All parent packages on
@@ -997,9 +1188,6 @@ public class Project implements DebuggerListener, InspectorManager
         throw new IllegalStateException("Project.getPackage()");
     }
 
-
-    private BProject singleBProject;  // Every Project has none or one BProject
-    
     /**
      * Return the extensions BProject associated with this Project.
      * There should be only one BProject object associated with each Project.
@@ -1012,7 +1200,6 @@ public class Project implements DebuggerListener, InspectorManager
           
         return singleBProject;
     }
-
 
     /**
      * Returns a package from the project. The package must have already been
@@ -1132,17 +1319,9 @@ public class Project implements DebuggerListener, InspectorManager
     private List<String> getPackageNames(Package rootPackage)
     {
         List<String> l = new LinkedList<String>();
-        List<Package> children;
 
         l.add(rootPackage.getQualifiedName());
-
-        children = rootPackage.getChildren(true);
-        Iterator<Package> i = children.iterator();
-        
-        while (i.hasNext()) {
-            Package p = i.next();
-            l.addAll(getPackageNames(p));
-        }
+        rootPackage.getChildren(true).forEach(p -> l.addAll(getPackageNames(p)));
 
         return l;
     }
@@ -1180,7 +1359,7 @@ public class Project implements DebuggerListener, InspectorManager
     {
         docuGenerator.generateClassDocu(filename);
     }
-
+    
     /**
      * Save all open packages of this project. This doesn't save files open
      * in editor windows - use saveAllEditors() for that.
@@ -1193,9 +1372,10 @@ public class Project implements DebuggerListener, InspectorManager
             return;
         }
 
-        for (int i = 0; i < frames.length; i++) {
-            frames[i].doSave();
-            frames[i].setStatus(Config.getString("pkgmgr.packageSaved"));
+        for (PkgMgrFrame frame : frames)
+        {
+            Platform.runLater(() -> frame.doSave());
+            frame.setStatus(Config.getString("pkgmgr.packageSaved"));
         }
     }
 
@@ -1209,7 +1389,7 @@ public class Project implements DebuggerListener, InspectorManager
         IOException exception = null;
 
         while(i.hasNext()) {
-            Package pkg = (Package) i.next();
+            Package pkg = i.next();
             try {
                 pkg.saveFilesInEditors();
             }
@@ -1233,29 +1413,15 @@ public class Project implements DebuggerListener, InspectorManager
      */
     public void reloadAll()
     {
-        Iterator<Package> i = packages.values().iterator();
-
-        while (i.hasNext()) {
-            Package pkg = (Package) i.next();
-
-            pkg.reload();
-        }
+        packages.values().forEach(Package::reload);
     }
-
+    
     /**
      * Make all open package editors clear their selection
      */
     public void clearAllSelections()
     {
-        Iterator<Package> i = packages.values().iterator();
-
-        while(i.hasNext()) {
-            Package pkg = (Package) i.next();
-            PackageEditor editor = pkg.getEditor();
-            if (editor != null){
-                editor.clearSelection();
-            }
-        }
+        packages.values().stream().map(Package::getEditor).forEach(PackageEditor::clearSelection);
     }
     
     /**
@@ -1270,8 +1436,10 @@ public class Project implements DebuggerListener, InspectorManager
             Target target = i.next();
             if (target != null){
                 PackageEditor packageEditor = target.getPackage().getEditor();
-                packageEditor.addToSelection(target);
-                packageEditor.repaint();
+                Platform.runLater(() -> {
+                    packageEditor.addToSelection(target);
+                    packageEditor.repaint();
+                });
             }
         }
     }
@@ -1323,7 +1491,7 @@ public class Project implements DebuggerListener, InspectorManager
             }
         }
     }
-    
+
     /**
      * Get a list of selected targets (in all packages)
      * @return a list of the selected targets
@@ -1332,14 +1500,13 @@ public class Project implements DebuggerListener, InspectorManager
     {
         List<Target> selectedTargets = new LinkedList<Target>();
         List<String> packageNames = getPackageNames();
-        for (Iterator<String> i = packageNames.iterator(); i.hasNext();) {
-            String packageName = i.next();
+        for (String packageName : packageNames) {
             Package p = getPackage(packageName);
-            selectedTargets.addAll(Arrays.asList(p.getSelectedTargets()));
+            selectedTargets.addAll(p.getSelectedTargets());
         }
         return selectedTargets;
     }
-    
+
     /**
      * Explicitly restart the remote debug VM. The VM first gets shut down, and then
      * restarted.
@@ -1358,15 +1525,10 @@ public class Project implements DebuggerListener, InspectorManager
     {
         BlueJEvent.raiseEvent(BlueJEvent.CREATE_VM_DONE, null);
         
-        Package pkg = null;
-        Iterator<Package> i = packages.values().iterator();
-        while (i.hasNext()) {
-            pkg = (Package) i.next();
-            pkg.reInitBreakpoints();           
-        }
-        PkgMgrFrame frame = PkgMgrFrame.getMostRecent();
+        packages.values().forEach(Package::reInitBreakpoints);
+        PkgMgrFrame frame = PkgMgrFrame.findFrame(getUnnamedPackage());
         if (frame != null) {
-            Utility.bringToFront(frame);
+            frame.bringToFront();
         }        
     }
 
@@ -1408,7 +1570,7 @@ public class Project implements DebuggerListener, InspectorManager
 
         // get rid of any inspectors that are open that were not cleaned up
         // as part of removing objects from the bench
-        removeAllInspectors();
+        Platform.runLater(() -> removeAllInspectors());
 
         // remove views for classes loaded by this classloader
         View.removeAll(currentClassLoader);
@@ -1433,10 +1595,15 @@ public class Project implements DebuggerListener, InspectorManager
     {
         // remove bench objects for all frames in this project
         PkgMgrFrame[] frames = PkgMgrFrame.getAllProjectFrames(this);
-
-        for (int i = 0; i < frames.length; i++) {
-            frames[i].getObjectBench().removeAllObjects(getUniqueId());
-            frames[i].clearTextEval();
+        if (frames != null) {
+            for (PkgMgrFrame frame : frames)
+            {
+                ObjectBench bench = frame.getObjectBench();
+                Platform.runLater(() -> {
+                    bench.removeAllObjects(getUniqueId());
+                    frame.clearTextEval();
+                });
+            }
         }
     }
 
@@ -1455,14 +1622,10 @@ public class Project implements DebuggerListener, InspectorManager
     public void newRemoteClassLoaderLeavingBreakpoints()
     {
         getDebugger().newClassLoader(getClassLoader());
-
-        Iterator<Package> i = packages.values().iterator();
-        while (i.hasNext()) {
-            Package pkg = (Package) i.next();
-            pkg.reInitBreakpoints();
-        }
+        packages.values().forEach(Package::reInitBreakpoints);
     }
 
+    @OnThread(Tag.Any)
     public Debugger getDebugger()
     {
         return debugger;
@@ -1478,7 +1641,6 @@ public class Project implements DebuggerListener, InspectorManager
         if (execControls == null) {
             execControls = new ExecControls(this, getDebugger());
         }
-
         return execControls;
     }
 
@@ -1492,7 +1654,6 @@ public class Project implements DebuggerListener, InspectorManager
         if (terminal == null) {
             terminal = new Terminal(this);
         }
-
         return terminal;
     }
 
@@ -1516,62 +1677,27 @@ public class Project implements DebuggerListener, InspectorManager
             return null;
         }
     }
-
-    public boolean inTestMode()
+    
+    @OnThread(value = Tag.Any, ignoreParent = true)
+    public synchronized boolean inTestMode()
     {
         return inTestMode;
     }
-
-    public void setTestMode(boolean mode)
+        
+    public synchronized void setTestMode(boolean mode)
     {
         inTestMode = mode;
     }
-  
-    /**
-     * Return a list of URL of the Java ME libraries specified in the 
-     * configuration files. The libraries are physically located in the 'lib'  
-     * subdirectory of the Wireless Toolkit directory. 
-     * @param type   "optional" or "core", the type of libraries to process
-     * @return a non null but possibly empty list of URL.
-     */
-    protected List<URL> getJavaMELibraries( String type ) 
-    {
-        List<URL> risul = new ArrayList<URL>( );
-        String toolkitDir = Config.getPropString( "bluej.javame.toolkit.dir", null );
-        
-        String libs;   //string of java me libraries to parse
-        if ( type.equals( "core" ) )
-            libs = Config.getPropString( "bluej.javame.corelibraries", null );
-        else if ( type.equals( "optional" ) )
-            libs = Config.getPropString( "bluej.javame.optlibraries", null );
-        else
-            libs = null;
-        
-        if ( toolkitDir != null  &&  libs != null )
-        {            
-            String libDir = toolkitDir + File.separator + "lib" + File.separator;
-            StringTokenizer st = new StringTokenizer( libs );
-            while ( st.hasMoreTokens( ) ) {
-                try {
-                    File file = new File( libDir + st.nextToken( ) );
-                    risul.add( file.toURI( ).toURL( ) );
-                }
-                catch( MalformedURLException mue ) { 
-                    Debug.reportError( st.nextToken( ) + " is a Java ME malformed file." );
-                }
-            }
-        }  
-        return risul;
-    }
-        
+
     /**
      * Returns a list of URL having in it all libraries that are in the +libs directory
      * of this project.
      * @return a non null but possibly empty list of URL.
      */
-    protected ArrayList<URL> getPlusLibsContent () 
+    @OnThread(Tag.Any)
+    protected List<URL> getPlusLibsContent () 
     {
-        ArrayList<URL> risul = new ArrayList<URL>();
+        List<URL> risul = new ArrayList<URL>();
         
         // the subdirectory of the project which can hold project specific jars and zips
         File libsDirectory = new File(projectDir, projectLibDirName);
@@ -1593,65 +1719,6 @@ public class Project implements DebuggerListener, InspectorManager
         }
         return risul;
     }
-    
-    /**
-     * Attempts to add a library to the given list of libraries.
-     * A valid library file is one that is a file, readable, ends either with zip or jar.
-     * Before addition the file is transformed to a URL.
-     * @param risul where to add the file
-     * @param aFile the file to be added.
-     */
-    private static final void attemptAddLibrary ( ArrayList<URL> risul, File aFile ) 
-    {
-        if ( aFile == null ) return;
-        
-        // Is this a normal file and is it readable ?
-        if ( ! (aFile.isFile() && aFile.canRead()) ) return;
-        
-        String libname = aFile.getName().toLowerCase();
-        if ( ! (libname.endsWith(".jar") || libname.endsWith(".zip")) ) return;
-        
-        try {
-            risul.add(aFile.toURI().toURL());
-        }
-        catch(MalformedURLException mue) { 
-            Debug.reportError("Project.attemptAddLibrary() malformaed file="+aFile);
-        }
-    }
-      
-
-    /**
-     * Returns an array of URLs for all the JAR files located in the lib/userlib directory.
-     * The result is calculated every time the method is called, in this way it is possible
-     * to capture a change in the library content in a reasonable timing.
-     *
-     * @return  URLs of the discovered JAR files
-     */
-    public static final ArrayList<URL> getUserlibContent() 
-    {
-        ArrayList<URL> risul = new ArrayList<URL>();
-        File userLibDir;
-        
-        // The userlib location may be specified in bluej.defs
-        String userLibSetting = Config.getPropString("bluej.userlibLocation", null);
-        if (userLibSetting == null) {
-            userLibDir = new File(Boot.getBluejLibDir(), "userlib");
-        }
-        else {
-            userLibDir = new File(userLibSetting);
-        }
-
-        File[] files = userLibDir.listFiles();
-        if (files == null) {
-            return risul;
-        }
-        
-        for (int index = 0; index < files.length; index++) {
-            attemptAddLibrary(risul, files[index]);
-        }
- 
-        return risul;
-    }
 
     /**
      * Return a ClassLoader that should be used to load or reflect on the project classes.
@@ -1665,10 +1732,7 @@ public class Project implements DebuggerListener, InspectorManager
         if (currentClassLoader != null)
             return currentClassLoader;
        
-        ArrayList<URL> pathList = new ArrayList<URL>();
-        
-        List<URL> coreLibs = new ArrayList<URL>(); //Java ME core libraries
-        List<URL> optLibs  = new ArrayList<URL>(); //java ME optional libraries
+        List<URL> pathList = new ArrayList<URL>();
 
         try {
             Collections.addAll(pathList, Boot.getInstance().getRuntimeUserClassPath());
@@ -1677,14 +1741,6 @@ public class Project implements DebuggerListener, InspectorManager
             
             // The current project dir must be added to the project class path too.
             pathList.add(getProjectDir().toURI().toURL());
-            
-            //Add Java ME jars if this is a Java ME project. 
-            if ( isJavaMEproject ) { 
-                coreLibs = getJavaMELibraries( "core"     ) ;
-                optLibs  = getJavaMELibraries( "optional" ) ;                
-                pathList.addAll( coreLibs );  
-                pathList.addAll( optLibs );         
-            }
         }
         catch ( Exception exc ) {
             // Should never happen
@@ -1692,16 +1748,13 @@ public class Project implements DebuggerListener, InspectorManager
             exc.printStackTrace();
         }
 
-        URL [] newUrls = (URL [])pathList.toArray(new URL[pathList.size()]);
+        URL [] newUrls = pathList.toArray(new URL[pathList.size()]);
         
         // The Project Class Loader should not see the BlueJ classes (the necessary
         // ones have been added to the URL list anyway). So we use the boot loader
         // as parent.
         currentClassLoader = new BPClassLoader( newUrls,
-                     Boot.getInstance().getBootClassLoader(), isJavaMEproject );
-        
-        currentClassLoader.setJavaMEcoreLibs(coreLibs);
-        currentClassLoader.setJavaMEoptLibs (optLibs);
+                     Boot.getInstance().getBootClassLoader());
         
         return currentClassLoader;
     }
@@ -1715,10 +1768,10 @@ public class Project implements DebuggerListener, InspectorManager
      */
     private List<URL> getLibrariesClasspath()
     {
-        ArrayList<URL> pathList = new ArrayList<URL>();
+        List<URL> pathList = new ArrayList<URL>();
         
         // Next part is the libraries that are added trough the config panel.
-        pathList.addAll(PrefMgrDialog.getInstance().getUserConfigLibPanel().getUserConfigContent());
+        pathList.addAll(ClassMgrPrefPanel.getUserConfigContent());
         
         // Then the libraries that are in the userlib directory
         pathList.addAll(getUserlibContent());
@@ -1743,6 +1796,7 @@ public class Project implements DebuggerListener, InspectorManager
     /**
      * Get a javadoc resolver, which can be used to retrieve comments for methods.
      */
+    @OnThread(Tag.Any)
     public JavadocResolver getJavadocResolver()
     {
         return javadocResolver;
@@ -1766,14 +1820,7 @@ public class Project implements DebuggerListener, InspectorManager
     public void removeStepMarks() 
     {
         // remove step marks for all packages
-        Iterator<Package> i = packages.values().iterator();
-
-        while (i.hasNext()) {
-            Package pkg = (Package) i.next();
-            pkg.removeStepMarks();
-        }
-
-        return;
+        packages.values().forEach(Package::removeStepMarks);
     }
 
     // ---- DebuggerListener interface ----
@@ -1782,6 +1829,7 @@ public class Project implements DebuggerListener, InspectorManager
      * A debugger event was fired. Analyse which event it was, and take
      * appropriate action.
      */
+    @OnThread(Tag.Any)
     public void processDebuggerEvent(final DebuggerEvent event, boolean skipUpdate)
     {
         if (skipUpdate) {
@@ -1867,12 +1915,12 @@ public class Project implements DebuggerListener, InspectorManager
     /**
      * Show the source code at a particular position
      */
-    public void showSource(String className, String sourceName, int lineNumber)
+    public void showSource(DebuggerThread thread, String className, String sourceName, int lineNumber)
     {
         String packageName = JavaNames.getPrefix(className);
         Package pkg = getPackage(packageName);
         if (pkg != null) {
-            pkg.showSourcePosition(sourceName, lineNumber);
+            pkg.showSourcePosition(thread, sourceName, lineNumber);
         }
     }
 
@@ -1896,12 +1944,7 @@ public class Project implements DebuggerListener, InspectorManager
     {
         Package pkg = packages.get(packageQualifiedName);
         if (pkg != null) {
-            List<Package> childPackages = pkg.getChildren(false);
-            Iterator<Package> i = childPackages.iterator();
-            while (i.hasNext()) {
-                Package childPkg = (Package) i.next();
-                removePackage(childPkg.getQualifiedName());
-            }
+            pkg.getChildren(false).forEach(childPkg -> removePackage(childPkg.getQualifiedName()));
             packages.remove(packageQualifiedName);
         }
     }
@@ -1922,23 +1965,27 @@ public class Project implements DebuggerListener, InspectorManager
      * team.defs
      * @return true if the project is a team project
      */
+    @OnThread(Tag.Any)
     public boolean isTeamProject()
     {
-        if (this.isSharedProject == null){
+        // This method may be called before we've checked, in which
+        // case we check ourselves but don't record this:
+        Optional<Boolean> shared;
+        synchronized (this)
+        {
+            shared = this.isSharedProject;
+        }
+        if (!shared.isPresent()){
             //checks if it is a valid team project
             File ccfFile = new File(projectDir.getAbsoluteFile(), "team.defs");
             if (ccfFile.isFile()){
                 //checks for valid vcs config.
-                if (TeamSettingsController.isValidVCSfound(projectDir)){
-                    return true;
-                } else {
-                    return false;
-                }
+                return TeamSettingsController.isValidVCSfound(projectDir);
             } else {
                 return false;
             }
         }
-        return isSharedProject;
+        return shared.get();
     }
 
     /**
@@ -1963,10 +2010,29 @@ public class Project implements DebuggerListener, InspectorManager
      */
     public TeamSettingsController getTeamSettingsController()
     {
-        if(teamSettingsController == null && isSharedProject) {
+        boolean shared;
+        synchronized (this)
+        {
+            shared = isSharedProject.orElse(false);
+        }
+        if(teamSettingsController == null && shared) {
             teamSettingsController = new TeamSettingsController(this);
         }
         return teamSettingsController;
+    }
+
+    /**
+     * Set the team settings controller for this project. This makes the
+     * project a shared project (unless the controller is null).
+     */
+    public void setTeamSettingsController(TeamSettingsController tsc)
+    {
+        teamSettingsController = tsc;
+        if (tsc != null) {
+            tsc.setProject(this);
+            tsc.writeToProject();
+        }
+        setProjectShared (tsc != null);
     }
 
     /**
@@ -1996,7 +2062,7 @@ public class Project implements DebuggerListener, InspectorManager
             }
         }
     }
-
+    
     /**
      * Get the team settings dialog for this project. Only call this if the
      * project is a shared project.
@@ -2009,15 +2075,20 @@ public class Project implements DebuggerListener, InspectorManager
     /**
      * Get the commit dialog for this project
      */
-    public CommitCommentsFrame getCommitCommentsDialog()
+    public CommitAndPushInterface getCommitCommentsDialog()
     {
         // lazy instantiation of commit comments frame
-        if(commitCommentsFrame == null) {
-            commitCommentsFrame = new CommitCommentsFrame(this);
+        if (commitCommentsFrame == null) {
+            if (this.teamSettingsController.isDVCS()) {
+                //a dcvs repository uses a different window.
+                commitCommentsFrame = new CommitAndPushFrame(this);
+            } else {
+                commitCommentsFrame = new CommitCommentsFrame(this);
+            }
         }
         return commitCommentsFrame;
     }
-    
+        
     /**
      * Get the update dialog for this project
      */
@@ -2028,14 +2099,22 @@ public class Project implements DebuggerListener, InspectorManager
         }
         return updateFilesFrame;
     }
-        
+    
     /**
      * Set this project as either shared or non-shared.
      */
     private void setProjectShared(boolean shared)
     {
-        isSharedProject = shared;
-        teamActions.setTeamMode(shared);
+        synchronized (this)
+        {
+            isSharedProject = Optional.of(shared);
+        }
+        //check if it is a dcvs.
+        if (shared){
+            TeamSettingsController tsc = new TeamSettingsController(this);
+            isDVCS = tsc.isDVCS();
+        }
+        teamActions.setTeamMode(PkgMgrFrame.findFrame(getUnnamedPackage()), shared, isDVCS);
         
         PkgMgrFrame[] frames = PkgMgrFrame.getAllProjectFrames(this);
         if (frames != null) {
@@ -2080,30 +2159,16 @@ public class Project implements DebuggerListener, InspectorManager
         
         return packageName;
     }
-    
-    
-    /**
-     * Set the team settings controller for this project. This makes the
-     * project a shared project (unless the controller is null).
-     */
-    public void setTeamSettingsController(TeamSettingsController tsc)
-    {
-        teamSettingsController = tsc;
-        if (tsc != null) {
-            tsc.setProject(this);
-            tsc.writeToProject();
-        }
-        setProjectShared (tsc != null);
-    }
 
     /**
      * return the associated status window
      */
-    public StatusFrame getStatusWindow(Window parent)
+    public StatusFrame getStatusWindow(FXPlatformSupplier<javafx.stage.Window> parent)
     {
         if(statusFrame == null) {
             statusFrame = new StatusFrame(this);
-            statusFrame.setLocationRelativeTo(parent);
+            final StatusFrame f = this.statusFrame;
+            Platform.runLater(() -> f.setLocationRelativeTo(parent.get()));
         }
         return statusFrame;
     }
@@ -2137,12 +2202,239 @@ public class Project implements DebuggerListener, InspectorManager
         }
     }
 
-    /*
-     * @see bluej.debugger.DebuggerListener#examineDebuggerEvent(bluej.debugger.DebuggerEvent)
+    /**
+     * Gets the FXTabbedEditor which should be used for adding new tabs
      */
-    @Override
-    public boolean examineDebuggerEvent(DebuggerEvent e)
+    @OnThread(Tag.FX)
+    public FXTabbedEditor getDefaultFXTabbedEditor()
     {
-        return false;
+        return fXTabbedEditors.get(0);
+    }
+
+    public boolean isClosing()
+    {
+        return closing;
+    }
+
+    public void setClosing(boolean closing)
+    {
+        this.closing = closing;
+    }
+
+    @OnThread(Tag.Any)
+    public synchronized void scheduleCompilation(boolean immediate, CompileReason reason, CompileType type, Package pkg)
+    {
+        scheduleCompilation(immediate, reason, type, pkg, null);
+    }
+    
+    @OnThread(Tag.Any)
+    public synchronized void scheduleCompilation(boolean immediate, CompileReason reason, CompileType type, ClassTarget target)
+    {
+        scheduleCompilation(immediate, reason, type, null, target);
+    }
+
+    /**
+     * Schedules a compilation within the project, of the given package (if not null) and/or the given target (if not null)
+     * @param immediate Whether to compile right now, or whether to compile after 1 seconds (this timer will be extended by
+     *                  every later call of scheduleCompilation to 1s again)
+     * @param reason Why we are compiling (used for Blackbox data collection)
+     * @param type The type of compilation (used for deciding whether to keep class files, whether to open editors to show errors)
+     * @param pkg The package in which to compile all targets (or null if don't want full-package compilation)
+     * @param target The target to compile (or null if you don't want specific target compiled)
+     *               
+     * Note: only one of pkg or target should be non-null.                  
+     */
+    @OnThread(Tag.Any)
+    private synchronized void scheduleCompilation(boolean immediate, CompileReason reason, CompileType type, Package pkg, ClassTarget target)
+    {
+        if (immediate)
+        {
+            // Take this package and target out of the list to compile later on:
+            if (compilerTimer != null) {
+                if (pkg != null)
+                    scheduledPkgs.remove(pkg);
+                if (target != null)
+                    scheduledTargets.remove(target);
+                // If nothing else to compile, cancel scheduled:
+                if (scheduledPkgs.isEmpty() && scheduledTargets.isEmpty()) {
+                    compilerTimer.stop();
+                }
+            }
+
+            // We must use invokeLater, even if already on event queue,
+            // to make sure all actions are resolved (e.g. auto-indent post-newline)
+            if (pkg != null)
+                EventQueue.invokeLater(() -> pkg.compileOnceIdle(null, reason, type));
+            else if (target != null)
+                EventQueue.invokeLater(() -> target.getPackage().compileOnceIdle(target, reason, type));
+        }
+        else
+        {
+            if (pkg != null)
+                scheduledPkgs.add(pkg);
+            if (target != null)
+                scheduledTargets.add(target);
+
+            latestCompileReason.set(reason);
+            latestCompileType.set(type);
+            if (compilerTimer != null)
+            {
+                // Re-use existing timer, to avoid lots of reallocation:
+                compilerTimer.restart();
+            }
+            else
+            {
+                ActionListener listener = e -> {
+                    Set<Package> pkgsToCompile;
+                    Set<ClassTarget> targetsToCompile;
+
+                    synchronized (Project.this)
+                    {
+                        // Avoid holding Project lock for too long by making a copy of the
+                        // lock-protected set now:
+                        pkgsToCompile = scheduledPkgs;
+                        scheduledPkgs = new HashSet<>();
+                        targetsToCompile = scheduledTargets;
+                        scheduledTargets = new HashSet<>();
+                    }
+
+                    for (Package p : pkgsToCompile)
+                    {
+                        p.compileOnceIdle(null, latestCompileReason.get(), latestCompileType.get());
+                    }
+                    for (ClassTarget t : targetsToCompile)
+                    {
+                        t.getPackage().compileOnceIdle(t, latestCompileReason.get(), latestCompileType.get());
+                    }
+                };
+                compilerTimer = new Timer(1000, listener);
+                compilerTimer.setRepeats(false);
+                compilerTimer.start();
+            }
+        }
+    }
+
+    @OnThread(Tag.Any)
+    public synchronized ImportScanner getImportScanner()
+    {
+        // We don't construct one until asked:
+        if (importScanner == null)
+            importScanner = new ImportScanner(this);
+        return importScanner;
+    }
+
+    /**
+     * Warning: this method executes on Swing thread, and expects to be able
+     * to wait for the FX thread.
+     */
+    @OnThread(Tag.FXPlatform)
+    public FXTabbedEditor createNewFXTabbedEditor()
+    {
+        FXTabbedEditor ed = new FXTabbedEditor(Project.this, recallFxPosition(fXTabbedEditors.size()));
+        ed.initialise();
+        fXTabbedEditors.add(ed);
+        fXTabbedEditors.forEach(FXTabbedEditor::updateMoveMenus);
+        return ed;
+    }
+
+    @OnThread(Tag.FX)
+    public List<FXTabbedEditor> getAllFXTabbedEditorWindows()
+    {
+        return Collections.unmodifiableList(fXTabbedEditors);
+    }
+
+    @OnThread(Tag.FX)
+    public void removeFXTabbedEditor(FXTabbedEditor fxTabbedEditor)
+    {
+        // Update size cache.  Just update the one being removed, by putting
+        // at the position where the next open editor will take from:
+        // Make it long enough to contain such an element:
+        while (fxCachedEditorSizes.size() < fXTabbedEditors.size())
+            fxCachedEditorSizes.add(0, null);
+        fxCachedEditorSizes.set(fXTabbedEditors.size() - 1, new Rectangle(fxTabbedEditor.getX(), fxTabbedEditor.getY(), fxTabbedEditor.getWidth(), fxTabbedEditor.getHeight()));
+
+        // Only remove if we have other windows left, otherwise retain the last window standing:
+        if (fXTabbedEditors.size() > 1)
+        {
+            fxTabbedEditor.cleanup();
+            fXTabbedEditors.remove(fxTabbedEditor);
+        }
+        // Update the move menus to remove the closed window as a move target:
+        fXTabbedEditors.forEach(FXTabbedEditor::updateMoveMenus);
+    }
+
+    @OnThread(Tag.FXPlatform)
+    public void saveEditorLocations(Properties props)
+    {
+        for (int i = 0; i < fXTabbedEditors.size(); i++)
+        {
+            saveEditorLocation(props, fXTabbedEditors.get(i), "editor.fx." + i);
+        }
+        // Also put out the cached sizes after the end of the editors:
+        for (int i = fXTabbedEditors.size(); i < fxCachedEditorSizes.size(); i++)
+        {
+            saveEditorLocation(props, fxCachedEditorSizes.get(i), "editor.fx." + i);
+        }
+    }
+
+    @OnThread(Tag.FXPlatform)
+    private void saveEditorLocation(Properties props, FXTabbedEditor editor, String prefix)
+    {
+        props.put(prefix + ".x", String.valueOf(editor.getX()));
+        props.put(prefix + ".y", String.valueOf(editor.getY()));
+        props.put(prefix + ".width", String.valueOf(editor.getWidth()));
+        props.put(prefix + ".height", String.valueOf(editor.getHeight()));
+    }
+
+    @OnThread(Tag.FXPlatform)
+    private void saveEditorLocation(Properties props, Rectangle rect, String prefix)
+    {
+        if (rect == null)
+            return;
+
+        props.put(prefix + ".x", String.valueOf(rect.x));
+        props.put(prefix + ".y", String.valueOf(rect.y));
+        props.put(prefix + ".width", String.valueOf(rect.width));
+        props.put(prefix + ".height", String.valueOf(rect.height));
+    }
+
+    public void setAllEditorStatus(String status)
+    {
+        Platform.runLater(() -> fXTabbedEditors.forEach(fte -> fte.setTitleStatus(status)));
+    }
+
+    @OnThread(Tag.Any)
+    private Rectangle recallPosition(String prefix, List<Rectangle> cache, int index)
+    {
+        // First check if we have a cache since we've been opened:
+        if (index < cache.size() && cache.get(index) != null) {
+            return cache.get(index);
+        }
+
+        // Add the number on:
+        Properties props = unnamedPackage.getLastSavedProperties();
+        prefix = prefix + "." + index;
+        int x = Integer.parseInt(props.getProperty(prefix +  ".x", "-1"));
+        int y = Integer.parseInt(props.getProperty(prefix + ".y", "-1"));
+        int width = Integer.parseInt(props.getProperty(prefix + ".width", "-1"));
+        int height = Integer.parseInt(props.getProperty(prefix + ".height", "-1"));
+        if (x >= 0 && y >= 0 && width > 100 && height > 100) {
+            return new Rectangle(x, y, width, height);
+        }
+        else {
+            return null;
+        }
+    }
+    
+    @OnThread(Tag.FX)
+    private Rectangle recallFxPosition(int index)
+    {
+        return recallPosition("editor.fx", fxCachedEditorSizes, index);
+    }
+
+    @OnThread(Tag.FX)
+    public FrameShelfStorage getShelfStorage()
+    {
+        return shelfStorage;
     }
 }

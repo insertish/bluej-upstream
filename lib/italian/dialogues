@@ -42,12 +42,9 @@ Nome del compilatore:
 compiler-error
 Errore di Compilazione:
 
-stream-incomplete
-Errore di Compilazione. Flusso di errore incompleto.
-
 out-of-bounds
 Elemento specificato non \u00e8
-all'interno dell'array bounds.
+entro limiti dell'array.
 
 cannot-access-element
 Incapace di accedere all'elemento 
@@ -103,12 +100,17 @@ invalid-package-name
 Nome del package invalido.
 
 must-be-identifier
-Il nome non \u00e8 valido. E' 
-un identificatore di Java.
+Il nome non \u00e8 valido.
+Deve essere un identificatore Java.
 
-directory-exists
-Un file o una cartella con questo 
-nome gi\u00e0 esiste.
+
+directory-exists-file
+Un file con questo nome gi\u00e0 esiste,
+la directory non pu\u00f2 essere creata.
+
+directory-exists-non-empty
+Questa directory non \u00e8 vuota, quindi non
+pu\u00f2 essere usata come destinazione per il progetto.
 
 cannot-create-directory
 Non posso creare la cartella. Controlla che
@@ -174,7 +176,7 @@ in questo progetto. Non possono avere
 due classi con lo stesso nome.
 
 class-already-in-library
-Una classe con questo nome esiste gi� nella libreria.
+Una classe con questo nome esiste gi\u00e0 nella libreria.
 Se crei questa classe, sarai capace di
 modificare e compilare la classe, ma non chiamerai i metodi.
 Cancella
@@ -182,7 +184,7 @@ Continua
 null
 
 compile-class-already-in-library
-Una classe con questo nome gi� esiste nella libreria
+Una classe con questo nome gi\u00e0 esiste nella libreria
 "$".
 Puoi modificare e compilare la classe, ma 
 chiamando i metodi eseguirai il codice della classe della libreria.
@@ -344,7 +346,7 @@ Nuovo Metodo di Test
 null
 
 unittest-io-error
-Un errore di I/O � avvenuto quando si cerca di leggere il codice 
+Un errore di I/O \u00e8 avvenuto quando si cerca di leggere il codice
 sorgente del test unitario.
 
 getobject-new-name
@@ -370,10 +372,6 @@ Vuoi continuare?
 Sostituisci
 Cancella
 null
-
-no-search-string
-Nessun vocabolo da ricercare.
-(Sottolinea del testo o utilizza il tasto 'Trova...'.)
 
 default-keys
 Vuoi cancellare tutti i tasti 
@@ -507,11 +505,15 @@ null
 team-error-saving-project
 Un errore durante il tentativo di salvare i file di progetto:
  $
- Pubblicare o l'aggiornamento pu� avere risultati imprevisti.
+ Pubbliccare o l'aggiornamento pu\u00f2 avere risultati imprevisti.
+
+team-cannot-import-into-existing-project
+Non \u00e8 possibile importare un progetto in un progetto esistente. Selezionare
+una normale cartella come destinazione per l'importazione.
 
 not-all-compiled
-Non tutte le classi del progetto sono compilate. Per fare il deploy della MIDlet
-del progetto compila prima tutte le classi.
+Non tutte le classi di questo progetto sono compilate. Per distribuire la MIDlet
+suite in questo progetto \u00e8 necessario compilare tutte le classi del progetto.
 
 error-midleticon-exists
 Il file che hai selezionata come icona gi\u00e0 \u00e8 presente in questo progetto.

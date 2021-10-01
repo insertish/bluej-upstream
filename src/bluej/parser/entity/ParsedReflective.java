@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2011,2014  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2011,2014,2015,2016  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -32,6 +32,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import bluej.debugger.gentype.ConstructorReflective;
 import bluej.debugger.gentype.FieldReflective;
 import bluej.debugger.gentype.GenTypeClass;
 import bluej.debugger.gentype.GenTypeDeclTpar;
@@ -230,7 +231,14 @@ public class ParsedReflective extends Reflective
     @Override
     public Map<String,FieldReflective> getDeclaredFields()
     {
-        Map<String,FieldNode> fields = pnode.getInner().getFields();
+        Map<String,Set<FieldNode>> allfields = pnode.getInner().getFields();
+        
+        // Filter out duplicates:
+        Map<String, FieldNode> fields = new HashMap<>();
+        for (String name : allfields.keySet()) {
+            fields.put(name, allfields.get(name).iterator().next());
+        }
+        
         Map<String,FieldReflective> rmap = new HashMap<String,FieldReflective>();
         for (Iterator<String> i = fields.keySet().iterator(); i.hasNext(); ) {
             String fieldName = i.next();
@@ -238,7 +246,7 @@ public class ParsedReflective extends Reflective
             JavaEntity ftypeEnt = fieldNode.getFieldType().resolveAsType();
             if (ftypeEnt != null) {
                 FieldReflective fref = new FieldReflective(fieldName, ftypeEnt.getType(),
-                        fieldNode.getModifiers());
+                        fieldNode.getModifiers(), this);
                 rmap.put(fieldName, fref);
             }
         }
@@ -288,6 +296,13 @@ public class ParsedReflective extends Reflective
             }
         }
         return rmap;
+    }
+
+    @Override
+    public List<ConstructorReflective> getDeclaredConstructors()
+    {
+        // TODO actually pick out the constructors:
+        return Collections.emptyList();
     }
     
     @Override

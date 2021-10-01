@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2016  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -21,36 +21,27 @@
  */
 package bluej.pkgmgr.actions;
 
+import javax.swing.SwingUtilities;
+
 import bluej.Config;
 import bluej.pkgmgr.PkgMgrFrame;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 
 /**
  * Cancel recording of a test method. Also removes from the bench objects which
  * were created since recording began.
  * 
  * @author Davin McCall
- * @version $Id: CancelTestRecordAction.java 6215 2009-03-30 13:28:25Z polle $
+ * @version $Id: CancelTestRecordAction.java 16606 2016-09-27 12:30:05Z nccb $
  */
 final public class CancelTestRecordAction extends PkgMgrAction
 {
-    static private CancelTestRecordAction instance = null;
-    
-    /**
-     * Factory method. This is the way to retrieve an instance of the class,
-     * as the constructor is private.
-     * @return an instance of the class.
-     */
-    static public CancelTestRecordAction getInstance()
+    @OnThread(Tag.Any)
+    public CancelTestRecordAction(PkgMgrFrame pmf)
     {
-        if(instance == null)
-            instance = new CancelTestRecordAction();
-        return instance;
-    }
-    
-    private CancelTestRecordAction()
-    {
-        super("menu.tools.cancel");
-        putValue(SHORT_DESCRIPTION, Config.getString("tooltip.test.cancel"));
+        super(pmf, "menu.tools.cancel");
+        SwingUtilities.invokeLater(() -> putValue(SHORT_DESCRIPTION, Config.getString("tooltip.test.cancel")));
     }
     
     public void actionPerformed(PkgMgrFrame pmf)

@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 2012  Michael Kolling and John Rosenberg 
+ Copyright (C) 2012,2015,2016  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -37,9 +37,28 @@ enum EventName
 
     ADD("file_add"),
     DELETE("file_delete"),
+    CONVERT_TO_JAVA("stride_converted_to_java"),
     RENAME("rename"),
     EDIT("edit"),
     COMPILE("compile"),
+    FILE_OPEN("file_open"),
+    FILE_SELECT("file_select"),
+    FILE_CLOSE("file_close"),
+
+    SHOWN_ERROR_INDICATOR("shown_error_indicator"),
+    SHOWN_ERROR_MESSAGE("shown_error_message"),
+    FIX_EXECUTED("fix_executed"),
+
+    UNKNOWN_FRAME_COMMAND("unknown_frame_command"),
+
+    CODE_COMPLETION_STARTED("code_completion_started"),
+    CODE_COMPLETION_ENDED("code_completion_ended"),
+
+    GREENFOOT_WINDOW_ACTIVATED("greenfoot_window_activated"),
+    GREENFOOT_WORLD_RESET("greenfoot_world_reset"),
+    GREENFOOT_WORLD_ACT("greenfoot_world_act"),
+    GREENFOOT_WORLD_RUN("greenfoot_world_run"),
+    GREENFOOT_WORLD_PAUSE("greenfoot_world_pause"),
     
     // Debugger: 
     DEBUGGER_OPEN("debugger_open"),

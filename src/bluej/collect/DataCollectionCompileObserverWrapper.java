@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 2012  Michael Kolling and John Rosenberg 
+ Copyright (C) 2012,2014,2016  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -27,8 +27,13 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
+import bluej.compiler.CompileInputFile;
 import bluej.compiler.CompileObserver;
+import bluej.compiler.CompileReason;
+import bluej.compiler.CompileType;
 import bluej.compiler.Diagnostic;
+import bluej.compiler.EDTCompileObserver;
+import bluej.extensions.SourceType;
 import bluej.pkgmgr.Project;
 
 /**
@@ -38,49 +43,65 @@ import bluej.pkgmgr.Project;
  * @author Neil Brown
  *
  */
-public class DataCollectionCompileObserverWrapper implements CompileObserver
+public class DataCollectionCompileObserverWrapper implements EDTCompileObserver
 {
-    private CompileObserver wrapped;
+    private EDTCompileObserver wrapped;
     private List<DiagnosticWithShown> diagnostics = new ArrayList<DiagnosticWithShown>();
+    private CompileInputFile[] sources;
+    private CompileReason reason;
     private Project project;
     
-    public DataCollectionCompileObserverWrapper(Project project, CompileObserver wrapped)
+    public DataCollectionCompileObserverWrapper(Project project, EDTCompileObserver wrapped)
     {
         this.project = project;
         this.wrapped = wrapped;
     }
 
     @Override
-    public void startCompile(File[] sources)
+    public void startCompile(CompileInputFile[] sources, CompileReason reason, CompileType type)
     {
         diagnostics.clear();
-        wrapped.startCompile(sources);
+        this.sources = sources;
+        this.reason = reason;
+        wrapped.startCompile(sources, reason, type);
 
     }
 
     @Override
-    public boolean compilerMessage(Diagnostic diagnostic)
+    public boolean compilerMessage(Diagnostic diagnostic, CompileType type)
     {
-        boolean shownToUser = wrapped.compilerMessage(diagnostic);
-        diagnostics.add(new DiagnosticWithShown(diagnostic, shownToUser));
+        boolean shownToUser = wrapped.compilerMessage(diagnostic, type);
+        if (diagnostic.getFileName() != null)
+        {
+            File userFile = new File(diagnostic.getFileName());
+            for (CompileInputFile input : sources)
+            {
+                if (input.getJavaCompileInputFile().getName().equals(userFile.getName()))
+                {
+                    userFile = input.getUserSourceFile();
+                    break;
+                }
+            }
+            diagnostics.add(new DiagnosticWithShown(diagnostic, shownToUser, userFile));
+        }
         return shownToUser;
     }
 
     @Override
-    public void endCompile(File[] sources, boolean succesful)
+    public void endCompile(CompileInputFile[] sources, boolean successful, CompileType type)
     {
         // Heuristic: if all files are in the same package, record the compile as being with that package
         // (I'm fairly sure the BlueJ interface doesn't let you do cross-package compile,
         // so I think this should always produce one package)
         Set<String> packages = new HashSet<String>();
-        for (File f : sources)
+        for (CompileInputFile f : sources)
         {
-            packages.add(project.getPackageForFile(f));
+            packages.add(project.getPackageForFile(f.getJavaCompileInputFile()));
         }
         bluej.pkgmgr.Package pkg = packages.size() == 1 ? project.getPackage(packages.iterator().next()) : null;
         
-        DataCollector.compiled(project, pkg, sources, diagnostics, succesful);
-        wrapped.endCompile(sources, succesful);
+        DataCollector.compiled(project, pkg, sources, diagnostics, successful, reason, SourceType.Java);
+        wrapped.endCompile(sources, successful, type);
     }
 
 }

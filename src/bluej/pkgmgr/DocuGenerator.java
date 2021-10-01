@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2011,2012,2013  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2015,2016  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -21,20 +21,33 @@
  */
 package bluej.pkgmgr;
 
+import javax.swing.SwingUtilities;
 import java.awt.EventQueue;
-import java.io.*;
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.FileReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.io.PrintWriter;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 
+import javafx.application.Platform;
+
 import bluej.BlueJEvent;
 import bluej.Config;
+import bluej.extensions.SourceType;
 import bluej.utility.Debug;
 import bluej.utility.DialogManager;
 import bluej.utility.FileUtility;
 import bluej.utility.Utility;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 
 /**
  * This class handles documentation generation from inside BlueJ.
@@ -55,7 +68,7 @@ public class DocuGenerator
                                 Config.getPropString("doctool.outputdir");
 
     /** Header for log file when generating documentation for projects. */
-    private static String projectLogHeader =
+    private static final String projectLogHeader =
                                 Config.getPropString("Project documentation");
 
     /** Header for log file when generating documentation for classes. */
@@ -103,9 +116,7 @@ public class DocuGenerator
                                     String header, boolean openBrowser)
     {
         // start the call in a separate thread to allow fast return to GUI.
-        Thread starterThread = new Thread(
-                        new DocuRunStarter(call, result, log, header, 
-                                           openBrowser));
+        Thread starterThread = new DocuRunStarter(call, result, log, header, openBrowser);
         starterThread.setPriority(Thread.MIN_PRIORITY);
         starterThread.start();
         BlueJEvent.raiseEvent(BlueJEvent.GENERATING_DOCU, null);
@@ -120,7 +131,7 @@ public class DocuGenerator
      * HTML file that should be opened by a web browser if the documentation
      * generation was successful.
      */
-    private static class DocuRunStarter implements Runnable
+    private static class DocuRunStarter extends Thread
     {
         private String[] docuCall;
         private File showFile;
@@ -249,19 +260,15 @@ public class DocuGenerator
                         }
                         else {
                             BlueJEvent.raiseEvent(BlueJEvent.DOCU_ABORTED, null);
-                            DialogManager.showMessageWithText(null,
+                            Platform.runLater(() -> DialogManager.showMessageWithTextFX(null,
                                     "doctool-error",
-                                    logFile.getPath());
+                                    logFile.getPath()));
                         }
                     }
                 });
             }
             catch (IOException exc) {
-                EventQueue.invokeLater(new Runnable() {
-                    public void run() {
-                        DialogManager.showMessage(null,"severe-doc-trouble");
-                    }
-                });
+                Platform.runLater(() -> DialogManager.showMessageFX(null, "severe-doc-trouble"));
             }
             finally {
                 if (logWriter != null) {
@@ -339,58 +346,71 @@ public class DocuGenerator
         File startPage = new File(docDir, "index.html");
         File logFile = new File(docDir, "logfile.txt");
 
-        if(documentationExists(logFile)) {
-            int result = DialogManager.askQuestion(null, "show-or-generate");
-            if(result == 0) {  // show only
-                Utility.openWebBrowser(startPage.getPath());
-                return "";
-            }
-            if(result == 2) {  // cancel
-                return "";
-            }
-        }
-
-        // tool-specific infos for javadoc
-
-        ArrayList<String> call = new ArrayList<String>();
-        call.add(docCommand);
-        call.add("-sourcepath");
-        call.add(projectDirPath);
-        addGeneralOptions(call);
-        call.add("-doctitle");
-        call.add(project.getProjectName());
-        call.add("-windowtitle");
-        call.add(project.getProjectName());
-        call.addAll(Utility.dequoteCommandLine(fixedJavadocParams));
-
-        // get the parameter that enables javadoc to link the generated
-        // documentation to the API documentation
-        addLinkParam(call);
-
-        // add the names of all the targets for the documentation tool.
-        // first: get the names of all packages that contain java sources.
-        List<String> packageNames = project.getPackageNames();
-        for (Iterator<String> names = packageNames.iterator(); names.hasNext(); ) {
-            String packageName = (String)names.next();
-            // as javadoc doesn't like packages with no java-files, we have to
-            // pass only names of packages that really contain java files.
-            Package pack = project.getPackage(packageName);
-            if (FileUtility.containsFile(pack.getPath(),".java")) {
-                if(packageName.length() > 0) {
-                    call.add(packageName);
+        Platform.runLater(() ->
+        {
+            if (documentationExists(logFile))
+            {
+                int result = DialogManager.askQuestionFX(null, "show-or-generate");
+                if (result == 0)
+                {  // show only
+                    SwingUtilities.invokeLater(() -> Utility.openWebBrowser(startPage.getPath()));
+                    return;
+                }
+                if (result == 2)
+                {  // cancel
+                    return;
                 }
             }
-        }
+            SwingUtilities.invokeLater(() ->
+            {
 
-        // second: get class names of classes in unnamed package, if any
-        List<String> classNames = project.getPackage("").getAllClassnamesWithSource();
-        String dirName = project.getProjectDir().getAbsolutePath();
-        for (Iterator<String> names = classNames.iterator();names.hasNext(); ) {
-            call.add(dirName + "/" + names.next() + ".java");
-        }
-        String[] javadocCall = (String[])call.toArray(new String[0]);
+                // tool-specific infos for javadoc
 
-        generateDoc(javadocCall, startPage, logFile, projectLogHeader, true);
+                ArrayList<String> call = new ArrayList<String>();
+                call.add(docCommand);
+                call.add("-sourcepath");
+                call.add(projectDirPath);
+                addGeneralOptions(call);
+                call.add("-doctitle");
+                call.add(project.getProjectName());
+                call.add("-windowtitle");
+                call.add(project.getProjectName());
+                call.addAll(Utility.dequoteCommandLine(fixedJavadocParams));
+
+                // get the parameter that enables javadoc to link the generated
+                // documentation to the API documentation
+                addLinkParam(call);
+
+                // add the names of all the targets for the documentation tool.
+                // first: get the names of all packages that contain java sources.
+                List<String> packageNames = project.getPackageNames();
+                for (Iterator<String> names = packageNames.iterator(); names.hasNext(); )
+                {
+                    String packageName = names.next();
+                    // as javadoc doesn't like packages with no java-files, we have to
+                    // pass only names of packages that really contain java files.
+                    Package pack = project.getPackage(packageName);
+                    if (FileUtility.containsFile(pack.getPath(), "." + SourceType.Java.toString().toLowerCase()))
+                    {
+                        if (packageName.length() > 0)
+                        {
+                            call.add(packageName);
+                        }
+                    }
+                }
+
+                // second: get class names of classes in unnamed package, if any
+                List<String> classNames = project.getPackage("").getAllClassnamesWithSource();
+                String dirName = project.getProjectDir().getAbsolutePath();
+                for (Iterator<String> names = classNames.iterator(); names.hasNext(); )
+                {
+                    call.add(dirName + "/" + names.next() + "." + SourceType.Java.toString().toLowerCase());
+                }
+                String[] javadocCall = call.toArray(new String[0]);
+
+                generateDoc(javadocCall, startPage, logFile, projectLogHeader, true);
+            });
+        });
         return "";
     }
 
@@ -459,8 +479,8 @@ public class DocuGenerator
     {
         if(filename.startsWith(projectDirPath))
             filename = filename.substring(projectDirPath.length());
-        if (filename.endsWith(".java"))
-            filename = filename.substring(0, filename.indexOf(".java"));
+        if (filename.endsWith("." + SourceType.Java.toString().toLowerCase()))
+            filename = filename.substring(0, filename.indexOf("." + SourceType.Java.toString().toLowerCase()));
         return docDirPath + filename + ".html";
     }
 
@@ -492,6 +512,7 @@ public class DocuGenerator
      * Test whether project documentation exists for this project.
      * @param the logfile in the doc directory
      */
+    @OnThread(Tag.Any)
     private static boolean documentationExists(File logFile) 
     {
         if(!logFile.exists())
@@ -503,7 +524,7 @@ public class DocuGenerator
             BufferedReader logReader = new BufferedReader(new FileReader(logFile));
             String header = logReader.readLine();
             logReader.close();
-            return header.equals(projectLogHeader);
+            return (header == null? false : header.equals(projectLogHeader));
         }
         catch(Exception e)
         {

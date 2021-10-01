@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2015,2016  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -37,6 +37,9 @@ import bluej.groupwork.TeamSettingsController;
 import bluej.groupwork.TeamworkProvider;
 import bluej.groupwork.actions.ValidateConnectionAction;
 import bluej.utility.MiksGridLayout;
+import java.io.File;
+import java.net.URI;
+import java.net.URISyntaxException;
 
 /**
  * A panel for team settings.
@@ -45,10 +48,13 @@ import bluej.utility.MiksGridLayout;
  */
 public class TeamSettingsPanel extends JPanel 
 {
-    private static final int fieldsize = 20;
+    private static final int fieldsize = 30;
     private TeamSettingsController teamSettingsController;
     private TeamSettingsDialog teamSettingsDialog;
     
+    private JPanel locationPanel;
+    private JTextField yourNameField;
+    private JTextField yourEmailField;
     private JTextField userField;
     private JPasswordField passwordField;
     private JTextField groupField;
@@ -58,12 +64,14 @@ public class TeamSettingsPanel extends JPanel
     private JComboBox protocolComboBox;
     private JButton validateButton;
     private JCheckBox useAsDefault;
+    private JTextField uriField;
     
     private JLabel serverTypeLabel;
     private JLabel groupLabel;
     private JLabel prefixLabel;
     private JLabel serverLabel;
     private JLabel protocolLabel;
+    private JLabel uriLabel;
     
     private int selectedServerType = -1;
     private boolean okEnabled = true;
@@ -85,7 +93,7 @@ public class TeamSettingsPanel extends JPanel
         add(useAsDefault);
         add(Box.createVerticalStrut(BlueJTheme.generalSpacingWidth));
         validateButton = new JButton(new ValidateConnectionAction(
-                Config.getString("team.settings.checkConnection"), this, dialog));
+                Config.getString("team.settings.checkConnection"), this, dialog::asWindow));
         add(validateButton);
         
         DocumentListener changeListener = new DocumentListener() {
@@ -105,8 +113,11 @@ public class TeamSettingsPanel extends JPanel
             }
         };
         
+        yourNameField.getDocument().addDocumentListener(changeListener);
+        yourEmailField.getDocument().addDocumentListener(changeListener);
         userField.getDocument().addDocumentListener(changeListener);
         serverField.getDocument().addDocumentListener(changeListener);
+        uriField.getDocument().addDocumentListener(changeListener);
         
         //add(new JSeparator());
         add(Box.createVerticalGlue());
@@ -127,11 +138,14 @@ public class TeamSettingsPanel extends JPanel
      */
     public FocusTraversalPolicy getTraversalPolicy(FocusTraversalPolicy delegate)
     {
-        if (getUser().length() != 0) {
-            return new TeamPanelFocusPolicy(passwordField, delegate);
-        }
-        else {
+        if (yourNameField.isEditable() && getYourName().length()==0){
             return delegate;
+        } else if ((yourEmailField.isEditable() && getYourEmail().length()==0)){
+            return new TeamPanelFocusPolicy(yourEmailField, delegate);
+        } else if ( getUser().length() == 0) {
+            return new TeamPanelFocusPolicy(userField, delegate);
+        } else {
+            return new TeamPanelFocusPolicy(passwordField, delegate);
         }
     }
     
@@ -146,8 +160,13 @@ public class TeamSettingsPanel extends JPanel
         prefixField.setEnabled(false);
         serverField.setEnabled(false);
         protocolComboBox.setEnabled(false);
+        uriField.setEnabled(false);
         
-        // useAsDefault.setEnabled(false);
+        if (uriField.isVisible() && uriField.getText().isEmpty()){
+            //update uri.
+            uriField.setText(TeamSettings.getURI(readProtocolString(), serverField.getText(), prefixField.getText()));
+        }
+        
         
         serverTypeLabel.setEnabled(false);
         groupLabel.setEnabled(false);
@@ -160,12 +179,17 @@ public class TeamSettingsPanel extends JPanel
     {
         JPanel authentificationPanel = new JPanel();
         {
-            authentificationPanel.setLayout(new MiksGridLayout(3,2,10,5));
+            authentificationPanel.setLayout(new MiksGridLayout(5,2,10,5));
             String docTitle = Config.getString("team.settings.personal");
             authentificationPanel.setBorder(BorderFactory.createCompoundBorder(
                     BorderFactory.createTitledBorder(docTitle),
                     BlueJTheme.generalBorder));
             authentificationPanel.setAlignmentX(LEFT_ALIGNMENT);
+            
+            JLabel yourNameLabel = new JLabel(Config.getString("team.settings.yourName"));
+            yourNameField = new JTextField(fieldsize);
+            JLabel yourEmailLabel = new JLabel(Config.getString("team.settings.yourEmail"));
+            yourEmailField = new JTextField(fieldsize);
             
             JLabel userLabel = new JLabel(Config.getString("team.settings.user"));
             userField = new JTextField(fieldsize);
@@ -174,6 +198,10 @@ public class TeamSettingsPanel extends JPanel
             groupLabel = new JLabel(Config.getString("team.settings.group"));
             groupField = new JTextField(fieldsize);
             
+            yourNameLabel.setMaximumSize(yourNameLabel.getMinimumSize());
+            yourNameField.setMaximumSize(yourNameField.getMinimumSize());
+            yourEmailLabel.setMaximumSize(yourEmailLabel.getMinimumSize());
+            yourEmailField.setMaximumSize(yourEmailField.getMinimumSize());
             userLabel.setMaximumSize(userLabel.getMinimumSize());
             userField.setMaximumSize(userField.getMinimumSize());
             passwordLabel.setMaximumSize(passwordLabel.getMinimumSize());
@@ -181,6 +209,10 @@ public class TeamSettingsPanel extends JPanel
             groupLabel.setMaximumSize(groupLabel.getMinimumSize());
             groupField.setMaximumSize(groupField.getMinimumSize());
                         
+            authentificationPanel.add(yourNameLabel);
+            authentificationPanel.add(yourNameField);
+            authentificationPanel.add(yourEmailLabel);
+            authentificationPanel.add(yourEmailField);
             authentificationPanel.add(userLabel);
             authentificationPanel.add(userField);
             authentificationPanel.add(passwordLabel);
@@ -194,7 +226,7 @@ public class TeamSettingsPanel extends JPanel
     
     private JPanel makeLocationPanel()
     {
-        JPanel locationPanel = new JPanel(new MiksGridLayout(4,2,10,5));
+        locationPanel = new JPanel(new MiksGridLayout(0,2,10,5));
         {
             String docTitle2 = Config.getString("team.settings.location");
             locationPanel.setBorder(BorderFactory.createCompoundBorder(
@@ -209,12 +241,6 @@ public class TeamSettingsPanel extends JPanel
                 serverTypeComboBox.addItem(provider.getProviderName());
             }
             
-            serverTypeComboBox.addActionListener(new ActionListener() {
-                public void actionPerformed(ActionEvent e)
-                {
-                    setProviderSettings();
-                }
-            });
             
             serverLabel = new JLabel(Config.getString("team.settings.server"));
             serverField = new JTextField(fieldsize);
@@ -226,12 +252,70 @@ public class TeamSettingsPanel extends JPanel
             protocolComboBox = new JComboBox();
             protocolComboBox.setEditable(false);
             
+            uriLabel = new JLabel(Config.getString("team.settings.uri"));
+            uriField = new JTextField(fieldsize);
+            
             prefixLabel.setMaximumSize(prefixLabel.getMinimumSize());
             prefixField.setMaximumSize(prefixField.getMinimumSize());
             serverLabel.setMaximumSize(serverLabel.getMinimumSize());
             serverField.setMaximumSize(serverField.getMinimumSize());
             serverTypeLabel.setMaximumSize(serverTypeLabel.getMinimumSize());
             serverTypeComboBox.setMaximumSize(serverTypeComboBox.getMinimumSize());
+            uriLabel.setMaximumSize(uriLabel.getMinimumSize());
+            uriField.setMaximumSize(uriField.getMinimumSize());
+            
+            
+            serverTypeComboBox.addActionListener(new ActionListener() {
+                public void actionPerformed(ActionEvent e)
+                {
+                    setProviderSettings();
+                    //if Git provider selected, enable your name and your email
+                    //fields.
+                    if (getSelectedProvider().needsEmail() &&  getSelectedProvider().needsName()){
+                        //Git was selected. Enable fields.
+                        yourNameField.setEnabled(true);
+                        yourEmailField.setEnabled(true);
+                        useAsDefault.setVisible(false);
+                        useAsDefault.setSelected(true); // on git we always save.
+                        //for git, we will use a URI field.
+                        if (serverLabel.getParent() == locationPanel){
+                            locationPanel.remove(serverLabel);
+                            locationPanel.remove(serverField);
+                            locationPanel.remove(prefixLabel);
+                            locationPanel.remove(prefixField);
+                            locationPanel.remove(protocolLabel);
+                            locationPanel.remove(protocolComboBox);
+                            locationPanel.add(uriLabel);
+                            locationPanel.add(uriField);
+                            locationPanel.revalidate();
+                            groupLabel.setEnabled(false);
+                            groupField.setEnabled(false);
+
+                        }
+                    } else {
+                        useAsDefault.setVisible(true);
+                        //Git is not selected. Disable fields.
+                        yourNameField.setEnabled(false);
+                        yourEmailField.setEnabled(false);
+                        //for svn, we will use the old layout.
+                        if (serverLabel.getParent() != locationPanel){
+                            locationPanel.remove(uriLabel);
+                            locationPanel.remove(uriField);
+                            locationPanel.add(serverLabel);
+                            locationPanel.add(serverField);
+                            locationPanel.add(prefixLabel);
+                            locationPanel.add(prefixField);
+                            locationPanel.add(protocolLabel);
+                            locationPanel.add(protocolComboBox);
+                            locationPanel.revalidate();
+                            groupLabel.setEnabled(true);
+                            groupField.setEnabled(true);
+                        }
+                    }
+                    checkOkEnabled();
+                    teamSettingsDialog.pack();//adjust window size.
+                }
+            });
             
             locationPanel.add(serverTypeLabel);
             locationPanel.add(serverTypeComboBox);
@@ -270,6 +354,17 @@ public class TeamSettingsPanel extends JPanel
         if (user != null) {
             setUser(user);
         }
+        
+        String yourName = teamSettingsController.getPropString("bluej.teamsettings.yourName");
+        if (yourName != null){
+            setYourName(yourName);
+        }
+        
+        String yourEmail = teamSettingsController.getPropString("bluej.teamsettings.yourEmail");
+        if (yourEmail != null){
+            setYourEmail(yourEmail);
+        }
+        
         String password = teamSettingsController.getPasswordString();
         if (password != null) {
             setPassword(password);
@@ -284,14 +379,29 @@ public class TeamSettingsPanel extends JPanel
         }
         
         String providerName = teamSettingsController.getPropString("bluej.teamsettings.vcs");
-        if (providerName != null) {
-            List<TeamworkProvider> teamProviders = teamSettingsController.getTeamworkProviders();
-            for (int index = 0; index < teamProviders.size(); index++) {
-                TeamworkProvider provider = teamProviders.get(index);
-                if (provider.getProviderName().equalsIgnoreCase(providerName)) {
-                    serverTypeComboBox.setSelectedIndex(index);
-                    break;
+        // We always go through the providers.  If the user had no preference,
+        // we select the first one, and update the email/name enabled states accordingly:
+        List<TeamworkProvider> teamProviders = teamSettingsController.getTeamworkProviders();
+        for (int index = 0; index < teamProviders.size(); index++) {
+            TeamworkProvider provider = teamProviders.get(index);
+            if (provider.getProviderName().equalsIgnoreCase(providerName)
+                || (providerName == null && index == 0)) { // Select first if no stored preference
+                serverTypeComboBox.setSelectedIndex(index);
+                //checks if this provider needs your name and your e-mail.
+                if (provider.needsEmail()){
+                    if (teamSettingsController.getProject() != null){
+                        //settings panel being open within a project.
+                        //fill the data.
+                        File respositoryRoot = teamSettingsController.getProject().getProjectDir();
+                        yourEmailField.setText(provider.getYourEmailFromRepo(respositoryRoot));
+                        yourEmailField.setEnabled(false);
+                        yourNameField.setText(provider.getYourNameFromRepo(respositoryRoot));
+                        yourNameField.setEnabled(false);
+                        this.useAsDefault.setSelected(true); // on git we always save.
+                    }
+
                 }
+                break;
             }
         }
         
@@ -319,10 +429,17 @@ public class TeamSettingsPanel extends JPanel
         
         fillProtocolSelections();
         
-        String protocol = teamSettingsController.getPropString(keyBase + "protocol");
+        String protocol = readProtocolString();
         if (protocol != null){
             setProtocol(protocol);
         }
+    }
+    
+    private String readProtocolString()
+    {
+        String keyBase = "bluej.teamsettings."
+            + getSelectedProvider().getProviderName().toLowerCase() + "."; 
+        return teamSettingsController.getPropString(keyBase + "protocol");
     }
     
     /**
@@ -331,8 +448,21 @@ public class TeamSettingsPanel extends JPanel
      */
     private void checkOkEnabled()
     {
-        boolean newOkEnabled = userField.getText().length() != 0;
-        newOkEnabled &= serverField.getText().length() != 0;
+        boolean newOkEnabled = (userField.getText().length() != 0);
+
+        if (yourEmailField.isEnabled() && yourNameField.isEnabled())
+        {
+            newOkEnabled &= (yourEmailField.getText().length() != 0) && (yourEmailField.getText().contains("@"));
+            newOkEnabled &= yourNameField.getText().length() != 0;
+        }
+        if (uriField.isVisible())
+        {
+            newOkEnabled &= uriField.getText().length() != 0;
+        }
+        else
+        {
+            newOkEnabled &= serverField.getText().length() != 0;
+        }
         if (newOkEnabled != okEnabled) {
             okEnabled = newOkEnabled;
             teamSettingsDialog.setOkButtonEnabled(okEnabled);
@@ -342,6 +472,16 @@ public class TeamSettingsPanel extends JPanel
     private void setUser(String user)
     {
         userField.setText(user);
+    }
+    
+    private void setYourName(String yourName)
+    {
+        yourNameField.setText(yourName);
+    }
+    
+    private void setYourEmail(String yourEmail)
+    {
+        yourEmailField.setText(yourEmail);
     }
     
     private void setPassword(String password)
@@ -396,21 +536,49 @@ public class TeamSettingsPanel extends JPanel
     
     private String getGroup()
     {
+        //DCVS does not have group.
+        if (getSelectedProvider().needsEmail()){
+            return "";
+        }
         return groupField.getText();
     }
     
     private String getPrefix()
     {
+        if (getSelectedProvider().needsEmail()) {
+            try {
+                URI uri = new URI(uriField.getText());
+                return uri.getPath();
+            } catch (URISyntaxException ex) {
+                return null;
+            }
+        }
         return prefixField.getText();
     }
     
     private String getServer()
     {
+        if (getSelectedProvider().needsEmail()) {
+            try {
+                URI uri = new URI(uriField.getText());
+                return uri.getHost();
+            } catch (URISyntaxException ex) {
+                return null;
+            }
+        }
         return serverField.getText();
     }
     
     private String getProtocolKey()
     {
+        if (getSelectedProvider().needsEmail()) {
+            try {
+                URI uri = new URI(uriField.getText());
+                return uri.getScheme();
+            } catch (URISyntaxException ex) {
+                return null;
+            }
+        }
         int protocol = protocolComboBox.getSelectedIndex();
         return getSelectedProvider().getProtocolKey(protocol);
     }
@@ -420,9 +588,19 @@ public class TeamSettingsPanel extends JPanel
         return useAsDefault.isSelected();
     }
     
-    public TeamSettings getSettings()
-    {
-        return new TeamSettings(getSelectedProvider(), getProtocolKey(),
+    private String getYourName(){
+        return yourNameField.getText();
+    }
+    
+    private String getYourEmail(){
+        return yourEmailField.getText();
+    }
+    
+    public TeamSettings getSettings() {
+        TeamSettings result = new TeamSettings(getSelectedProvider(), getProtocolKey(),
                 getServer(), getPrefix(), getGroup(), getUser(), getPassword());
+        result.setYourEmail(getYourEmail());
+        result.setYourName(getYourName());
+        return result;
     }
 }

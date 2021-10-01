@@ -31,7 +31,7 @@
 #include <cstring>
 #include <list>
 #include <shlwapi.h>
-
+#include <cstdio>
 
 #undef __cplusplus
 #include <jni.h>
@@ -45,8 +45,6 @@
 #define REQUIREDJAVA "1.5"
 #endif
 
-
-#include <cstdio>
 
 // Handy typedef
 typedef std::basic_string<TCHAR> string;

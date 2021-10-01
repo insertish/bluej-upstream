@@ -3,7 +3,7 @@
 unset JAVAPATH
 
 FOUND="false"
-for VMNAME in java-8-oracle jdk-8-oracle java-8-openjdk java-7-oracle jdk-7-oracle java-7-sun java-7-openjdk java-6-oracle java-6-sun java-6-openjdk ; do
+for VMNAME in java-8-oracle jdk-8-oracle java-8-openjdk ; do
     for JDKCANDIDATE in /usr/lib/jvm/"$VMNAME"* ; do
         if [ -e "$JDKCANDIDATE"/lib/tools.jar ]; then
             JAVAPATH="$JDKCANDIDATE"
@@ -22,12 +22,22 @@ if [ x"$JAVAPATH" = x"" ]; then
     exit 1
 fi
 
-    
 CP="/usr/share/greenfoot/bluej.jar:$JAVAPATH/lib/tools.jar"
-"$JAVAPATH/bin/java" -Dawt.useSystemAAFontSettings=on -cp "$CP" bluej.Boot \
+JFXRTOPT=""
+
+if [ ! -e "$JAVAPATH/jre/lib/ext/jfxrt.jar" ]; then
+    if [ -e "/usr/share/java/openjfx/jre/lib/ext/jfxrt.jar" ]; then
+        CP="$CP:/usr/share/java/openjfx/jre/lib/ext/jfxrt.jar"
+        JFXRTOPT="-jfxrt.jarpath=/usr/share/java/openjfx/jre/lib/ext/jfxrt.jar"
+    fi
+fi
+
+
+"$JAVAPATH/bin/java" -Dawt.useSystemAAFontSettings=on -Xmx512M -cp "$CP" bluej.Boot \
     -greenfoot=true -bluej.compiler.showunchecked=false \
     -greenfoot.scenarios=/usr/share/doc/Greenfoot/scenarios \
     -greenfoot.tutorial=file:///usr/share/doc/Greenfoot/tutorial/tutorial.html \
     -greenfoot.tutorial.scenario=wombats \
-    -greenfoot.url.javadoc=/usr/share/doc/Greenfoot/API/index.html \
-     "$@"
+    -greenfoot.url.javadoc=file:///usr/share/doc/Greenfoot/API/ \
+    ${JFXRTOPT:+"$JFXRTOPT"} \
+    "$@"

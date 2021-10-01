@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 2010,2011,2012,2013,2014  Michael Kolling and John Rosenberg 
+ Copyright (C) 2010,2011,2012,2013,2014,2016,2017  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -33,6 +33,8 @@ import java.util.Stack;
 import javax.swing.text.Document;
 import javax.swing.text.Element;
 
+import threadchecker.OnThread;
+import threadchecker.Tag;
 import bluej.debugger.gentype.Reflective;
 import bluej.editor.moe.MoeSyntaxDocument;
 import bluej.parser.entity.EntityResolver;
@@ -152,6 +154,9 @@ public class EditorParser extends JavaParser
     }
     
     @Override
+    // This tag is not correct, but if document is an instanceof MoeSyntaxDocument, the parsing
+    // should be happening on the Swing thread:
+    @OnThread(value = Tag.Swing, ignoreParent = true)
     protected void error(String msg, int beginLine, int beginColumn, int endLine, int endColumn)
     {
         // TODO make a proper listener interface
@@ -366,7 +371,7 @@ public class EditorParser extends JavaParser
     }
 
     @Override
-    protected void gotImport(List<LocatableToken> tokens, boolean isStatic)
+    protected void gotImport(List<LocatableToken> tokens, boolean isStatic, LocatableToken importToken, LocatableToken semiColonToken)
     {
         EntityResolver parentResolver = pcuNode.getParentResolver();
         if (parentResolver == null) {
@@ -392,7 +397,7 @@ public class EditorParser extends JavaParser
                     currentQuerySource(), newList);
             TypeEntity tentity = (entity != null) ? entity.resolveAsType() : null;
             if (tentity != null) {
-                pcuNode.getImports().addStaticImport(memberName, tentity);
+                pcuNode.getImports().addStaticImport(memberName, tentity, importToken, semiColonToken);
             }
         }
         else {
@@ -400,14 +405,14 @@ public class EditorParser extends JavaParser
             JavaEntity entity = ParseUtils.getImportEntity(parentResolver,
                     currentQuerySource(), tokens);
             if (entity != null) {
-                pcuNode.getImports().addNormalImport(memberName, entity);
+                pcuNode.getImports().addNormalImport(memberName, entity, importToken, semiColonToken);
             }
         }
     }
     
     @Override
     protected void gotWildcardImport(List<LocatableToken> tokens,
-            boolean isStatic)
+                                     boolean isStatic, LocatableToken importToken, LocatableToken semiColonToken)
     {
         EntityResolver parentResolver = pcuNode.getParentResolver();
         if (parentResolver == null) {
@@ -420,12 +425,12 @@ public class EditorParser extends JavaParser
             return;
         }
         if (! isStatic) {
-            pcuNode.getImports().addWildcardImport(importEntity);
+            pcuNode.getImports().addWildcardImport(importEntity, importToken, semiColonToken);
         }
         else {
             TypeEntity tentity = importEntity.resolveAsType();
             if (tentity != null) {
-                pcuNode.getImports().addStaticWildcardImport(tentity);
+                pcuNode.getImports().addStaticWildcardImport(tentity, importToken, semiColonToken);
             }
         }
     }
@@ -751,7 +756,7 @@ public class EditorParser extends JavaParser
     }
     
     @Override
-    protected void beginTryCatchSmt(LocatableToken token)
+    protected void beginTryCatchSmt(LocatableToken token, boolean hasResource)
     {
         JavaParentNode tryNode = new ContainerNode(scopeStack.peek(), ParsedNode.NODETYPE_SELECTION);
         int curOffset = getTopNodeOffset();
@@ -941,7 +946,7 @@ public class EditorParser extends JavaParser
     
     @Override
     protected void gotConstructorDecl(LocatableToken token,
-            LocatableToken hiddenToken)
+                                      LocatableToken hiddenToken)
     {
         endDecl(token); // remove placeholder
         LocatableToken start = pcuStmtBegin;
@@ -962,7 +967,7 @@ public class EditorParser extends JavaParser
     
     @Override
     protected void gotMethodDeclaration(LocatableToken token,
-            LocatableToken hiddenToken)
+                                        LocatableToken hiddenToken)
     {
         endDecl(token); // remove placeholder
         LocatableToken start = pcuStmtBegin;
@@ -1090,7 +1095,7 @@ public class EditorParser extends JavaParser
     }
     
     @Override
-    protected void gotField(LocatableToken first, LocatableToken idToken)
+    protected void gotField(LocatableToken first, LocatableToken idToken, boolean initExpressionFollows)
     {
         int curOffset = getTopNodeOffset();
         int insPos = lineColToPosition(first.getLine(), first.getColumn());
@@ -1116,7 +1121,7 @@ public class EditorParser extends JavaParser
     
     @Override
     protected void gotSubsequentField(LocatableToken first,
-            LocatableToken idToken)
+                                      LocatableToken idToken, boolean initFollows)
     {
         FieldNode field = new FieldNode(scopeStack.peek(), idToken.getText(), lastField, arrayDecls);
         arrayDecls = 0;
@@ -1152,13 +1157,13 @@ public class EditorParser extends JavaParser
     @Override
     protected void gotVariableDecl(LocatableToken first, LocatableToken idToken, boolean inited)
     {
-        gotField(first, idToken);
+        gotField(first, idToken, inited);
     }
     
     @Override
     protected void gotSubsequentVar(LocatableToken first, LocatableToken idToken, boolean inited)
     {
-        gotSubsequentField(first, idToken);
+        gotSubsequentField(first, idToken, inited);
     }
     
     @Override
@@ -1178,14 +1183,14 @@ public class EditorParser extends JavaParser
     @Override
     protected void gotForInit(LocatableToken first, LocatableToken idToken)
     {
-        gotField(first, idToken);
+        gotField(first, idToken, true);
     }
     
     @Override
     protected void gotSubsequentForInit(LocatableToken first,
-            LocatableToken idToken)
+                                        LocatableToken idToken, boolean initFollows)
     {
-        gotSubsequentField(first, idToken);
+        gotSubsequentField(first, idToken, true);
     }
     
     @Override
@@ -1257,14 +1262,14 @@ public class EditorParser extends JavaParser
     }
 
     @Override
-    protected void gotTypeDefExtends(LocatableToken extendsToken)
+    protected void beginTypeDefExtends(LocatableToken extendsToken)
     {
         gotExtends = true;
         gotImplements = false;
     }
     
     @Override
-    protected void gotTypeDefImplements(LocatableToken implementsToken)
+    protected void beginTypeDefImplements(LocatableToken implementsToken)
     {
         gotImplements = true;
         gotExtends = false;

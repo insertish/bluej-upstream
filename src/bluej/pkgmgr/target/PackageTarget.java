@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2011,2013  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2011,2013,2016  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -23,24 +23,33 @@ package bluej.pkgmgr.target;
 
 import java.awt.BasicStroke;
 import java.awt.Color;
-import java.awt.event.ActionEvent;
-import java.awt.event.MouseEvent;
 import java.io.File;
 import java.lang.reflect.Array;
 import java.util.Properties;
 
-import javax.swing.AbstractAction;
-import javax.swing.Action;
-import javax.swing.JMenuItem;
-import javax.swing.JPopupMenu;
+import javax.swing.SwingUtilities;
+
+import bluej.utility.javafx.JavaFXUtil;
+import bluej.utility.javafx.ResizableCanvas;
+import javafx.application.Platform;
+import javafx.scene.control.ContextMenu;
+import javafx.scene.control.Label;
+import javafx.scene.control.MenuItem;
 
 import bluej.Config;
-import bluej.graph.GraphEditor;
-import bluej.graph.Moveable;
 import bluej.pkgmgr.Package;
+import bluej.pkgmgr.PackageEditor;
 import bluej.pkgmgr.PkgMgrFrame;
-import bluej.prefmgr.PrefMgr;
 import bluej.utility.Debug;
+import bluej.utility.DialogManager;
+import javafx.scene.layout.AnchorPane;
+import javafx.scene.layout.BorderPane;
+import javafx.scene.layout.Pane;
+import javafx.scene.layout.Region;
+import javafx.scene.layout.VBox;
+import javafx.scene.shape.Rectangle;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 
 /**
  * A sub package (or parent package)
@@ -48,39 +57,84 @@ import bluej.utility.Debug;
  * @author Michael Cahill
  */
 public class PackageTarget extends Target
-    implements Moveable
 {
     static final int MIN_WIDTH = 60;
     static final int MIN_HEIGHT = 40;
 
     private static final int TAB_HEIGHT = 12;
 
-    static String openStr = Config.getString("pkgmgr.packagemenu.open");
-    static String removeStr = Config.getString("pkgmgr.packagemenu.remove");
+    static final String openStr = Config.getString("pkgmgr.packagemenu.open");
+    static final String removeStr = Config.getString("pkgmgr.packagemenu.remove");
 
     static final Color envOpColour = Config.ENV_COLOUR;
 
     static final BasicStroke normalStroke = new BasicStroke(1);
     static final BasicStroke selectedStroke = new BasicStroke(3);
 
-    private int ghostX;
-    private int ghostY;
-    private int ghostWidth;
-    private int ghostHeight;
-    private boolean isDragging;
+    @OnThread(Tag.FXPlatform)
     private boolean isMoveable = true;
 
     public PackageTarget(Package pkg, String baseName)
     {
         super(pkg, baseName);
 
-        setSize(calculateWidth(baseName), DEF_HEIGHT + TAB_HEIGHT);
+        Platform.runLater(() -> {
+            JavaFXUtil.addStyleClass(pane, "package-target");
+
+            Label name = new Label(baseName);
+            JavaFXUtil.addStyleClass(name, "package-target-name");
+            name.setMaxWidth(9999.0);
+            pane.setTop(name);
+            setSize(calculateWidth(baseName), DEF_HEIGHT + TAB_HEIGHT);
+
+            Pane center = new Pane();
+            BorderPane centerWrapper = new BorderPane(center);
+            pane.setCenter(centerWrapper);
+            JavaFXUtil.addStyleClass(centerWrapper, "package-target-preview-wrapper");
+            JavaFXUtil.addStyleClass(center, "package-target-preview");
+
+            double pos[] = new double[] {0.25,0.5,  0.75, 0.2,   0.6,0.8};
+            for (int i = 0; i < 3; i++)
+            {
+                Pane r = new Pane();
+                r.setMouseTransparent(true);
+                // was: 15, 10
+                r.prefWidthProperty().bind(center.widthProperty().multiply(0.2));
+                r.prefHeightProperty().bind(center.heightProperty().multiply(0.2));
+                r.layoutXProperty().bind(center.widthProperty().multiply(pos[i*2+0]-0.1));
+                r.layoutYProperty().bind(center.heightProperty().multiply(pos[i*2+1]-0.1));
+                /*
+                //r.setMaxWidth(Region.USE_PREF_SIZE);
+                //r.setMaxHeight(Region.USE_PREF_SIZE);
+                r.setMinWidth(10);
+                r.setMinHeight(5);
+                AnchorPane.setLeftAnchor(r, pos[i * 2 + 0] * center.getWidth());
+                AnchorPane.setRightAnchor(r, (pos[i * 2 + 0]+0.2) * center.getWidth());
+                AnchorPane.setTopAnchor(r, pos[i * 2 + 1] * center.getHeight());
+                AnchorPane.setBottomAnchor(r, (pos[i * 2 + 1]+0.2) * center.getHeight());
+                int iFinal = i;
+                JavaFXUtil.addChangeListener(center.widthProperty(), w -> {
+                    AnchorPane.setLeftAnchor(r, pos[iFinal * 2 + 0] * w.doubleValue());
+                    AnchorPane.setRightAnchor(r, (pos[iFinal * 2 + 0]+0.2) * w.doubleValue());
+                });
+                JavaFXUtil.addChangeListener(center.heightProperty(), h -> {
+                    AnchorPane.setTopAnchor(r, pos[iFinal * 2 + 1] * h.doubleValue());
+                    AnchorPane.setBottomAnchor(r, (pos[iFinal * 2 + 1]+0.2) * h.doubleValue());
+                });*/
+
+                JavaFXUtil.addStyleClass(r, "package-target-preview-item");
+
+                center.getChildren().add(r);
+            }
+
+        });
     }
 
     /**
      * Return the target's base name (ie the name without the package name). eg.
      * Target
      */
+    @OnThread(Tag.Any)
     public String getBaseName()
     {
         return getIdentifierName();
@@ -91,7 +145,7 @@ public class PackageTarget extends Target
      */
     public String getQualifiedName()
     {
-        return getPackage().getQualifiedName(getBaseName());
+        return getOpenPkgName();
     }
 
     @Override
@@ -102,6 +156,7 @@ public class PackageTarget extends Target
     }
 
     @Override
+    @OnThread(Tag.FXPlatform)
     public void save(Properties props, String prefix)
     {
         super.save(props, prefix);
@@ -155,91 +210,96 @@ public class PackageTarget extends Target
      * new PkgFrame when a package is drilled down on.
      */
     @Override
-    public void doubleClick(MouseEvent evt)
+    @OnThread(Tag.FXPlatform)
+    public void doubleClick()
     {
-        getPackage().getEditor().raiseOpenPackageEvent(this, getPackage().getQualifiedName(getBaseName()));
+        SwingUtilities.invokeLater(() -> {getPackage().getEditor().raiseOpenPackageEvent(this, getOpenPkgName());});
     }
 
     /**
      * Disply the context menu.
      */
     @Override
-    public void popupMenu(int x, int y, GraphEditor graphEditor)
+    @OnThread(Tag.FXPlatform)
+    public void popupMenu(int x, int y, PackageEditor graphEditor)
     {
-        JPopupMenu menu = createMenu();
+        ContextMenu menu = createMenu();
         if (menu != null) {
-            menu.show(graphEditor, x, y);
+            showingMenu(menu);
+            menu.show(pane, x, y);
         }
     }
 
     /**
      * Construct a popup menu which displays all our parent packages.
      */
-    private JPopupMenu createMenu()
+    @OnThread(Tag.FXPlatform)
+    private ContextMenu createMenu()
     {
-        JPopupMenu menu = new JPopupMenu(getBaseName());
+        MenuItem open = new MenuItem(openStr);
+        open.setOnAction(e -> SwingUtilities.invokeLater(() -> {
+            getPackage().getEditor().raiseOpenPackageEvent(this, getOpenPkgName());
+        }));
+        JavaFXUtil.addStyleClass(open, "class-action-inbuilt");
+        ContextMenu contextMenu = new ContextMenu(open);
 
-        Action openAction = new OpenAction(openStr, this, getPackage().getQualifiedName(getBaseName()));
-        addMenuItem(menu, openAction);
-        
-        Action removeAction = new RemoveAction(removeStr, this);
-        addMenuItem(menu, removeAction);
+        if (isRemovable())
+        {
+            MenuItem remove = new MenuItem(removeStr);
+            remove.setOnAction(e -> SwingUtilities.invokeLater(() ->
+            {
+                getPackage().getEditor().raiseRemoveTargetEvent(this);
+            }));
+            JavaFXUtil.addStyleClass(remove, "class-action-inbuilt");
+            contextMenu.getItems().add(remove);
+        }
 
-        return menu;
+
+        return contextMenu;
     }
 
-    private void addMenuItem(JPopupMenu menu, Action action)
+    @OnThread(Tag.Any)
+    protected boolean isRemovable()
     {
-        JMenuItem item = menu.add(action);
-        item.setFont(PrefMgr.getPopupMenuFont());
-        item.setForeground(envOpColour);
+        return true;
     }
 
-    private class OpenAction extends AbstractAction
+    @OnThread(Tag.Any)
+    protected String getOpenPkgName()
     {
-        private Target t;
-        private String pkgName;
-
-        public OpenAction(String menu, Target t, String pkgName)
-        {
-            super(menu);
-            this.t = t;
-            this.pkgName = pkgName;
-        }
-
-        @Override
-        public void actionPerformed(ActionEvent e)
-        {
-            getPackage().getEditor().raiseOpenPackageEvent(t, pkgName);
-        }
-    }
-
-    private class RemoveAction extends AbstractAction
-    {
-        private Target t;
-
-        public RemoveAction(String menu, Target t)
-        {
-            super(menu);
-            this.t = t;
-        }
-
-        @Override
-        public void actionPerformed(ActionEvent e)
-        {
-            getPackage().getEditor().raiseRemoveTargetEvent(t);
-        }
+        return getPackage().getQualifiedName(getBaseName());
     }
 
     @Override
     public void remove()
     {
         PkgMgrFrame pmf = PkgMgrFrame.findFrame(getPackage());
-        if (pmf.askRemovePackage(this)) {
-            deleteFiles();
-            getPackage().getProject().removePackage(getQualifiedName());
-            getPackage().removeTarget(this);
-        }
+        String name = getQualifiedName();
+        PkgMgrFrame[] f = PkgMgrFrame.getAllProjectFrames(pmf.getProject(), name);
+
+        Platform.runLater(() ->
+        {
+            if (f != null)
+            {
+                DialogManager.showErrorFX(pmf.getFXWindow(), "remove-package-open");
+            }
+            else
+            {
+                // Check they realise that this will delete ALL the files.
+                int response = DialogManager.askQuestionFX(pmf.getFXWindow(), "really-remove-package");
+
+                // if they agree
+                if (response == 0)
+                {
+                    SwingUtilities.invokeLater(() ->
+                    {
+                        deleteFiles();
+                        getPackage().getProject().removePackage(getQualifiedName());
+                        getPackage().removeTarget(this);
+                    });
+                }
+            }
+        });
     }
 
     /**
@@ -253,111 +313,21 @@ public class PackageTarget extends Target
     }
 
     @Override
+    @OnThread(Tag.FXPlatform)
     public void setSize(int width, int height)
     {
         super.setSize(Math.max(width, MIN_WIDTH), Math.max(height, MIN_HEIGHT));
-        setGhostSize(0, 0);
     }
 
-    @Override
-    public void setPos(int x, int y)
-    {
-        super.setPos(x, y);
-        setGhostPosition(0, 0);
-    }
-
-    /**
-     * @return Returns the ghostX.
-     */
-    public int getGhostX()
-    {
-        return ghostX;
-    }
-
-    /**
-     * @return Returns the ghostX.
-     */
-    public int getGhostY()
-    {
-        return ghostY;
-    }
-
-    /**
-     * @return Returns the ghostX.
-     */
-    public int getGhostWidth()
-    {
-        return ghostWidth;
-    }
-
-    /**
-     * @return Returns the ghostX.
-     */
-    public int getGhostHeight()
-    {
-        return ghostHeight;
-    }
-
-    /**
-     * Set the position of the ghost image given a delta to the real size.
-     */
-    public void setGhostPosition(int deltaX, int deltaY)
-    {
-        this.ghostX = getX() + deltaX;
-        this.ghostY = getY() + deltaY;
-    }
-
-    /**
-     * Set the size of the ghost image given a delta to the real size.
-     */
-    public void setGhostSize(int deltaX, int deltaY)
-    {
-        ghostWidth = Math.max(getWidth() + deltaX, MIN_WIDTH);
-        ghostHeight = Math.max(getHeight() + deltaY, MIN_HEIGHT);
-    }
-
-    /**
-     * Set the target's position to its ghost position.
-     */
-    public void setPositionToGhost()
-    {
-        super.setPos(ghostX, ghostY);
-        setSize(ghostWidth, ghostHeight);
-        isDragging = false;
-    }
-
-    /** 
-     * Ask whether we are currently dragging. 
-     */
-    public boolean isDragging()
-    {
-        return isDragging;
-    }
-
-    /**
-     * Set whether or not we are currently dragging this class
-     * (either moving or resizing).
-     */
-    public void setDragging(boolean isDragging)
-    {
-        this.isDragging = isDragging;
-    }
-
-    @Override
+    @OnThread(Tag.FXPlatform)
     public boolean isMoveable()
     {
         return isMoveable;
     }
 
-    @Override
+    @OnThread(Tag.FXPlatform)
     public void setIsMoveable(boolean isMoveable)
     {
         this.isMoveable = isMoveable;
-    }
-
-    @Override
-    public String getTooltipText()
-    {
-        return getIdentifierName();
     }
 }

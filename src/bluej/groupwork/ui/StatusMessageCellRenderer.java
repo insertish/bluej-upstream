@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2016  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -22,6 +22,7 @@
 
 package bluej.groupwork.ui;
 
+import bluej.Config;
 import bluej.groupwork.TeamStatusInfo;
 import bluej.pkgmgr.Project;
 import java.awt.Color;
@@ -33,7 +34,6 @@ import javax.swing.table.DefaultTableCellRenderer;
  * StatusCellRenderer.java
  * Renderer to add colour to the status message of resources inside a StatusFrame
  * @author Bruce Quig
- * @cvs $Id: StatusMessageCellRenderer.java 6215 2009-03-30 13:28:25Z polle $
  */
 public class StatusMessageCellRenderer extends DefaultTableCellRenderer 
 {
@@ -47,6 +47,9 @@ public class StatusMessageCellRenderer extends DefaultTableCellRenderer
     private final static Color DELETED = new Color(122,143,123);      // grey-green
     private final static Color CONFLICT = NEEDSMERGE;   // darker red
 
+    private final static int LOCAL = 0; //local status
+    private final static int REMOTE = 1; //remote status
+    
     Project project;
     
     public StatusMessageCellRenderer(Project project)
@@ -65,35 +68,66 @@ public class StatusMessageCellRenderer extends DefaultTableCellRenderer
     {
         super.getTableCellRendererComponent(jTable, object, isSelected, hasFocus, row, column);
         
-        int status = getStatus(jTable, row);
+        int remoteStatusColumn = getRemoteStatusColumnIndex(jTable);
+        
+        int status = getStatus(jTable, row, LOCAL);
+        int remoteStatus = getStatus(jTable, row, REMOTE);
+        
         setForeground(getStatusColour(status));
-        String statusLabel = getStatusString(object, status, row, column);
+        String statusLabel = getStatusString(jTable, object, status, row, column);
+        if (column == remoteStatusColumn)
+            statusLabel = getStatusString(jTable, object, remoteStatus, row, column);
+        
         setText(statusLabel);
         setForeground(getStatusColour(status));
         
         return this;
     }
     
-    private int getStatus(JTable table, int row) 
+    private int getStatus(JTable table, int row, int location) 
     {
         int status = 0;
-        Object val = table.getModel().getValueAt(row, 2);
+        Object val;
+        
+        int localStatusColumn = project.getTeamSettingsController().isDVCS()?
+                table.getColumnModel().getColumnIndex(Config.getString("team.status.status"))
+                :table.getColumnModel().getColumnIndex(Config.getString("team.status"));
+        
+        int remoteStatusColumn = getRemoteStatusColumnIndex(table);
+        
+        if (location == LOCAL){
+            val = table.getModel().getValueAt(row, localStatusColumn);
+        } else {
+            val = table.getModel().getValueAt(row, remoteStatusColumn);
+        }
+        
         if(val instanceof Integer) {
-            status = ((Integer)val).intValue();
+            status = ((Integer)val);
         }
         return status;
     }
     
     /**
-     * get the String value of the statis ID
+     * get the String value of the status ID
      */
-    private String getStatusString(Object value, int statusValue, int row, int col) 
+    private String getStatusString(JTable jtable, Object value, int statusValue, int row, int col) 
     {
-        // TODO, change to use column names for ID
-        if(col == 0 || col == 1) {
+        String colName = jtable.getColumnName(col);
+
+        if (colName.equals(Config.getString("team.status.resource")) || colName.equals(Config.getString("team.status.version"))) {
             return value.toString();
-        }        
-        return TeamStatusInfo.getStatusString(statusValue);
+        }
+        
+        if (project.getTeamSettingsController().isDVCS()) {
+            if (colName.equals(Config.getString("team.status.remoteStatus"))) {
+                return TeamStatusInfo.getDCVSStatusString(statusValue,true);
+            }
+            //return local status.
+            return TeamStatusInfo.getDCVSStatusString(statusValue, false);
+        } else {
+            return TeamStatusInfo.getStatusString(statusValue);
+        }
+
     }
     
     /**
@@ -132,5 +166,20 @@ public class StatusMessageCellRenderer extends DefaultTableCellRenderer
         }
         
         return color;
+    }
+    
+    /**
+     * return the column index of the remote status, if this is a distributed VCS
+     * @param jTable
+     * @return the column number, -1 if this is not a DCVS.
+     */
+    private int getRemoteStatusColumnIndex(JTable jTable)
+    {
+        int result = -1;
+
+        if (project.getTeamSettingsController().isDVCS()) {
+            result = jTable.getColumnModel().getColumnIndex(Config.getString("team.status.remoteStatus"));
+        }
+        return result;
     }
 }

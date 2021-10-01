@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2010,2012,2014  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2010,2012,2014,2016,2017  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -27,12 +27,25 @@ import java.awt.Toolkit;
 import java.awt.Window;
 import java.awt.datatransfer.StringSelection;
 import java.io.File;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 
 import javax.swing.JButton;
 import javax.swing.JDialog;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 
+import javafx.scene.control.Alert;
+import javafx.scene.control.Button;
+import javafx.scene.control.ButtonBar;
+import javafx.scene.control.ButtonType;
+import javafx.scene.control.TextInputDialog;
+import javafx.stage.Modality;
+
+import bluej.utility.javafx.SwingNodeDialog;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 import bluej.Config;
 
 /**
@@ -43,6 +56,7 @@ import bluej.Config;
  *
  * @author Michael Kolling
  */
+@OnThread(Tag.Swing)
 public class DialogManager
 {
     private static final String DLG_FILE_NAME = "dialogues";
@@ -68,58 +82,61 @@ public class DialogManager
      * Show an information dialog with message and "OK" button. The
      * message itself is identified by a message ID (a short string)
      * which is looked up in the language specific dialogue text file
-     * (eg. "dialogues.english"). A text (given in a parameter) is appended
-     * to the message.
+     * (eg. "dialogues.english").
      */
-    public static void showMessageWithText(Component parent, String msgID,
-                                           String text)
+    @OnThread(Tag.FXPlatform)
+    public static void showMessageFX(javafx.stage.Window parent, String msgID)
     {
-        String message = getMessage(msgID);
-        if (message != null) {
-            JOptionPane.showMessageDialog(parent, message + "\n" + text);
-        }
+        showMessageFX(parent, msgID, new String[0]);
     }
-    
+
     /**
-     * Show an information dialog with message (including and "OK" button. The
+     * Show an information dialog with message and "OK" button. The
      * message itself is identified by a message ID (a short string)
      * which is looked up in the language specific dialogue text file
-     * (eg. "dialogues.english"). A text (given in a parameter) is appended
-     * to the message.
+     * (eg. "dialogues.english"). Then replacing variables with subs.
      */
-    public static void showMessageWithText(Component parent, String msgID, String[] subs)
+    @OnThread(Tag.FXPlatform)
+    public static void showMessageFX(javafx.stage.Window parent, String msgID, String[] subs)
     {
         String message = getMessage(msgID);
-        message = Utility.mergeStrings(message, subs);
-        
-        // Replace single ':' with a blank line:
-        message = message.replace("\n:\n", "\n\n");
-        message = message.replace("\r\n:\r\n", "\r\n\r\n");
-        
         if (message != null) {
-            JOptionPane.showMessageDialog(parent, message,
-                    Config.getApplicationName() + ":  " +
-                    Config.getString("dialogmgr.message"),
-                    JOptionPane.INFORMATION_MESSAGE);
+            for (String sub : subs) {
+                message = message.replace("$", sub);
+            }
+            Alert alert = new Alert(Alert.AlertType.INFORMATION, "", ButtonType.OK);
+            alert.setHeaderText(message);
+            alert.setTitle(Config.getApplicationName() + ":  " +
+                Config.getString("dialogmgr.message"));
+            alert.initOwner(parent);
+            alert.initModality(Modality.WINDOW_MODAL);
+            alert.showAndWait();
         }
     }
-    
+
     /**
      * Show an information dialog with message and "OK" button. The
      * message itself is identified by a message ID (a short string)
      * which is looked up in the language specific dialogue text file
      * (eg. "dialogues.english"). A text (given in a parameter) is appended
-     * as a prefix to the message. Use showMessageWithText in order to
-     * append to the suffix of the message
+     * to the message.
      */
-    public static void showMessageWithPrefixText(Component parent, String msgID,
-                                           String text)
+    @OnThread(Tag.FXPlatform)
+    public static void showMessageWithTextFX(javafx.stage.Window parent, String msgID,
+                                             String text)
     {
         String message = getMessage(msgID);
-        if (message != null)
-            JOptionPane.showMessageDialog(parent, text+ "\n"+message);
+        if (message != null) {
+            Alert alert = new Alert(Alert.AlertType.INFORMATION, text, ButtonType.OK);
+            alert.setHeaderText(message);
+            alert.setTitle(Config.getApplicationName() + ":  " +
+                Config.getString("dialogmgr.message"));
+            alert.initOwner(parent);
+            alert.initModality(Modality.WINDOW_MODAL);
+            alert.showAndWait();
+        }
     }
-    
+
     /**
      * Show an information dialog with message and "OK" button. The
      * message itself is identified by a message ID (a short string)
@@ -128,13 +145,23 @@ public class DialogManager
      * as a prefix to the message. Some text (given as a parameter -
      * innerText) is inserted within the message itself. 
      */
-    public static void showMessageWithPrefixText(Component parent, String msgID,
-                                           String text, String innerText)
+    @OnThread(Tag.FXPlatform)
+    public static void showMessageWithPrefixTextFX(javafx.stage.Window parent, String msgID,
+                                                   String text, String innerText)
     {
         String message = getMessage(msgID);
-        String messageDialog=Utility.mergeStrings(message, innerText);
+        String messageDialog = Utility.mergeStrings(message, innerText);
         if (message != null)
-            JOptionPane.showMessageDialog(parent, text+ "\n"+messageDialog);
+        {
+            Alert alert = new Alert(Alert.AlertType.INFORMATION, "", ButtonType.OK);
+            alert.setHeaderText("");
+            alert.setTitle(Config.getApplicationName() + ":  " +
+                Config.getString("dialogmgr.message"));
+            alert.initOwner(parent);
+            alert.initModality(Modality.WINDOW_MODAL);
+            alert.setContentText(messageDialog);
+            alert.showAndWait();
+        }
     }
 
 
@@ -148,15 +175,31 @@ public class DialogManager
     {
         JOptionPane.showMessageDialog(parent, text);
     }
-    
-    public static void showTextWithCopyButton(Component parent, String text, String title)
+
+    @OnThread(Tag.FXPlatform)
+    public static void showTextWithCopyButtonFX(javafx.stage.Window parent, String text, String title)
     {
-        if (JOptionPane.showOptionDialog(parent, text, title, 0, 0, null, new String [] {Config.getString("okay"), Config.getString("editor.copy-to-clipboardLabel")}, null) == 1)
+        Alert alert = new Alert(Alert.AlertType.INFORMATION, text, ButtonType.OK, ButtonType.APPLY);
+        ((Button)alert.getDialogPane().lookupButton(ButtonType.APPLY)).setText(Config.getString("editor.copy-to-clipboardLabel"));
+        alert.setTitle(title);
+        alert.initOwner(parent);
+        alert.setHeaderText("");
+        alert.initModality(Modality.WINDOW_MODAL);
+        if (alert.showAndWait().orElse(ButtonType.OK) == ButtonType.APPLY)
         {
             Toolkit.getDefaultToolkit().getSystemClipboard().setContents(new StringSelection(text), null);
         }
     }
 
+    @OnThread(Tag.FXPlatform)
+    public static void showTextFX(javafx.stage.Window parent, String text)
+    {
+        Alert alert = new Alert(Alert.AlertType.INFORMATION, text, ButtonType.OK);
+        alert.initOwner(parent);
+        alert.initModality(Modality.WINDOW_MODAL);
+        alert.setHeaderText("");
+        alert.showAndWait();
+    }
 
     /**
      * Show an error dialog with message and "OK" button.
@@ -166,6 +209,18 @@ public class DialogManager
         String message = getMessage(msgID);
         if (message != null) {
             showErrorText(parent, message);
+        }
+    }
+
+    /**
+     * Show an error dialog with message and "OK" button.
+     */
+    @OnThread(Tag.FXPlatform)
+    public static void showErrorFX(javafx.stage.Window parent, String msgID)
+    {
+        String message = getMessage(msgID);
+        if (message != null) {
+            showErrorTextFX(parent, message);
         }
     }
 
@@ -182,17 +237,32 @@ public class DialogManager
                 Config.getString("dialogmgr.error"),
                 JOptionPane.ERROR_MESSAGE);
     }
-    
 
     /**
-     * Show an error dialog with a message, some additional text, and "OK" button.
+     * Show an error dialog with an already-localized message and "OK" button.
+     *
+     * @param parent   The component to position the dialog over
+     * @param message  The message text to display (should be localized)
      */
-    public static void showErrorWithText(Component parent, String msgID,
-                                         String text)
+    @OnThread(Tag.FXPlatform)
+    public static void showErrorTextFX(javafx.stage.Window parent, String message)
+    {
+        Alert alert = new Alert(Alert.AlertType.ERROR, message, ButtonType.OK);
+        alert.setTitle(Config.getApplicationName() + ":  " +
+            Config.getString("dialogmgr.error"));
+        alert.initOwner(parent);
+        alert.initModality(Modality.WINDOW_MODAL);
+        alert.setHeaderText("");
+        alert.showAndWait();
+    }
+
+    @OnThread(Tag.FXPlatform)
+    public static void showErrorWithTextFX(javafx.stage.Window parent, String msgID,
+                                           String text)
     {
         String message = getMessage(msgID);
         if (message != null) {
-            showErrorText(parent, message + "\n" + text);
+            showErrorTextFX(parent, message + "\n" + text);
         }
     }
 
@@ -201,36 +271,34 @@ public class DialogManager
      * question and the buttons is read from the dialogues file. If the third
      * button text is "null", it is not shown. Returns the button index that
      * was selected (0..2).
+     * 
+     * FX button types/ordering:
+     * With two buttons, the first button is assumed to be a YES button,
+     * the second is assumed to be NO.  With three buttons, the first two
+     * are assumed to be yes, the third is NO.
      */
-    public static int askQuestion(Component parent, String msgID)
+    @OnThread(Tag.FXPlatform)
+    public static int askQuestionFX(javafx.stage.Window parent, String msgID)
     {
-        String message = getMessage(msgID);
-        if (message != null) {
-            int button3Index = message.lastIndexOf("\n");
-            int button2Index = message.lastIndexOf("\n", button3Index-1);
-            int button1Index = message.lastIndexOf("\n", button2Index-1);
-            String button3 = message.substring(button3Index+1);
-            String button2 = message.substring(button2Index+1, button3Index);
-            String button1 = message.substring(button1Index+1, button2Index);
-            message = message.substring(0, button1Index);
-            Object[] options;
-            if ("null".equals(button3)) {
-                options = new Object[] { button1, button2 };
+        MessageAndButtons messageAndButtons = new MessageAndButtons(getMessage(msgID));
+        if (messageAndButtons.getMessage() != null) {
+            List<ButtonType> buttons = new ArrayList<>();
+            for (int i = 0; i < messageAndButtons.getOptions().size(); i++)
+            {
+                buttons.add(new ButtonType(messageAndButtons.getOptions().get(i), i == messageAndButtons.getOptions().size() - 1 ? ButtonBar.ButtonData.NO : ButtonBar.ButtonData.YES));
             }
-            else {
-                options = new Object[] { button1, button2, button3 };
-            }
-
-            return JOptionPane.showOptionDialog(parent, message,
-                                                Config.getApplicationName() + ":  " +
-                                                Config.getString("dialogmgr.question"),
-                                                JOptionPane.DEFAULT_OPTION,
-                                                JOptionPane.WARNING_MESSAGE,
-                                                null, options, options[0]);
+            
+            Alert alert = new Alert(Alert.AlertType.CONFIRMATION, messageAndButtons.getMessage(), buttons.toArray(new ButtonType[0]));
+            alert.setHeaderText("");
+            alert.initOwner(parent);
+            alert.initModality(Modality.WINDOW_MODAL);
+            alert.setTitle(Config.getApplicationName() + ":  " +
+                Config.getString("dialogmgr.question"));
+            return alert.showAndWait().map(buttons::indexOf).orElse(buttons.size() - 1);
         }
         return 0;
     }
-    
+
     /**
      * Brings up a two or three button question dialog. The text for the
      * question and the buttons is read from the dialogues file; '$'
@@ -240,7 +308,8 @@ public class DialogManager
      * <p>If the third button text is "null", it is not shown. Returns the button
      * index that was selected (0..2).
      */
-    public static int askQuestion(Component parent, String msgID, String [] subs)
+    @OnThread(Tag.FXPlatform)
+    public static int askQuestionFX(javafx.stage.Window parent, String msgID, String [] subs)
     {
         String message = getMessage(msgID);
         if (message != null) {
@@ -252,20 +321,20 @@ public class DialogManager
             String button1 = message.substring(button1Index+1, button2Index);
             message = message.substring(0, button1Index);
             message = Utility.mergeStrings(message, subs);
-            Object[] options;
-            if ("null".equals(button3)) {
-                options = new Object[] { button1, button2 };
-            }
-            else {
-                options = new Object[] { button1, button2, button3 };
-            }
+            List<ButtonType> buttons = new ArrayList<>();
+            boolean hasThirdButton = "null".equals(button3);
+            buttons.add(new ButtonType(button1, hasThirdButton ? ButtonBar.ButtonData.CANCEL_CLOSE : ButtonBar.ButtonData.NO));
+            buttons.add(new ButtonType(button2, hasThirdButton ? ButtonBar.ButtonData.NO : ButtonBar.ButtonData.YES));
+            if (hasThirdButton)
+                buttons.add(new ButtonType(button3, ButtonBar.ButtonData.YES));
 
-            return JOptionPane.showOptionDialog(parent, message,
-                                                Config.getApplicationName() + ":  " +
-                                                Config.getString("dialogmgr.question"),
-                                                JOptionPane.DEFAULT_OPTION,
-                                                JOptionPane.WARNING_MESSAGE,
-                                                null, options, options[0]);
+            Alert alert = new Alert(Alert.AlertType.CONFIRMATION, message, buttons.toArray(new ButtonType[0]));
+            alert.initOwner(parent);
+            alert.initModality(Modality.WINDOW_MODAL);
+            alert.setHeaderText("");
+            alert.setTitle(Config.getApplicationName() + ":  " +
+                Config.getString("dialogmgr.question"));
+            return alert.showAndWait().map(buttons::indexOf).orElse(buttons.size() - 1);
         }
         return 0;
     }
@@ -280,7 +349,8 @@ public class DialogManager
      * 
      * @return The string supplied by the user, or null if the dialog was cancelled.
      */
-    public static String askString(Component parent, String msgID)
+    @OnThread(Tag.FXPlatform)
+    public static String askStringFX(javafx.stage.Window parent, String msgID)
     {
         String response = "";
         String message = getMessage(msgID);
@@ -293,13 +363,12 @@ public class DialogManager
             if ("null".equals(defaultText)) {
                 defaultText = null;
             }
-            response = (String)JOptionPane.showInputDialog(parent,
-                                                           message,
-                                                           title,
-                                                           JOptionPane.PLAIN_MESSAGE,
-                                                           null,
-                                                           null,
-                                                           defaultText);
+            TextInputDialog dialog = new TextInputDialog(defaultText);
+            dialog.initModality(Modality.WINDOW_MODAL);
+            dialog.initOwner(parent);
+            dialog.setTitle(title);
+            dialog.setHeaderText(message);
+            return dialog.showAndWait().orElse(null);
         }
         return response;
     }
@@ -315,7 +384,8 @@ public class DialogManager
      * 
      * @return The string supplied by the user, or null if the dialog was cancelled.
      */
-    public static String askString(Component parent, String msgID, String defaultText)
+    @OnThread(Tag.FXPlatform)
+    public static String askStringFX(javafx.stage.Window parent, String msgID, String defaultText)
     {
         String response = "";
         String message = getMessage(msgID);
@@ -324,13 +394,12 @@ public class DialogManager
             int titleIndex = message.lastIndexOf("\n", defaultTextIndex - 1);
             String title = message.substring(titleIndex + 1, defaultTextIndex);
             message = message.substring(0, titleIndex);
-            response = (String) JOptionPane.showInputDialog(parent,
-                                                            message,
-                                                            title,
-                                                            JOptionPane.PLAIN_MESSAGE,
-                                                            null,
-                                                            null,
-                                                            defaultText);
+            TextInputDialog dialog = new TextInputDialog(defaultText);
+            dialog.initModality(Modality.WINDOW_MODAL);
+            dialog.initOwner(parent);
+            dialog.setTitle(title);
+            dialog.setHeaderText(message);
+            return dialog.showAndWait().orElse(null);
         }
         return response;
     }
@@ -339,7 +408,8 @@ public class DialogManager
      * Support routine for dialogues. Read the message text out of the
      * dialogue text file (language dependent).
      */
-    public static String getMessage(String msgID)
+    @OnThread(Tag.Any)
+    public static String getMessage(String msgID, String... subs)
     {
         String message = null;
         
@@ -370,17 +440,14 @@ public class DialogManager
             message = "BlueJ configuration problem:\n" + "text not found for message ID\n" + msgID;
             Debug.message(message);
         }
+        else
+        {
+            for (String sub : subs) {
+                message = message.replace("$", sub);
+            }
+        }
         return message;
     }
-
-    /**
-     * Show a "Not Yet Implemented" message.
-     */
-    public static void NYI(Component frame)
-    {
-        showMessage(frame, "not-yet-implemented");
-    }
-
 
     // --- utility methods to position dialogues and other windows ---
 
@@ -392,6 +459,11 @@ public class DialogManager
         centreWindow(dialog, (Window)dialog.getParent());
     }
 
+    public static void centreDialog(SwingNodeDialog dialog)
+    {
+        
+    }
+
 
     /**
      * centreWindow - try to center a window within a parent window
@@ -399,49 +471,6 @@ public class DialogManager
     public static void centreWindow(Window child, Window parent)
     {
         child.setLocationRelativeTo(parent);
-    }
-
-
-    /**
-     * tileWindow - position the child at 20, 20 offset of parent
-     *  location
-     */
-    public static void tileWindow(Window child, Window parent)
-    {
-        if(parent.isShowing()) {
-            Point p_topleft = parent.getLocationOnScreen();
-            child.setLocation(p_topleft.x + 20, p_topleft.y + 20);
-        }
-    }
-    
-    /**
-     * Allows the user to specify the number of buttons in question dialog. 
-     * The text for the question and the buttons is read from the dialogues file. 
-     */
-    public static int askQuestion(Component parent, String msgID, int numOptions)
-    {
-        String message = getMessage(msgID);
-        if(message != null) {
-            String buttonName;
-            int btnIndex=message.length()+1;
-            int prevBtnIndex=message.length(); 
-            String[] options=new String[numOptions];
-            for (int i=0; i < numOptions; i++) {
-                btnIndex=message.lastIndexOf("\n", btnIndex-1);
-                buttonName=message.substring(btnIndex+1, prevBtnIndex);
-                options[numOptions-i-1]=buttonName; //just to ensure they go in, in the correct order
-                prevBtnIndex=btnIndex;
-            }
-            message = message.substring(0, btnIndex);
-
-            return JOptionPane.showOptionDialog(parent, message,
-                    Config.getApplicationName() + ":  " +
-                    Config.getString("dialogmgr.question"),
-                    JOptionPane.DEFAULT_OPTION,
-                    JOptionPane.WARNING_MESSAGE,
-                    null, options, options[0]);
-        }
-        return 0;
     }
 
     public static void addOKCancelButtons(JPanel panel, JButton okButton, JButton cancelButton) 
@@ -455,4 +484,43 @@ public class DialogManager
         }
     }
 
+    private static class MessageAndButtons
+    {
+        private final String message;
+        private final List<String> options;
+
+        public MessageAndButtons(String message)
+        {
+            if (message == null)
+            {
+                this.message = null;
+                this.options = null;
+                return;
+            }
+            
+            int button3Index = message.lastIndexOf("\n");
+            int button2Index = message.lastIndexOf("\n", button3Index-1);
+            int button1Index = message.lastIndexOf("\n", button2Index-1);
+            String button3 = message.substring(button3Index+1);
+            String button2 = message.substring(button2Index+1, button3Index);
+            String button1 = message.substring(button1Index+1, button2Index);
+            this.message = message.substring(0, button1Index);
+            if ("null".equals(button3)) {
+                options = Arrays.asList(button1, button2);
+            }
+            else {
+                options = Arrays.asList(button1, button2, button3);
+            }
+        }
+
+        public String getMessage()
+        {
+            return message;
+        }
+
+        public List<String> getOptions()
+        {
+            return options;
+        }
+    }
 }

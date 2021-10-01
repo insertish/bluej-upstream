@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2012  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2012,2014,2016  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -24,10 +24,17 @@ package bluej.groupwork.actions;
 import java.awt.EventQueue;
 import java.io.File;
 import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
+import javafx.application.Platform;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 import bluej.Config;
 import bluej.collect.DataCollector;
 import bluej.groupwork.Repository;
@@ -37,6 +44,7 @@ import bluej.groupwork.TeamworkCommand;
 import bluej.groupwork.TeamworkCommandResult;
 import bluej.pkgmgr.PkgMgrFrame;
 import bluej.pkgmgr.Project;
+import bluej.utility.Debug;
 import bluej.utility.DialogManager;
 import bluej.utility.Utility;
 
@@ -47,9 +55,9 @@ import bluej.utility.Utility;
  */
 public class ImportAction extends TeamAction 
 {
-    public ImportAction()
+    public ImportAction(PkgMgrFrame pmf)
     {
-        super("team.import");
+        super(pmf, "team.import");
     }
     
     /* (non-Javadoc)
@@ -66,6 +74,7 @@ public class ImportAction extends TeamAction
         doImport(pmf, project);
     }
 
+    @OnThread(Tag.Swing)
     private void doImport(final PkgMgrFrame pmf, final Project project)
     {
         // The team settings controller is not initially associated with the
@@ -85,8 +94,8 @@ public class ImportAction extends TeamAction
         catch(IOException ioe) {
             String msg = DialogManager.getMessage("team-error-saving-project");
             if (msg != null) {
-                msg = Utility.mergeStrings(msg, ioe.getLocalizedMessage());
-                DialogManager.showErrorText(pmf, msg);
+                String finalMsg = Utility.mergeStrings(msg, ioe.getLocalizedMessage());
+                Platform.runLater(() -> DialogManager.showErrorTextFX(pmf.getFXWindow(), finalMsg));
                 return;
             }
         }
@@ -104,29 +113,47 @@ public class ImportAction extends TeamAction
                 result = command.getResult();
 
                 if (! result.isError()) {
-                    project.setTeamSettingsController(tsc);
-                    Set<File> files = tsc.getProjectFiles(true);
-                    Set<File> newFiles = new LinkedHashSet<File>(files);
+                    final AtomicReference<Set<File>> files = new AtomicReference<>();
+                    final AtomicBoolean isDVCS = new AtomicBoolean();
+                    try
+                    {
+                        EventQueue.invokeAndWait(() -> {
+                            project.setTeamSettingsController(tsc);
+                            Set<File> projFiles = tsc.getProjectFiles(true);
+                            // Make copy, to ensure thread safety:
+                            files.set(new HashSet<File>(projFiles));
+                            isDVCS.set(tsc.isDVCS());
+                        });
+                    }
+                    catch (InvocationTargetException | InterruptedException e)
+                    {
+                        Debug.reportError(e);
+                    }
+                    Set<File> newFiles = new LinkedHashSet<File>(files.get());
                     Set<File> binFiles = TeamUtils.extractBinaryFilesFromSet(newFiles);
                     command = repository.commitAll(newFiles, binFiles, Collections.<File>emptySet(),
-                            files, Config.getString("team.import.initialMessage"));
+                            files.get(), Config.getString("team.import.initialMessage"));
                     result = command.getResult();
+                    //In DVCS, we need an aditional command: pushChanges.
+                    if (isDVCS.get()){
+                        command = repository.pushChanges();
+                        result = command.getResult();
+                    }
                 }
 
-                stopProgressBar();
-
-                EventQueue.invokeLater(new Runnable() {
-                    public void run()
-                    {
-                        handleServerResponse(result);
-                        if(! result.isError()) {
+                Platform.runLater(() -> {
+                    handleServerResponse(result);
+                    EventQueue.invokeLater(() -> {
+                        stopProgressBar();
+                        if (!result.isError())
+                        {
                             setStatus(Config.getString("team.shared"));
                             DataCollector.teamShareProject(project, repository);
-                        }
-                        else {
+                        } else
+                        {
                             clearStatus();
                         }
-                    }
+                    });
                 });
             }
         };

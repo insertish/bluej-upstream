@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2013  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2013,2016  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -21,8 +21,15 @@
  */
 package bluej.graph;
 
-import java.awt.*;
 import java.util.*;
+
+import bluej.pkgmgr.Package;
+import bluej.pkgmgr.target.Target;
+import bluej.utility.Debug;
+import javafx.application.Platform;
+import javafx.scene.shape.Rectangle;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 
 /**
  * The diagram's marquee (a rectangular drag area for selecting graph elements).
@@ -30,19 +37,28 @@ import java.util.*;
  * @author fisker
  * @author Michael Kolling
  */
+@OnThread(Tag.FXPlatform)
 public final class Marquee
 {
-    private Graph graph;
+    private final Package graph;
     private int drag_start_x, drag_start_y;
     private Rectangle currentRect;
-    private SelectionSet selected = null;
+    private final SelectionSet selected;
+    private boolean active = false;
+    private final ArrayList<Target> previouslySelected = new ArrayList<>();
 
     /**
      * Create a marquee for a given graph.
      */
-    public Marquee(Graph graph)
+    @OnThread(Tag.Any)
+    public Marquee(Package graph, SelectionSet selection)
     {
         this.graph = graph;
+        this.selected = selection;
+        Platform.runLater(() -> {
+            currentRect = new Rectangle();
+            currentRect.setVisible(false);
+        });
     }
 
     /**
@@ -50,9 +66,16 @@ public final class Marquee
      */
     public void start(int x, int y)
     {
+        previouslySelected.clear();
+        previouslySelected.addAll(selected.getSelected());
         drag_start_x = x;
         drag_start_y = y;
-        selected = new SelectionSet();
+        currentRect.setX(x);
+        currentRect.setY(y);
+        currentRect.setWidth(0);
+        currentRect.setHeight(0);
+        currentRect.setVisible(false);
+        active = true;
     }
 
     /**
@@ -76,7 +99,14 @@ public final class Marquee
             y = y + h;
         w = Math.abs(w);
         h = Math.abs(h);
-        currentRect = new Rectangle(x, y, w, h);
+        currentRect.setX(x);
+        currentRect.setY(y);
+        currentRect.setWidth(w);
+        currentRect.setHeight(h);
+        if (w != 0 || h != 0)
+        {
+            currentRect.setVisible(true);
+        }
 
         findSelectedVertices(x, y, w, h);
     }
@@ -89,25 +119,28 @@ public final class Marquee
     {
         //clear the currently selected
         selected.clear();
+        selected.addAll(previouslySelected);
 
         //find the intersecting vertices
-        for (Iterator<? extends Vertex> it = graph.getVertices(); it.hasNext();) {
-            Vertex v = it.next();
-            if (v.getBounds().intersects(x, y, w, h)) {
+        for (Target v : graph.getVertices()) {
+            if (v.getBoundsInEditor().intersects(x, y, w, h)) {
                 selected.add(v);
             }
         }
+        
+        // If none of them are focused, focus one, otherwise keyboard
+        // actions won't work:
+        if (!selected.isEmpty() && !selected.getSelected().stream().anyMatch(Target::isFocused))
+            selected.getAnyVertex().requestFocus();
     }
 
     /**
      * Stop a current marquee selection.
      */
-    public SelectionSet stop()
+    public void stop()
     {
-        currentRect = null;
-        SelectionSet tmp = selected;
-        selected = null;
-        return tmp;
+        currentRect.setVisible(false);
+        active = false;
     }
 
     /**
@@ -115,7 +148,7 @@ public final class Marquee
      */
     public boolean isActive()
     {
-        return selected != null;
+        return active;
     }
     
     /**

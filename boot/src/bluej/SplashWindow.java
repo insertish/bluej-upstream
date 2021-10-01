@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2013,2014,2015  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2013,2014,2015,2017  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -21,6 +21,7 @@
  */
 package bluej;
 
+import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Frame;
 import java.awt.Graphics;
@@ -51,13 +52,9 @@ public class SplashWindow extends Frame
     {
         setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
         setUndecorated(true);
-
+        // Make window background transparent:
+        setBackground(new Color(0,0,0,0));
         add(image);
-        progress = new JProgressBar();
-        progress.setIndeterminate(true);
-        progress.setDoubleBuffered(true); //stop the flickering on raspberry pi.
-        progress.setVisible(false); //set progress bar to invisible, initially.
-        add(progress);
         pack();
 
         // centre on screen
@@ -65,14 +62,13 @@ public class SplashWindow extends Frame
         setLocation((screenDim.width - getSize().width) / 2, (screenDim.height - getSize().height) / 2);
         setVisible(true);
         
-        Timer progressTimer = new Timer(5000, new ActionListener() {
-            @Override
-            public void actionPerformed(ActionEvent e)
-            {
-                if (isVisible()) {
-                    progress.setVisible(true); //timeout expired, show progress bar.
-                    pack();
-                }
+        Timer progressTimer = new Timer(5000, (ActionEvent e) -> {
+            if (isVisible()) {
+                progress = new JProgressBar();
+                progress.setIndeterminate(true);
+                progress.setDoubleBuffered(true); //stop the flickering on raspberry pi.
+                add(progress);
+                pack();
             }
         });
         progressTimer.setRepeats(false);
@@ -87,22 +83,22 @@ public class SplashWindow extends Frame
         notify();
     }
     
-    /**
-     * Wait until the splash screen has actually been painted, with a timeout of
-     * 3 seconds.
-     */
-    public synchronized void waitUntilPainted()
-    {
-        long startTime = System.currentTimeMillis();
-        long timePast = System.currentTimeMillis() - startTime; 
-        while (!painted && timePast < 3000) {
-            try {
-                wait(3000 - timePast);
-            }
-            catch (InterruptedException ie) { }
-            timePast = System.currentTimeMillis() - startTime;
-        }
-        painted = true;
-    }
+//    /**
+//     * Wait until the splash screen has actually been painted, with a timeout of
+//     * 3 seconds.
+//     */
+//    public synchronized void waitUntilPainted()
+//    {
+//        long startTime = System.currentTimeMillis();
+//        long timePast = System.currentTimeMillis() - startTime; 
+//        while (!painted && timePast < 3000) {
+//            try {
+//                wait(3000 - timePast);
+//            }
+//            catch (InterruptedException ie) { }
+//            timePast = System.currentTimeMillis() - startTime;
+//        }
+//        painted = true;
+//    }
 }
 

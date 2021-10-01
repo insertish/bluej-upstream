@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2016  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -21,8 +21,12 @@
  */
 package bluej.pkgmgr.actions;
 
+import javax.swing.SwingUtilities;
+
 import bluej.Config;
 import bluej.pkgmgr.PkgMgrFrame;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 
 /**
  * End a recording of a test method. Creates a new test case class and
@@ -30,28 +34,15 @@ import bluej.pkgmgr.PkgMgrFrame;
  * recording began.
  * 
  * @author Davin McCall
- * @version $Id: EndTestRecordAction.java 6215 2009-03-30 13:28:25Z polle $
+ * @version $Id: EndTestRecordAction.java 16606 2016-09-27 12:30:05Z nccb $
  */
 final public class EndTestRecordAction extends PkgMgrAction
 {
-    static private EndTestRecordAction instance = null;
-    
-    /**
-     * Factory method. This is the way to retrieve an instance of the class,
-     * as the constructor is private.
-     * @return an instance of the class.
-     */
-    static public EndTestRecordAction getInstance()
+    @OnThread(Tag.Any)
+    public EndTestRecordAction(PkgMgrFrame pmf)
     {
-        if(instance == null)
-            instance = new EndTestRecordAction();
-        return instance;
-    }
-    
-    private EndTestRecordAction()
-    {
-        super("menu.tools.end");
-        putValue(SHORT_DESCRIPTION, Config.getString("tooltip.test.end"));
+        super(pmf, "menu.tools.end");
+        SwingUtilities.invokeLater(() -> putValue(SHORT_DESCRIPTION, Config.getString("tooltip.test.end")));
     }
     
     public void actionPerformed(PkgMgrFrame pmf)

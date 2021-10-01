@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2016  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -21,13 +21,14 @@
  */
 package bluej.debugmgr.inspector;
 
-import javax.swing.JFrame;
-
 import bluej.debugger.DebuggerClass;
 import bluej.debugger.DebuggerObject;
 import bluej.debugmgr.ExpressionInformation;
 import bluej.pkgmgr.Package;
 import bluej.testmgr.record.InvokerRecord;
+
+import javafx.scene.Node;
+import javafx.stage.Window;
 
 
 /**
@@ -57,6 +58,8 @@ public interface InspectorManager
     /**
      * Return an ObjectInspector for an object. The inspector is visible.
      *
+     * @param info
+     *            The information about the the expression that gave this result
      * @param obj
      *            The object displayed by this viewer
      * @param name
@@ -66,33 +69,33 @@ public interface InspectorManager
      * @param ir
      *            the InvokerRecord explaining how we got this result/object if
      *            null, the "get" button is permanently disabled
-     * @param info
-     *            The information about the the expression that gave this result
      * @param parent
      *            The parent frame of this frame
+     * @param animateFromCentre
      * @return The Viewer value
      */
     public ObjectInspector getInspectorInstance(DebuggerObject obj,
-            String name, Package pkg, InvokerRecord ir, JFrame parent);
+                                                String name, Package pkg, InvokerRecord ir, Window parent, Node animateFromCentre);
     
     /**
      * Return a ClassInspector for a class. The inspector is visible.
      *
-     * @param clss
-     *            The class displayed by this viewer
      * @param name
      *            The name of this object or "null" if it is not on the object
      *            bench
-     * @param pkg
-     *            The package all this belongs to
      * @param getEnabled
      *            if false, the "get" button is permanently disabled
+     * @param clss
+     *            The class displayed by this viewer
+     * @param pkg
+     *            The package all this belongs to
      * @param parent
      *            The parent frame of this frame
+     * @param animateFromCentre
      * @return The Viewer value
      */
     public ClassInspector getClassInspectorInstance(DebuggerClass clss,
-            Package pkg, JFrame parent);
+                                                    Package pkg, Window parent, Node animateFromCentre);
 
     /**
      * Return an ObjectInspector for an object. The inspector is visible.
@@ -109,7 +112,7 @@ public interface InspectorManager
      */
     public ResultInspector getResultInspectorInstance(DebuggerObject obj,
         String name, Package pkg, InvokerRecord ir, ExpressionInformation info,
-        JFrame parent);
+        Window parent);
     
     /**
      * Whether we are in testing mode. If true, the inspectors should show testing stuff.

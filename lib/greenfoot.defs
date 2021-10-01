@@ -35,9 +35,28 @@ bluej.language=english
 #bluej.language=german
 #bluej.language=greek
 #bluej.language=italian
+#bluej.language=korean
+#bluej.language=polish
+#bluej.language=portuguese
 #bluej.language=russian
 #bluej.language=spanish
-#bluej.language=chinese
+
+#####################################################################
+## User's home directory. This is also defined by Java, and if that's
+## fine for you, don't specify this property. This property, if
+## specified, will override Java's user.home property.
+##
+## You can specify multiple values by appending consecutive numbers
+## (starting at 2) to the property name, eg:
+##
+##   bluej.userHome=/home/mik/tmp
+##   bluej.userHome2=/some/other/directory
+##   bluej.userHome3=/yet/another/directory
+##
+## In this case the first location that is writable will be selected.
+#####################################################################
+
+#bluej.userHome=/home/mik/tmp
 
 #####################################################################
 ## If you have a translated version of the Greenfoot API documentation
@@ -62,7 +81,7 @@ greenfoot.url.discuss=http://www.greenfootgallery.org/topics/
 # setting is saved in the user preferences file (and the setting here
 # is ignored). You can adjust the user preferences via the preferences
 # dialog in Greenfoot.
-greenfoot.url.javaStdLib=http://download.oracle.com/javase/6/docs/api/
+greenfoot.url.javaStdLib=https://docs.oracle.com/javase/8/docs/api/
 
 # Options for the generation of the JavaDoc shown in the documentation view of the editor.
 doctool.options=-author -version -nodeprecated -protected
@@ -88,7 +107,7 @@ greenfoot.gameserver.createAccount.address=http://www.greenfoot.org/users/new
 ## Normally it should not be necessary to change this.
 ##
 #####################################################################
-bluej.compiler.options=-source 1.6 -target 1.6
+bluej.compiler.options=-source 1.8 -target 1.8
 
 #####################################################################
 ## Options for starting the internal virtual machine.
@@ -128,4 +147,4 @@ greenfoot.image.create.height=150
 #greenfoot.windows.vm=X\:\\Programming Apps\\JDK_1.7.0_55
 
 # command line arguments, if any:
-#greenfoot.windows.vm.args=
+greenfoot.windows.vm.args=-Xmx512M

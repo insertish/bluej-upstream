@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2011,2013  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2011,2013,2014,2015,2016  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -26,10 +26,12 @@ import java.net.URLClassLoader;
 import java.util.List;
 import java.util.ListIterator;
 
+import javafx.application.Platform;
+import bluej.collect.DataCollector;
+import bluej.editor.stride.FXTabbedEditor;
 import bluej.pkgmgr.Package;
 import bluej.pkgmgr.PkgMgrFrame;
 import bluej.pkgmgr.Project;
-import bluej.collect.DataCollector;
 
 /**
  * A wrapper for a BlueJ project.
@@ -225,5 +227,30 @@ public class BProject
     {
         Project thisProject = projectId.getBluejProject();
         thisProject.clearObjectBenches();
+    }
+    
+    //Package-visible:
+    Project getProject() throws ProjectNotOpenException
+    {
+        return projectId.getBluejProject();
+    }
+
+    /**
+     * Open a tab (in the window with the FX-based editors, which at the moment includes
+     * the Stride editors but not the Java editors) with a web browser showing the given URL.
+     * If any open web browser tab is already showing that URL (either because it's been opened
+     * by this method before and not navigated away from, or because the user already navigated
+     * to that page), it is shown and focused instead of opening another browser with the same page.
+     *
+     * @param url The URL to open in the web browser
+     * @throws ProjectNotOpenException if the project has been closed by the user
+     */
+    public void openWebViewTab(String url) throws ProjectNotOpenException
+    {
+        Project bjProject = projectId.getBluejProject();
+        Platform.runLater(() -> {
+            FXTabbedEditor fXTabbedEditor = bjProject.getDefaultFXTabbedEditor();
+            fXTabbedEditor.openWebViewTab(url);
+        });        
     }
 }

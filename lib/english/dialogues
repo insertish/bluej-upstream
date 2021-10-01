@@ -48,8 +48,6 @@ cannot-access-element
 Unable to access the array
 element specified.
 
-appletviewer-error
-Error executing applet in appletviewer.
 
 error-no-name
 You must specify a valid name.
@@ -169,9 +167,9 @@ No Java source files were
 found in this directory.
 
 duplicate-name
-A class or package with this name already exists
+A class, package or file with this name already exists
 in this project. You cannot have two
-classes or packages with the same name.
+classes, packages or files with the same name.
 
 class-library-conflict
 A class with this name already exists in the library
@@ -240,10 +238,6 @@ no-bluej-package
 Error in opening package.
 The file/directory is not
 a BlueJ package:
-
-applet-height-width
-Applet height and width
-must be specified.
 
 not-yet-implemented
 Not Yet Implemented - sorry.
@@ -477,6 +471,25 @@ team-cant-connect
 Cannot connect to the server. Check that server
 address is correct in the Team Settings.
 
+team-wrong-protocol
+Cannot connect to the server. The server does not seem
+to accept the informed protocol.
+
+team-malformed-uri
+The connection URI is malformed. Please check the connection
+string used.
+
+team-denied-invalidUser
+Access denied. Wrong user name or password.
+
+team-denied-invalidUserOrnotExported
+The access has been denied. Please check your authentication 
+details (user name and password) if needed, if this protocol 
+does not require a user name, then the repository was not exported.
+
+team-noRepository-uri
+Repository not found: $
+
 team-project-exists
 The project already exists on the server. Maybe you 
 want to use Checkout, to check out the existing project
@@ -506,6 +519,13 @@ Invalid CVS root - check your team settings.
 team-authentication-problem
 The server could not log you in - check your username/password and
 repository in team settings.
+
+team-authorisation-problem
+Operation not authorised by the server. If this server allows 
+public reading access to the project, like github, then your 
+username/password may be wrong. 
+Check your username/password and repository settings 
+in team settings.
 
 team-binary-conflict
 A conflict was detected when trying to update the following file:

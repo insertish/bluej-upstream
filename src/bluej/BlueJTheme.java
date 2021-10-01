@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2014,2015,2016  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -30,6 +30,12 @@ import javax.swing.border.Border;
 import javax.swing.plaf.FontUIResource;
 import javax.swing.plaf.metal.DefaultMetalTheme;
 
+import javafx.scene.control.Dialog;
+import javafx.stage.Stage;
+
+import javafx.stage.Window;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 import bluej.prefmgr.PrefMgr;
 
 /**
@@ -39,6 +45,7 @@ import bluej.prefmgr.PrefMgr;
  *
  * @author  Bruce Quig
  */
+@OnThread(Tag.Swing)
 public class BlueJTheme extends DefaultMetalTheme
 {
     private final FontUIResource controlFont = 
@@ -61,6 +68,7 @@ public class BlueJTheme extends DefaultMetalTheme
     private static String okayLabel;
     private static String cancelLabel;
     private static String closeLabel;
+    @OnThread(Tag.Any)
     private static String continueLabel;
 
     // a dimension for ok and cancel buttons that is as large as
@@ -89,6 +97,31 @@ public class BlueJTheme extends DefaultMetalTheme
     public static final int componentSpacingLarge = 11;
 
     public static final int dialogCommandButtonsVertical = 17;
+
+    // This tag is not really accurate, but we barely support this option
+    // anyway:
+    @OnThread(Tag.Any)
+    public BlueJTheme()
+    {
+        
+    }
+
+    @OnThread(Tag.FX)
+    public static void setWindowIconFX(Stage frame)
+    {
+        javafx.scene.image.Image icon = getIconImageFX();
+        if (icon != null) {
+            frame.getIcons().add(icon);
+        }
+    }
+
+    @OnThread(Tag.FX)
+    public static void setWindowIconFX(Dialog<?> dialog)
+    {
+        Window window = dialog.getDialogPane().getScene().getWindow();
+        if (window != null && window instanceof Stage)
+            setWindowIconFX((Stage)window);
+    }
 
     /**
      * Name of theme
@@ -121,7 +154,7 @@ public class BlueJTheme extends DefaultMetalTheme
     /**
      * Get the icon for most BlueJ frames.
      *
-     * @return	an icon to be used as the frame icon for most BlueJ windows
+     * @return    an icon to be used as the frame icon for most BlueJ windows
      */
     public static Image getIconImage()
     {
@@ -129,10 +162,34 @@ public class BlueJTheme extends DefaultMetalTheme
         return getApplicationIcon (appName);
     }
 
+    @OnThread(Tag.FX)
+    public static javafx.scene.image.Image getIconImageFX()
+    {
+        String appName = Config.getApplicationName().toLowerCase();
+        return getApplicationFxIcon(appName, false);
+    }
+    
+    @OnThread(Tag.Any)
+    public static String getApplicationIconFileName(String baseName, boolean getStrideEditorIcon)
+    {
+        if (Config.isMacOS() && !getStrideEditorIcon) {
+            return null;        // don't set window icon on Mac - Mac OS generates dynamic icons
+        }
+        if (Config.isModernWinOS()) {
+            // Win Vista, 7, or newer
+            return baseName + LARGE_ICON_SUFFIX;
+        } else if (Config.isWinOS()) {
+            return baseName + SMALL_ICON_SUFFIX;
+        } else {
+            // Linux, etc. or we want the icon only.
+            return baseName + MEDIUM_ICON_SUFFIX;
+        }
+    }
+
     /**
      * Get the icon for most BlueJ frames.
      *
-     * @return	an icon to be used as the frame icon for most BlueJ windows
+     * @return    an icon to be used as the frame icon for most BlueJ windows
      */
     public static Image getApplicationIcon(String baseName)
     {
@@ -140,22 +197,22 @@ public class BlueJTheme extends DefaultMetalTheme
             return null;        // don't set window icon on Mac - Mac OS generates dynamic icons
 
         if (iconImage == null) {
-            if (Config.isModernWinOS()) {
-                // Win Vista, 7, or newer
-                iconImage = Config.getFixedImageAsIcon(baseName + LARGE_ICON_SUFFIX).getImage();
+                iconImage = Config.getFixedImageAsIcon(getApplicationIconFileName(baseName, false)).getImage();
             }
-            else if (Config.isWinOS()) {
-                // for Win XP
-                iconImage = Config.getFixedImageAsIcon(baseName + SMALL_ICON_SUFFIX).getImage();
-            }
-            else {
-                // Linux, etc.
-                iconImage = Config.getFixedImageAsIcon(baseName + MEDIUM_ICON_SUFFIX).getImage();
-            }
-        }
 
         return iconImage;
     }
+    
+    @OnThread(Tag.FX)
+    public static javafx.scene.image.Image getApplicationFxIcon(String baseName, boolean getStrideEditorIcon)
+    {
+        if (Config.isMacOS() && !getStrideEditorIcon)
+        {
+            return null;        // don't set window icon on Mac - Mac OS generates dynamic icons
+        }
+        return Config.getFixedImageAsFXImage(getApplicationIconFileName(baseName, getStrideEditorIcon));
+    }
+    
 
     /**
      * Needed for Greenfoot
@@ -189,8 +246,8 @@ public class BlueJTheme extends DefaultMetalTheme
         return closeLabel;
     }
 
-
-    public static String getContinueLabel()
+    @OnThread(Tag.Any)
+    public static synchronized String getContinueLabel()
     {
         if (continueLabel == null) {
             continueLabel = Config.getString("continue");
@@ -201,7 +258,7 @@ public class BlueJTheme extends DefaultMetalTheme
     /**
      * Get a standard BlueJ "ok" button.
      * 
-     * @return	A JButton that says "ok"
+     * @return    A JButton that says "ok"
      */
     public static JButton getOkButton()
     {
@@ -216,7 +273,7 @@ public class BlueJTheme extends DefaultMetalTheme
     /**
      * Get a standard BlueJ "cancel" button.
      * 
-     * @return	A JButton that says "cancel"
+     * @return    A JButton that says "cancel"
      */
     public static JButton getCancelButton()
     {
@@ -225,13 +282,13 @@ public class BlueJTheme extends DefaultMetalTheme
         JButton cancelButton = new JButton(getCancelLabel());
         // try to make the OK, cancel and continue  buttons have equal size
         cancelButton.setPreferredSize(okCancelDimension);
-        return cancelButton;	
+        return cancelButton;    
     }
 
     /**
      * Get a standard BlueJ "close" button.
      * 
-     * @return	A JButton that says "cancel"
+     * @return    A JButton that says "cancel"
      */
     public static JButton getCloseButton()
     {
@@ -240,14 +297,14 @@ public class BlueJTheme extends DefaultMetalTheme
         JButton closeButton = new JButton(getCloseLabel());
         // try to make the OK, cancel and continue  buttons have equal size
         closeButton.setPreferredSize(okCancelDimension);
-        return closeButton;	
+        return closeButton;    
     }
 
 
     /**
      * Get a standard BlueJ "continue" button.
      * 
-     * @return	A JButton that says "Continue"
+     * @return    A JButton that says "Continue"
      */
     public static JButton getContinueButton()
     {
@@ -256,7 +313,7 @@ public class BlueJTheme extends DefaultMetalTheme
         JButton continueButton = new JButton(getContinueLabel());
         // try to make the OK, cancel and continue  buttons have equal size
         continueButton.setPreferredSize(okCancelDimension);
-        return continueButton;	
+        return continueButton;    
     }
 
     /**

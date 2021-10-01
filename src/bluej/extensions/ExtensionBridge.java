@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2011,2012,2013  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2011,2012,2013,2014,2016  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -25,6 +25,8 @@ import java.awt.Graphics2D;
 
 import javax.swing.JMenuItem;
 
+import threadchecker.OnThread;
+import threadchecker.Tag;
 import bluej.debugmgr.objectbench.ObjectWrapper;
 import bluej.extensions.BDependency.Type;
 import bluej.extensions.event.ExtensionEvent;
@@ -35,7 +37,7 @@ import bluej.pkgmgr.Package;
 import bluej.pkgmgr.PkgMgrFrame;
 import bluej.pkgmgr.Project;
 import bluej.pkgmgr.dependency.Dependency;
-import bluej.pkgmgr.graphPainter.ClassTargetPainter.Layer;
+import bluej.pkgmgr.Layer;
 import bluej.pkgmgr.target.ClassTarget;
 import bluej.pkgmgr.target.DependentTarget;
 
@@ -75,6 +77,7 @@ public final class ExtensionBridge
         return new BProject(new Identifier(bluejPrj));
     }
 
+    @OnThread(Tag.Any)
     public static BPackage newBPackage(Package bluejPkg) {
         return new BPackage(new Identifier(bluejPkg.getProject(), bluejPkg));
     }
@@ -139,11 +142,6 @@ public final class ExtensionBridge
         aBluej.postMenuItem(attachedObject, onThisItem);
     }
     
-    public static boolean hasSourceCode(BClass bClass) throws ProjectNotOpenException, PackageNotFoundException
-    {
-        return bClass.hasSourceCode();
-    }
-
     public static void clearObjectBench(BProject project) throws ProjectNotOpenException
     {
         project.clearObjectBench();
@@ -153,5 +151,20 @@ public final class ExtensionBridge
             BClassTarget bClassTarget, Graphics2D graphics, int width, int height)
     {
         bluej.drawExtensionClassTarget(layer, bClassTarget, graphics, width, height);
+    }
+
+    public static Project getProject(BProject bProject) throws ProjectNotOpenException
+    {
+        return bProject.getProject();
+    }
+
+    public static PkgMgrFrame getPkgMgrFrame(BPackage pkg) throws ProjectNotOpenException, PackageNotFoundException
+    {
+        return pkg.getPkgMgrFrame();
+    }
+
+    public static Object getFieldValue(BField field, BObject bObject, boolean unpackArray) throws ProjectNotOpenException, PackageNotFoundException
+    {
+        return field.getValue(bObject, unpackArray);
     }
 }

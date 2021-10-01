@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2012  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2012,2014,2016  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -22,6 +22,7 @@
 package bluej.groupwork.ui;
 
 import java.awt.BorderLayout;
+import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.event.ActionEvent;
@@ -41,6 +42,11 @@ import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTable;
 
+import javafx.application.Platform;
+
+import bluej.utility.javafx.SwingNodeDialog;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 import bluej.BlueJTheme;
 import bluej.Config;
 import bluej.collect.DataCollector;
@@ -53,7 +59,6 @@ import bluej.groupwork.TeamViewFilter;
 import bluej.groupwork.TeamworkCommand;
 import bluej.groupwork.TeamworkCommandResult;
 import bluej.pkgmgr.Project;
-import bluej.utility.EscapeDialog;
 import bluej.utility.SwingWorker;
 
 /**
@@ -61,7 +66,7 @@ import bluej.utility.SwingWorker;
  *
  * @author bquig
  */
-public class StatusFrame extends EscapeDialog
+public class StatusFrame extends SwingNodeDialog
 {
     private Project project;
     private JTable statusTable;
@@ -90,7 +95,7 @@ public class StatusFrame extends EscapeDialog
 
     private void makeWindow()
     {              
-        setTitle(Config.getString("team.status.status"));
+        setTitle(Config.getString("team.status"));
         // try and set up a reasonable default amount of entries that avoids resizing
         // and scrolling once we get info back from repository
         statusModel = new StatusTableModel(project, estimateInitialEntries());
@@ -98,9 +103,9 @@ public class StatusFrame extends EscapeDialog
         statusTable.getTableHeader().setReorderingAllowed(false);
         
         // set relative column widths
-        statusTable.getColumnModel().getColumn(0).setPreferredWidth(80);
-        statusTable.getColumnModel().getColumn(1).setPreferredWidth(30);
-        statusTable.getColumnModel().getColumn(2).setPreferredWidth(120);
+        statusTable.getColumnModel().getColumn(0).setPreferredWidth(70);
+        statusTable.getColumnModel().getColumn(1).setPreferredWidth(40);
+        statusTable.getColumnModel().getColumn(2).setPreferredWidth(60);
         
         //set up custom renderer to colour code status message field
         statusRenderer = new StatusMessageCellRenderer(project);
@@ -127,7 +132,7 @@ public class StatusFrame extends EscapeDialog
         JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
 
         {
-            buttonPanel.setAlignmentX(LEFT_ALIGNMENT);
+            buttonPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
             buttonPanel.setBorder(BlueJTheme.generalBorder);
             
             // progress bar
@@ -157,10 +162,12 @@ public class StatusFrame extends EscapeDialog
                     }
                 });
 
-            getRootPane().setDefaultButton(refreshButton);
+            setDefaultButton(refreshButton);
 
             buttonPanel.add(refreshButton);
             buttonPanel.add(closeButton);
+
+            Platform.runLater(() -> setCloseIsButton(closeButton));
         }
 
         return buttonPanel;
@@ -227,17 +234,20 @@ public class StatusFrame extends EscapeDialog
             aborted = true;
         }
 
+        @OnThread(Tag.Unique)
         public Object construct() 
         {
             result = command.getResult();
             return resources;
         }
 
+        @OnThread(Tag.Any)
         public void gotStatus(TeamStatusInfo info)
         {
             resources.add(info);
         }
 
+        @OnThread(Tag.Any)
         public void statusComplete(StatusHandle commitHandle)
         {
             // Nothing to be done here.
@@ -248,8 +258,7 @@ public class StatusFrame extends EscapeDialog
             progressBar.setRunning(false);
             if (! aborted) {
                 if (result.isError()) {
-                    TeamUtils.handleServerResponse(result, StatusFrame.this);
-                    setVisible(false);
+                    StatusFrame.this.dialogThenHide(() -> TeamUtils.handleServerResponseFX(result, StatusFrame.this.asWindow()));
                 }
                 else {
                     Collections.sort(resources, new Comparator<TeamStatusInfo>() {

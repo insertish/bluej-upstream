@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2011,2014  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2011,2014,2016  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -21,15 +21,29 @@
  */
 package bluej.testmgr;
 
-import java.awt.Component;
-import java.awt.Dimension;
-import java.awt.GridBagConstraints;
-import java.awt.GridBagLayout;
-import java.awt.event.*;
-
-import javax.swing.*;
-import javax.swing.event.ListSelectionEvent;
-import javax.swing.event.ListSelectionListener;
+import javax.swing.SwingUtilities;
+import java.util.concurrent.atomic.AtomicBoolean;
+import javafx.beans.binding.Bindings;
+import javafx.beans.binding.BooleanBinding;
+import javafx.beans.property.SimpleIntegerProperty;
+import javafx.collections.FXCollections;
+import javafx.collections.ObservableList;
+import javafx.scene.Scene;
+import javafx.scene.control.Button;
+import javafx.scene.control.Label;
+import javafx.scene.control.ListCell;
+import javafx.scene.control.ListView;
+import javafx.scene.control.ProgressBar;
+import javafx.scene.control.SelectionMode;
+import javafx.scene.control.TextArea;
+import javafx.scene.image.Image;
+import javafx.scene.image.ImageView;
+import javafx.scene.input.MouseButton;
+import javafx.scene.layout.BorderPane;
+import javafx.scene.layout.HBox;
+import javafx.scene.layout.Priority;
+import javafx.scene.layout.VBox;
+import javafx.stage.Stage;
 
 import bluej.BlueJTheme;
 import bluej.Config;
@@ -37,21 +51,23 @@ import bluej.debugger.DebuggerTestResult;
 import bluej.debugger.SourceLocation;
 import bluej.pkgmgr.Package;
 import bluej.pkgmgr.Project;
-import bluej.utility.GradientFillPanel;
 import bluej.utility.JavaNames;
-import java.awt.Image;
+import bluej.utility.javafx.JavaFXUtil;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 
 /**
- * A Swing based user interface to run tests.
+ * A JavaFX based user interface to run tests.
  *
  * @author  Andrew Patterson
  */
-public class TestDisplayFrame
+public @OnThread(Tag.FXPlatform) class TestDisplayFrame
 {
     // -- static singleton factory method --
-
-    static TestDisplayFrame singleton = null;
-
+    @OnThread(value = Tag.Any,requireSynchronized = true)
+    private static TestDisplayFrame singleton = null;
+    
+    @OnThread(Tag.FXPlatform)
     public synchronized static TestDisplayFrame getTestDisplay()
     {
         if(singleton == null) {
@@ -60,7 +76,8 @@ public class TestDisplayFrame
         return singleton;
     }
 
-    public static boolean isFrameShown()
+    @OnThread(Tag.Any)
+    public synchronized static boolean isFrameShown()
     {
         if(singleton == null) {
             return false;
@@ -70,37 +87,43 @@ public class TestDisplayFrame
         }
     }
 
-    private JFrame frame;
-    private DefaultListModel testEntries;
+    private final Image failureIcon = Config.getFixedImageAsFXImage("failure.gif");
+    private final Image errorIcon = Config.getFixedImageAsFXImage("error.gif");
+    private final Image okIcon = Config.getFixedImageAsFXImage("ok.gif");
 
-    private JList testnames;
+    private Stage frame;
+
+    private ObservableList<DebuggerTestResult> testEntries;
+    private ListView<DebuggerTestResult> testNames;
     private ProgressBar progressBar;
-    private GridBagConstraints pbConstraints;
-    private JPanel statusLabel;
-    private JPanel bottomPanel;
-    
-    // index of the progress bar in the topPanel's components
-    private final static int PROGRESS_BAR_INDEX = 0;
-    
-    private CounterPanel counterPanel;
-    private int errorCount;
-    private int failureCount;
-    private int totalTimeMs;
-    private int testTotal;
+
+    private final SimpleIntegerProperty errorCount;
+    private final SimpleIntegerProperty failureCount;
+    private final SimpleIntegerProperty totalTimeMs;
+    private final SimpleIntegerProperty testTotal;
     private boolean doingMultiple;
+
+    // Bindings passed to bindPseudoclass can get GCed, so we need to keep track
+    // in a field even though they are trivial manipulations of the earlier properties:
+    private BooleanBinding hasErrors;
+    private BooleanBinding hasFailures;
+    private BooleanBinding hasFailuresOrErrors;
         
     // private FailureDetailView fdv;
-    private JTextArea exceptionMessageField;
-    private JButton showSourceButton;
-    
-    private Project lastProject;
-    
+    private TextArea exceptionMessageField;
+    private Button showSourceButton;
+
+    private Project project;
+
+    @OnThread(Tag.Any)
+    private final AtomicBoolean frameShowing = new AtomicBoolean(false);
+
     public TestDisplayFrame()
     {
-        testTotal = 0;
-        errorCount = 0;
-        failureCount = 0;
-        totalTimeMs = 0;
+        testTotal = new SimpleIntegerProperty(0);
+        errorCount = new SimpleIntegerProperty(0);
+        failureCount = new SimpleIntegerProperty(0);
+        totalTimeMs = new SimpleIntegerProperty(0);
         doingMultiple = false;
 
         createUI();
@@ -111,15 +134,23 @@ public class TestDisplayFrame
      */
     public void showTestDisplay(boolean doShow)
     {
-        frame.setVisible(doShow);
+        if (doShow)
+        {
+            if (!frame.isShowing())
+                frame.show();
+            frame.toFront();
+        }
+        else
+            frame.hide();
     }
 
     /**
      * Return true if the window is currently displayed.
      */
+    @OnThread(Tag.Any)
     public boolean isShown()
     {
-        return frame.isShowing();
+        return frameShowing.get();
     }
     
     /**
@@ -127,135 +158,114 @@ public class TestDisplayFrame
      */
     protected void createUI()
     {
-        frame = new JFrame(Config.getString("testdisplay.title"));
-        if (! Config.isRaspberryPi()) {
-            frame.setContentPane(new GradientFillPanel(frame.getContentPane().getLayout()));
-        }else{
-            frame.setContentPane(new JPanel(frame.getContentPane().getLayout()));
-        }
+        frame = new Stage();
+        frame.setTitle(Config.getString("testdisplay.title"));
+        frame.setOnShown(e -> {frameShowing.set(true);/*org.scenicview.ScenicView.show(frame.getScene());*/});
+        frame.setOnHidden(e -> {frameShowing.set(false);});
 
-        Image icon = BlueJTheme.getIconImage();
-        if (icon != null) {
-            frame.setIconImage(icon);
-        }
-        frame.setLocation(Config.getLocation("bluej.testdisplay"));
+        BlueJTheme.setWindowIconFX(frame);
 
-        // save position when window is moved
-        frame.addComponentListener(new ComponentAdapter() {
-            public void componentMoved(ComponentEvent event)
-            {
-                Config.putLocation("bluej.testdisplay", frame.getLocation());
-            }
-        });
+        Config.rememberPosition(frame, "bluej.testdisplay");
 
-        JSplitPane splitPane = new JSplitPane(JSplitPane.VERTICAL_SPLIT);
-        splitPane.setBorder(BlueJTheme.generalBorder);
-        splitPane.setResizeWeight(0.5);
-        if (!Config.isRaspberryPi()) splitPane.setOpaque(false);
+        VBox content = new VBox();
+
+        testEntries = FXCollections.observableArrayList();
+        testNames = new ListView();
+        testNames.setEditable(false);
+        testNames.getSelectionModel().setSelectionMode(SelectionMode.SINGLE);
+        JavaFXUtil.addChangeListener(testNames.getSelectionModel().selectedItemProperty(), this::selected);
+        testNames.setDisable(false);
+        JavaFXUtil.addStyleClass(testNames, "test-names");
+        testNames.setItems(testEntries);
+        testNames.setCellFactory(col -> new TestResultCell());
         
-        JScrollPane resultScrollPane = new JScrollPane();
-        {
-            testEntries = new DefaultListModel();
-            testnames = new JList(testEntries);
-            testnames.setCellRenderer(new MyCellRenderer());
-            testnames.addListSelectionListener(new MyListSelectionListener());
-            testnames.addMouseListener(new ShowSourceListener());
-                        
-            resultScrollPane.setViewportView(testnames);
-        }
-        splitPane.setTopComponent(resultScrollPane);
-        
-        bottomPanel = new JPanel();
-        if (!Config.isRaspberryPi()) bottomPanel.setOpaque(false);
-        {
-            bottomPanel.setLayout(new GridBagLayout());
-            GridBagConstraints constraints = new GridBagConstraints();
-            
-            constraints.fill = GridBagConstraints.BOTH;
-            constraints.weightx = 1.0;
-            constraints.weighty = 0;
-            constraints.gridx = 0;
-            
-            progressBar = new ProgressBar();
-            bottomPanel.add(progressBar, constraints);
-            
-            bottomPanel.add(Box.createVerticalStrut(BlueJTheme.generalSpacingWidth), constraints);
-            
-            counterPanel = new CounterPanel();
-            if (!Config.isRaspberryPi()) counterPanel.setOpaque(false);
-            bottomPanel.add(counterPanel, constraints);
-            bottomPanel.add(Box.createVerticalStrut(BlueJTheme.generalSpacingWidth), constraints);
-        
-            // exception message field (text area)
-            exceptionMessageField = new JTextArea("");
-            exceptionMessageField.setEditable(false);
-            exceptionMessageField.setRows(6);
-            exceptionMessageField.setColumns(42);
-            // exceptionMessageField.setLineWrap(true);
-            exceptionMessageField.setFocusable(false);
-            
-            Dimension size = exceptionMessageField.getPreferredSize();
-            // size.width = exceptionMessageField.getMaximumSize().width;
-            // exceptionMessageField.setPreferredSize(size);
-            size.width = exceptionMessageField.getMinimumSize().width;
-            exceptionMessageField.setMinimumSize(size);
-            JScrollPane exceptionScrollPane = new JScrollPane(exceptionMessageField);
-            exceptionScrollPane.setMinimumSize(size);
+        content.getChildren().add(testNames);
 
-            // "show source" and "close" buttons
-            showSourceButton = new JButton(Config.getString("testdisplay.showsource"));
-            showSourceButton.addActionListener(new ShowSourceListener());
-            
-            JButton closeButton = new JButton(Config.getString("close"));
-            closeButton.addActionListener(new ActionListener() {
-                public void actionPerformed(ActionEvent e) {
-                    frame.setVisible(false);
-                }
-            });
-            
-            // Panel for "show source" and "close" buttons
-            JPanel buttonPanel = new JPanel();
-            if (!Config.isRaspberryPi()) buttonPanel.setOpaque(false);
-            buttonPanel.setLayout(new BoxLayout(buttonPanel, BoxLayout.X_AXIS));
-            buttonPanel.add(showSourceButton);
-            buttonPanel.add(Box.createHorizontalGlue());
-            buttonPanel.add(closeButton);
-            
-            constraints.weighty = 1.0;
-            bottomPanel.add(exceptionScrollPane, constraints);
-            constraints.weighty = 0;
-            bottomPanel.add(Box.createVerticalStrut(BlueJTheme.generalSpacingWidth), constraints);
-            bottomPanel.add(buttonPanel, constraints);
+        progressBar = new ProgressBar();
+        JavaFXUtil.addStyleClass(progressBar, "test-progress-bar");
+        progressBar.progressProperty().bind(Bindings.add(0.0, Bindings.size(testEntries)).divide(Bindings.max(1, testTotal)));
+        hasFailuresOrErrors = Bindings.greaterThan(failureCount.add(errorCount), 0);
+        JavaFXUtil.bindPseudoclass(progressBar, "bj-error", hasFailuresOrErrors);
+        content.getChildren().add(progressBar);
 
-            constraints.gridy = PROGRESS_BAR_INDEX;
-            pbConstraints = constraints;
-        }
-        splitPane.setBottomComponent(bottomPanel);
+        HBox counterPanel = new HBox();
+        JavaFXUtil.addStyleClass(counterPanel, "counter-panel");
+        Label fNumberOfErrors = new Label();
+        Label fNumberOfFailures = new Label();
+        Label fNumberOfRuns = new Label();
+        Label fTotalTime = new Label();
+
+        HBox.setHgrow(fNumberOfRuns, Priority.ALWAYS);
+        HBox.setHgrow(fTotalTime, Priority.ALWAYS);
+
+        fNumberOfErrors.textProperty().bind(errorCount.asString());
+        fNumberOfFailures.textProperty().bind(failureCount.asString());
+        fNumberOfRuns.textProperty().bind(Bindings.size(testEntries).asString().concat("/").concat(testTotal.asString()));
+        fTotalTime.textProperty().bind(totalTimeMs.asString().concat("ms"));
+
+        HBox errorPanel = new HBox(new ImageView(errorIcon), new Label(Config.getString("testdisplay.counter.errors")), fNumberOfErrors);
+        JavaFXUtil.addStyleClass(errorPanel, "error-panel");
+        hasErrors = Bindings.greaterThan(errorCount, 0);
+        JavaFXUtil.bindPseudoclass(errorPanel, "bj-non-zero", hasErrors);
+        HBox.setHgrow(errorPanel, Priority.ALWAYS);
+
+        HBox failurePanel = new HBox(new ImageView(failureIcon), new Label(Config.getString("testdisplay.counter.failures")), fNumberOfFailures);
+        JavaFXUtil.addStyleClass(failurePanel, "error-panel");
+        // Need to keep a reference to avoid GC:
+        hasFailures = Bindings.greaterThan(failureCount, 0);
+        JavaFXUtil.bindPseudoclass(failurePanel, "bj-non-zero", hasFailures);
+        HBox.setHgrow(failurePanel, Priority.ALWAYS);
         
-        frame.getContentPane().add(splitPane);
-        frame.pack();
+        counterPanel.getChildren().addAll(
+                new Label(Config.getString("testdisplay.counter.runs")),
+                fNumberOfRuns,
+                errorPanel,
+                failurePanel,
+                new Label(Config.getString("testdisplay.counter.totalTime")),
+                fTotalTime
+        );
+        content.getChildren().add(counterPanel);
+
+        // exception message field (text area)
+        exceptionMessageField = new TextArea("");
+        JavaFXUtil.addStyleClass(exceptionMessageField, "test-output");
+        VBox.setVgrow(exceptionMessageField, Priority.ALWAYS);
+        exceptionMessageField.setEditable(false);
+        // exceptionMessageField.setLineWrap(true);
+        exceptionMessageField.setFocusTraversable(false);
+
+        content.getChildren().add(exceptionMessageField);
+
+        // "show source" and "close" buttons
+        showSourceButton = new Button(Config.getString("testdisplay.showsource"));
+        showSourceButton.setOnAction(e -> showSource(testNames.getSelectionModel().getSelectedItem()));
+        showSourceButton.setDisable(true);
+
+        Button closeButton = new Button(Config.getString("close"));
+        closeButton.setOnAction(e -> frame.hide());
+            
+        // Panel for "show source" and "close" buttons
+        BorderPane buttonPanel = new BorderPane();
+        buttonPanel.setLeft(showSourceButton);
+        buttonPanel.setRight(closeButton);
+            
+        content.getChildren().add(buttonPanel);
+        JavaFXUtil.addStyleClass(content, "test-results");
+        frame.setScene(new Scene(content));
+        Config.addTestsStylesheets(frame.getScene());
     }
 
     protected void reset()
     {
         testEntries.clear();
         
-        errorCount = 0;
-        failureCount = 0;
-        totalTimeMs = 0;
-        testTotal = 0;   
+        errorCount.set(0);
+        failureCount.set(0);
+        totalTimeMs.set(0);
+        testTotal.set(0);
 
         exceptionMessageField.setText("");
-        showSourceButton.setEnabled(false);
-        progressBar.reset();
-        counterPanel.setTotal(0);
-        counterPanel.setErrorValue(0);
-        counterPanel.setFailureValue(0);
-        
-        bottomPanel.remove(PROGRESS_BAR_INDEX);
-        bottomPanel.add(progressBar, pbConstraints, PROGRESS_BAR_INDEX);
-        bottomPanel.validate();
-        progressBar.repaint();
+        showSourceButton.setDisable(true);
     }
     
     /**
@@ -263,21 +273,19 @@ public class TestDisplayFrame
      * 
      * @param num  The total number of tests to be run
      */
-    public void startMultipleTests(int num)
+    public void startMultipleTests(Project proj, int num)
     {
+        this.project = proj;
         doingMultiple = true;    
         
         reset();
-        testTotal = num;
-        counterPanel.setTotal(testTotal);
-        progressBar.setMaximum(testTotal);  
+        testTotal.set(num);
         showTestDisplay(true);
     }
     
     public void endMultipleTests()
     {
         doingMultiple = false;
-        setResultLabel();
     }  
 
     /**
@@ -285,15 +293,12 @@ public class TestDisplayFrame
      * 
      * @param num   the number of tests we will run
      */
-    public void startTest(Project project, int num)
+    public void startTest(Project proj, int num)
     {
-        lastProject = project;
-
+        this.project = proj;
         if (! doingMultiple) {
             reset();
-            testTotal = num;
-            counterPanel.setTotal(testTotal);
-            progressBar.setMaximum(testTotal);  
+            testTotal.set(num);
         }
     }
 
@@ -323,108 +328,90 @@ public class TestDisplayFrame
     {
         if (!dtr.isSuccess()) {
             if (dtr.isFailure())
-                ++failureCount;
+                failureCount.set(failureCount.get() + 1);
             else
-                ++errorCount;
+                errorCount.set(errorCount.get() + 1);
         }
 
-        totalTimeMs += dtr.getRunTimeMs();
-        
-        testEntries.addElement(dtr);
-        progressBar.step(testEntries.getSize(), dtr.isSuccess());
-        
-        counterPanel.setTotalTime(totalTimeMs);
-        counterPanel.setFailureValue(failureCount);
-        counterPanel.setErrorValue(errorCount);
-        counterPanel.setRunValue(testEntries.getSize());
+        totalTimeMs.set(totalTimeMs.get() + dtr.getRunTimeMs());
+        testEntries.add(dtr);
+    }
 
-        if (!doingMultiple &&
-                (progressBar.getValue() == progressBar.getMaximum())) {
-            setResultLabel();
+    @OnThread(Tag.FX)
+    private class TestResultCell extends ListCell<DebuggerTestResult>
+    {
+        private final ImageView imageView;
+
+        public TestResultCell()
+        {
+            setEditable(false);
+            setText("");
+            imageView = new ImageView();
+            imageView.setMouseTransparent(true);
+            setGraphic(imageView);
+            setOnMouseClicked(e -> {
+                if (e.getClickCount() == 2 && e.getButton() == MouseButton.PRIMARY)
+                    showSource(getItem());
+            });
+        }
+
+        @Override
+        public void updateItem(DebuggerTestResult item, boolean empty)
+        {
+            super.updateItem(item, empty);
+            if (item == null || empty)
+            {
+                imageView.setImage(null);
+                setText("");
+            }
+            else
+            {
+                if (item.isSuccess())
+                    imageView.setImage(okIcon);
+                else if (item.isFailure())
+                    imageView.setImage(failureIcon);
+                else
+                    imageView.setImage(errorIcon);
+
+                setText(item.getName() + " (" + item.getRunTimeMs() + "ms)");
+            }
         }
     }
     
-    /**
-     * Change the progress bar into a red or green label, depending on
-     * success/failure status. Should be called on the swing event thread.
-     */
-    private void setResultLabel()
+    private void selected(DebuggerTestResult dtr)
     {
-        statusLabel = new JPanel();
+        if (dtr != null && (dtr.isError() || dtr.isFailure())) {
+            // fdv.showFailure(dtr.getExceptionMessage() + "\n---\n" + dtr.getTrace());
+            exceptionMessageField.setText(dtr.getExceptionMessage()
+                + "\n---\n" + dtr.getTrace());
+            exceptionMessageField.positionCaret(0);
 
-        if ((errorCount + failureCount) == 0) {
-            statusLabel.setBackground(ProgressBar.greenBarColour);
+            showSourceButton.setDisable(dtr.getExceptionLocation() == null);
         } else {
-            statusLabel.setBackground(ProgressBar.redBarColour);
-        }
-
-        statusLabel.setMinimumSize(progressBar.getMinimumSize());
-        statusLabel.setMaximumSize(progressBar.getMaximumSize());
-        statusLabel.setPreferredSize(progressBar.getSize());
-        statusLabel.setOpaque(true);
-        bottomPanel.remove(PROGRESS_BAR_INDEX);
-        bottomPanel.add(statusLabel, pbConstraints, PROGRESS_BAR_INDEX);
-        bottomPanel.validate();
-        statusLabel.repaint();
-    }
-
-    class MyListSelectionListener implements ListSelectionListener
-    {
-        public void valueChanged(ListSelectionEvent e)
-        {
-            if (testnames.getSelectedValue() != null) {
-                DebuggerTestResult dtr = (DebuggerTestResult) testnames.getSelectedValue();
-
-                if (dtr.isError() || dtr.isFailure()) {
-                    // fdv.showFailure(dtr.getExceptionMessage() + "\n---\n" + dtr.getTrace());
-                    exceptionMessageField.setText(dtr.getExceptionMessage()
-                            + "\n---\n" + dtr.getTrace());
-                    exceptionMessageField.setCaretPosition(0);
-
-                    // Set the column count to a small number; the text area
-                    // will use the available space anyway, and this prevents
-                    // unncessary horizontal scrollbar from appearing
-                    exceptionMessageField.setColumns(1);
-                    showSourceButton.setEnabled(dtr.getExceptionLocation() != null);
-                } else {
-                    exceptionMessageField.setText("");
-                    showSourceButton.setEnabled(false);
-                }
-            }
+            exceptionMessageField.setText("");
+            showSourceButton.setDisable(true);
         }
     }
-    
-    class ShowSourceListener extends MouseAdapter implements ActionListener
-    {
-        public void mouseClicked(MouseEvent e)
-        {
-            int cc = e.getClickCount();
-            if (cc == 2) {
-                showSource();
-            }
-        }
-        
-        public void actionPerformed(ActionEvent e)
-        {
-            showSource();
-        }
-        
-        private void showSource()
-        {
-            DebuggerTestResult dtr = (DebuggerTestResult) testnames.getSelectedValue();
 
-            if ((dtr != null) && (dtr.isError() || dtr.isFailure())) {
+    private void showSource(DebuggerTestResult dtr)
+    {
+        if ((dtr != null) && (dtr.isError() || dtr.isFailure()))
+        {
+            Project projFinal = project;
+            SwingUtilities.invokeLater(() -> {
                 SourceLocation exceptionLocation = dtr.getExceptionLocation();
 
-                if (exceptionLocation == null) {
+                if (exceptionLocation == null)
+                {
                     return;
                 }
 
                 String packageName = JavaNames.getPrefix(exceptionLocation.getClassName());
 
-                Package spackage = lastProject.getPackage(packageName);
+                Package spackage = projFinal.getPackage(packageName);
 
-                if (spackage == null) {
+                if (spackage == null)
+                {
                     return;
                 }
 
@@ -433,48 +420,8 @@ public class TestDisplayFrame
                 String sourceName = exceptionLocation.getFileName();
                 int lineno = exceptionLocation.getLineNumber();
 
-                spackage.showSource(sourceName, lineno, "", false);
-            }
+                spackage.showSource(sourceName, lineno);
+            });
         }
-    }
-}
-
-class MyCellRenderer extends JLabel implements ListCellRenderer
-{
-    final static Icon errorIcon = Config.getFixedImageAsIcon("error.gif");
-    final static Icon failureIcon = Config.getFixedImageAsIcon("failure.gif");
-    final static Icon okIcon = Config.getFixedImageAsIcon("ok.gif");
-
-    // This is the only method defined by ListCellRenderer.
-    // We just reconfigure the JLabel each time we're called.
-    public Component getListCellRendererComponent(
-            JList list,
-            Object value,            // value to display
-            int index,               // cell index
-            boolean isSelected,      // is the cell selected
-            boolean cellHasFocus)    // the list and the cell have the focus
-    {
-        if (value instanceof DebuggerTestResult) {
-            DebuggerTestResult dtr = (DebuggerTestResult) value;
-            setText(dtr.getName() + " (" + dtr.getRunTimeMs() + "ms)");
-            setIcon((dtr.isSuccess()) ? okIcon : (dtr.isFailure() ? failureIcon : errorIcon));
-        } else {
-            setText(value.toString());
-        }
-
-        if (isSelected) {
-            setBackground(list.getSelectionBackground());
-            setForeground(list.getSelectionForeground());
-            setOpaque(true);
-        }
-        else {
-            setBackground(list.getBackground());
-            setForeground(list.getForeground());
-            setOpaque(false);
-        }
-        setEnabled(list.isEnabled());
-        setFont(list.getFont());
-
-        return this;
     }
 }

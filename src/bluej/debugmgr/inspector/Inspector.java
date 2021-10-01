@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2010,2011,2012,2014  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2010,2011,2012,2014,2015,2016,2017  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -21,44 +21,29 @@
  */
 package bluej.debugmgr.inspector;
 
-import java.awt.BorderLayout;
-import java.awt.Color;
-import java.awt.Dimension;
-import java.awt.Frame;
-import java.awt.GraphicsConfiguration;
-import java.awt.GraphicsDevice;
-import java.awt.GraphicsEnvironment;
-import java.awt.GridLayout;
-import java.awt.Image;
-import java.awt.Point;
-import java.awt.Window;
-import java.awt.event.ActionEvent;
-import java.awt.event.ActionListener;
-import java.awt.event.KeyEvent;
-import java.awt.event.KeyListener;
-import java.awt.event.MouseAdapter;
-import java.awt.event.MouseEvent;
-import java.awt.event.MouseListener;
-import java.awt.event.MouseMotionAdapter;
-import java.awt.event.WindowAdapter;
-import java.awt.event.WindowEvent;
-import java.lang.reflect.Method;
+import javax.swing.SwingUtilities;
 import java.lang.reflect.Modifier;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import javax.swing.BorderFactory;
-import javax.swing.JButton;
-import javax.swing.JComponent;
-import javax.swing.JFrame;
-import javax.swing.JPanel;
-import javax.swing.JRootPane;
-import javax.swing.JScrollPane;
-import javax.swing.KeyStroke;
-import javax.swing.event.ListSelectionEvent;
-import javax.swing.event.ListSelectionListener;
+import javafx.event.EventHandler;
+import javafx.event.EventType;
+import javafx.scene.Cursor;
+import javafx.scene.Node;
+import javafx.scene.Scene;
+import javafx.scene.control.Button;
+import javafx.scene.input.KeyCode;
+import javafx.scene.input.KeyEvent;
+import javafx.scene.input.MouseButton;
+import javafx.scene.input.MouseEvent;
+import javafx.scene.layout.Pane;
+import javafx.scene.layout.Region;
+import javafx.scene.layout.VBox;
+import javafx.stage.Stage;
+import javafx.stage.StageStyle;
+import javafx.stage.Window;
 
-import bluej.BlueJTheme;
 import bluej.Config;
 import bluej.debugger.DebuggerField;
 import bluej.debugger.DebuggerObject;
@@ -68,8 +53,10 @@ import bluej.pkgmgr.PkgMgrFrame;
 import bluej.testmgr.record.GetInvokerRecord;
 import bluej.testmgr.record.InvokerRecord;
 import bluej.testmgr.record.ObjectInspectInvokerRecord;
-import bluej.utility.Debug;
 import bluej.utility.DialogManager;
+import bluej.utility.javafx.JavaFXUtil;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 
 /**
  * 
@@ -81,8 +68,8 @@ import bluej.utility.DialogManager;
  * @author Poul Henriksen
  * @author Bruce Quig
  */
-public abstract class Inspector extends JFrame
-    implements ListSelectionListener
+@OnThread(Tag.FXPlatform)
+public abstract class Inspector extends Stage
 {
     // === static variables ===
 
@@ -92,13 +79,11 @@ public abstract class Inspector extends JFrame
     protected final static String close = Config.getString("close");
  
     // === instance variables ===
-
-    protected JScrollPane fieldListScrollPane = null;
+    
     protected FieldList fieldList = null;
-    private Color fieldListBackgroundColor;
 
-    protected JButton inspectButton;
-    protected JButton getButton;
+    protected Button inspectButton;
+    protected Button getButton;
     protected AssertPanel assertPanel;
 
     protected DebuggerObject selectedField; // the object currently selected in
@@ -109,10 +94,11 @@ public abstract class Inspector extends JFrame
     protected InvokerRecord selectedInvokerRecord; // an InvokerRecord for the
                                                    // selected object (if possible, else null)
 
-    protected Package pkg;
-    protected InspectorManager inspectorManager;
-    protected InvokerRecord ir;
-    protected Point initialClick;
+    protected final Package pkg;
+    protected final InspectorManager inspectorManager;
+    protected final InvokerRecord ir;
+    private double initialClickX;
+    private double initialClickY;
     
     // Each inspector is uniquely numbered in a session, for the purposes
     // of data collection:
@@ -122,10 +108,12 @@ public abstract class Inspector extends JFrame
     //The width of the list of fields
     private static final int MIN_LIST_WIDTH = 150;
     private static final int MAX_LIST_WIDTH = 400;
+    private final ResizeListener resizeListener;
 
     /**
      * Convert a field to a string representation, used to display the field in the inspector value list.
      */
+    @OnThread(Tag.Any)
     public static String fieldToString(DebuggerField field)
     {
         int mods = field.getModifiers();
@@ -157,56 +145,37 @@ public abstract class Inspector extends JFrame
      * @param ir
      *            the InvokerRecord for this inspector (or null)
      */
-    protected Inspector(InspectorManager inspectorManager, Package pkg, InvokerRecord ir, Color valueFieldColor)
+    protected Inspector(InspectorManager inspectorManager, Package pkg, InvokerRecord ir, StageStyle stageStyle)
     {
-        super(Config.isLinux() ? null : AWTUtilitiesWrapper.getBestGC());
-        
         if(inspectorManager == null) {
             throw new NullPointerException("An inspector must have an InspectorManager.");
-        }
-        Image icon = BlueJTheme.getIconImage();
-        if (icon != null) {
-            setIconImage(icon);
         }
 
         if (pkg == null && ir != null) {
             // Get button cannot be enabled when pkg==null
             ir = null;
         }
+        JavaFXUtil.addSelfRemovingListener(sceneProperty(), Config::addInspectorStylesheets);
+        initStyle(stageStyle);
         this.inspectorManager = inspectorManager;
         this.pkg = pkg;
         this.ir = ir;
         this.uniqueId = nextUniqueId.incrementAndGet();
 
         // We want to be able to veto a close
-        setDefaultCloseOperation(DO_NOTHING_ON_CLOSE);
-        addWindowListener(new WindowAdapter() {
-            @Override
-            public void windowClosing(WindowEvent E)
-            {
+        setOnCloseRequest(e -> { e.consume(); doClose(true); });
+        addEventFilter(javafx.scene.input.KeyEvent.KEY_PRESSED, e -> {
+            if (e.getCode() == KeyCode.ESCAPE)
                 doClose(true);
-            }
         });
 
-        fieldListBackgroundColor = valueFieldColor;
+        resizeListener = new ResizeListener(this);
+
+        //setOnShown(e -> org.scenicview.ScenicView.show(getScene()));
+
         initFieldList();
     }
     
-    @Override
-    protected JRootPane createRootPane()
-    {
-        // Close the dialog if escape is pressed.
-        ActionListener actionListener = new ActionListener() {
-            public void actionPerformed(ActionEvent actionEvent) {
-              doClose(true);
-            }
-        };
-        JRootPane rootPane = super.createRootPane();
-        KeyStroke stroke = KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0);
-        rootPane.registerKeyboardAction(actionListener, stroke, JComponent.WHEN_IN_FOCUSED_WINDOW);
-        return rootPane;
-    }
-
     /**
      * Initializes the list of fields. This creates the component that shows the
      * fields.
@@ -214,48 +183,29 @@ public abstract class Inspector extends JFrame
      */
     private void initFieldList()
     {
-        fieldList = new FieldList(MAX_LIST_WIDTH, fieldListBackgroundColor);
-        fieldList.setBackground(this.getBackground());
-        if (!Config.isRaspberryPi()) fieldList.setOpaque(true);
-        fieldList.setSelectionBackground(Config.getSelectionColour());
-        fieldList.getSelectionModel().addListSelectionListener(this);
+        fieldList = new FieldList();
+        JavaFXUtil.addChangeListenerPlatform(fieldList.getSelectionModel().selectedIndexProperty(), index -> listElementSelected(index.intValue()));
+        
         // add mouse listener to monitor for double clicks to inspect list
         // objects. assumption is made that valueChanged will have selected
         // object on first click
-        MouseListener mouseListener = new MouseAdapter() {
-            @Override
-            public void mouseClicked(MouseEvent e)
+        fieldList.setOnMouseClicked(e -> {
+            if (e.getClickCount() == 2 && e.getButton() == MouseButton.PRIMARY)
             {
-                // monitor for double clicks
-                if (e.getClickCount() == 2) {
-                    doInspect();
-                }
+                doInspect();
             }
-        };
-        fieldList.addMouseListener(mouseListener);
+        });
         
-        //to make it possible to close dialogs with the keyboard (ENTER or ESCAPE), we
-        // grab the key event from the fieldlist. 
-        fieldList.addKeyListener(new KeyListener() {            
-            public void keyPressed(KeyEvent e)
-            {
+        // To make it possible to close dialogs with the keyboard (ENTER), we
+        // grab the key event from the fieldlist which otherwise consumes it
+        // as part of the edit action (even though it's not editable)
+        fieldList.addEventFilter(KeyEvent.KEY_PRESSED, e -> {
+            // Enter or escape?
+            if (e.getCode() == KeyCode.ENTER) {
+                doClose(true);
+                e.consume();    
             }
-
-            public void keyReleased(KeyEvent e)
-            {
-            }
-
-            public void keyTyped(KeyEvent e)
-            {
-                // Enter or escape?
-                if (e.getKeyChar() == '\n' || e.getKeyChar() == 27) {
-                    // On MacOS, we'll never see escape here. We have set up an
-                    // action on the root pane which will handle it instead.
-                    doClose(true);
-                    e.consume();
-                }    
-            }
-        });        
+        });
     }
 
     protected boolean isGetEnabled()
@@ -263,22 +213,12 @@ public abstract class Inspector extends JFrame
         return ir != null;
     }
 
-    @Override
-    public void setVisible(boolean visible)
-    {
-        super.setVisible(visible);
-        if (visible)
-            fieldList.requestFocus(); // doesn't seem to work
-        // requestFocus seems to work only of the
-        // component is already visible
-    }
-
     /**
      * De-iconify the window (if necessary) and bring it to the front.
      */
     public void bringToFront()
     {
-        setState(Frame.NORMAL); // de-iconify
+        setIconified(false); // de-iconify
         toFront(); // window to front
     }
 
@@ -316,99 +256,16 @@ public abstract class Inspector extends JFrame
     public void update()
     {
         final List<FieldInfo> listData = getListData();
+
+        int prevSelection = fieldList.getSelectionModel().getSelectedIndex();
         
         fieldList.setData(listData);
-        fieldList.setTableHeader(null);
-        
-        // Ensures that an element (if any exist) is always selected
-        if (fieldList.getSelectedRow() == -1 && listData.size() > 0) {
-            fieldList.setRowSelectionInterval(0, 0);
-        }
-                
-        // if (assertPanel != null) {
-        //    assertPanel.updateWithResultData((String) listData[0]);
-        // }
-        
-        int slot = fieldList.getSelectedRow();
-        
-        // occurs if valueChanged picked up a clearSelection event from
-        // the list
-        if (slot != -1) {
-            listElementSelected(slot);
-        }
-        
-        repaint();
+        //fieldList.setTableHeader(null);
+
+        // Ensures that an element (if any exist) is always selected, preferably previously selected item:
+        if (!listData.isEmpty())
+            fieldList.getSelectionModel().select(prevSelection == -1 || prevSelection >= listData.size() ? 0 : prevSelection);
     }
-
-    /**
-     * Call this method when you want the inspector to resize to its preferred
-     * size as calculated from the elements in the inspector.
-     */
-    public void updateLayout()
-    {
-        recalculateFieldlistSize();
-        
-        // limit the preferred size of the field list scrollpane
-        if (fieldListScrollPane != null) {
-            fieldListScrollPane.setPreferredSize(null);
-            Dimension d = fieldListScrollPane.getPreferredSize();
-            fieldListScrollPane.setMaximumSize(d);
-            d = new Dimension(d);
-            d.width = Math.min(d.width, MAX_LIST_WIDTH);
-            fieldListScrollPane.setPreferredSize(d);
-        }
-        
-        pack();
-        repaint();
-    }
-    
-    /**
-     * Re-calculate the preferred field list size according to the data in the list.
-     */
-    protected void recalculateFieldlistSize()
-    {
-        final List<FieldInfo> listData = getListData();
-        int height = fieldList.getPreferredSize().height;
-        int rows = listData.size();
-        int scrollBarWidth = 0;
-        if (rows > getPreferredRows()) {
-            height = fieldList.getRowHeight() * getPreferredRows();
-            scrollBarWidth = 32; // add some space for a scrollbar
-        }
-        
-        int width = fieldList.getPreferredSize().width;
-        width = Math.max(width, MIN_LIST_WIDTH);
-        
-        fieldList.setPreferredScrollableViewportSize(new Dimension(width + scrollBarWidth, height));
-    }
-
-    // ----- ListSelectionListener interface -----
-
-    /**
-     * The value of the list selection has changed. Update the selected object.
-     * 
-     * @param e
-     *            The event object describing the event
-     */
-    public void valueChanged(ListSelectionEvent e)
-    {
-        // ignore mouse down, dragging, etc.
-        if (e.getValueIsAdjusting()) {
-            return;
-        }
-
-        int slot = fieldList.getSelectedRow();
-
-        // occurs if valueChanged picked up a clearSelection event from
-        // the list
-        if (slot == -1) {
-            return;
-        }
-
-        listElementSelected(slot);
-    }
-
-    // ----- end of ListSelectionListener interface -----
 
     /**
      * Store the object currently selected in the list.
@@ -437,8 +294,8 @@ public abstract class Inspector extends JFrame
      */
     protected void setButtonsEnabled(boolean inspect, boolean get)
     {
-        inspectButton.setEnabled(inspect);
-        getButton.setEnabled(get && isGetEnabled());
+        inspectButton.setDisable(!inspect);
+        getButton.setDisable(!(get && isGetEnabled()));
     }
 
     /**
@@ -447,10 +304,10 @@ public abstract class Inspector extends JFrame
     protected void doInspect()
     {
         if (selectedField != null) {
-            boolean isPublic = getButton.isEnabled();
+            boolean isPublic = !getButton.isDisable();
             
             InvokerRecord newIr = new ObjectInspectInvokerRecord(selectedFieldName, ir);
-            inspectorManager.getInspectorInstance(selectedField, selectedFieldName, pkg, isPublic ? newIr : null, this);
+            inspectorManager.getInspectorInstance(selectedField, selectedFieldName, pkg, isPublic ? newIr : null, this, null);
         }
     }
 
@@ -462,9 +319,12 @@ public abstract class Inspector extends JFrame
     {
         if (selectedField != null) {
             GetInvokerRecord getIr = new GetInvokerRecord(selectedFieldType, selectedFieldName, ir);
-            PackageEditor pkgEd = pkg.getEditor();
-            pkgEd.recordInteraction(getIr);
-            pkgEd.raisePutOnBenchEvent(this, selectedField, selectedField.getGenType(), getIr);
+            DebuggerObject selField = this.selectedField;
+            SwingUtilities.invokeLater(() -> {
+                PackageEditor pkgEd = pkg.getEditor();
+                pkgEd.recordInteraction(getIr);
+                pkgEd.raisePutOnBenchEvent(this, selField, selField.getGenType(), getIr, true, Optional.empty());
+            });
         }
     }
 
@@ -486,9 +346,8 @@ public abstract class Inspector extends JFrame
         }
 
         if (closeOk) {
-            setVisible(false);
+            hide();
             remove();
-            dispose();
         }
     }
 
@@ -497,7 +356,7 @@ public abstract class Inspector extends JFrame
         if (assertPanel != null && assertPanel.isAssertEnabled()) {
             
             if (! assertPanel.isAssertComplete()) {
-                int choice = DialogManager.askQuestion(this, "empty-assertion-text");
+                int choice = DialogManager.askQuestionFX(this, "empty-assertion-text");
                 
                 if (choice == 0) {
                     return false;
@@ -505,25 +364,16 @@ public abstract class Inspector extends JFrame
             }
             
             ir.addAssertion(assertPanel.getAssertStatement());
-            
-            PkgMgrFrame pmf = PkgMgrFrame.findFrame(pkg);
-            if (pmf != null)
-            {
-                assertPanel.recordAssertion(pkg, pmf.getTestIdentifier(), ir.getUniqueIdentifier());
-            }
+
+            assertPanel.recordAssertion(pkg, () -> Optional.ofNullable(PkgMgrFrame.findFrame(pkg)).map(PkgMgrFrame::getTestIdentifier), ir.getUniqueIdentifier());
         }
         return true;
     }
 
-    protected JButton createCloseButton()
+    protected Button createCloseButton()
     {
-        JButton button = new JButton(close);
-        button.addActionListener(new ActionListener() {
-            public void actionPerformed(ActionEvent e)
-            {
-                doClose(true);
-            }
-        });
+        Button button = new Button(close);
+        button.setOnAction(e -> doClose(true));
         return button;
     }
 
@@ -532,223 +382,190 @@ public abstract class Inspector extends JFrame
      * 
      * @return A panel with two buttons
      */
-    protected JPanel createInspectAndGetButtons()
+    protected Node createInspectAndGetButtons()
     {
         // Create panel with "inspect" and "get" buttons
-        JPanel buttonPanel = new JPanel();
-        if (!Config.isRaspberryPi()) buttonPanel.setOpaque(false);
-        if (!Config.isRaspberryPi()) buttonPanel.setDoubleBuffered(false);
-        buttonPanel.setLayout(new GridLayout(0, 1));
-        inspectButton = new JButton(inspectLabel);
-        inspectButton.addActionListener(new ActionListener() {
-            public void actionPerformed(ActionEvent e)
-            {
-                doInspect();
-            }
-        });
-        inspectButton.setEnabled(false);
-        buttonPanel.add(inspectButton);
+        Pane buttonPanel = new VBox();
+        inspectButton = new Button(inspectLabel);
+        inspectButton.setOnAction(e -> doInspect());
+        inspectButton.setDisable(true);
+        buttonPanel.getChildren().add(inspectButton);
 
-        getButton = new JButton(getLabel);
-        getButton.setEnabled(false);
-        getButton.addActionListener(new ActionListener() {
-            public void actionPerformed(ActionEvent e)
-            {
-                doGet();
-            }
-        });
-        buttonPanel.add(getButton);
+        getButton = new Button(getLabel);
+        getButton.setDisable(true);
+        getButton.setOnAction(e -> doGet());
+        buttonPanel.getChildren().add(getButton);
 
-        JPanel buttonFramePanel = new JPanel();
-        if (!Config.isRaspberryPi()) buttonFramePanel.setOpaque(false);
-        if (!Config.isRaspberryPi()) buttonFramePanel.setDoubleBuffered(false);
-        buttonFramePanel.setLayout(new BorderLayout(0, 0));
-        buttonFramePanel.add(buttonPanel, BorderLayout.NORTH);
-        return buttonFramePanel;
+        JavaFXUtil.addStyleClass(buttonPanel, "inspector-side-buttons");
+        return buttonPanel;
     }
 
-    /**
-     * Creates a ScrollPane for the fieldList
-     */
-    protected JScrollPane createFieldListScrollPane()
-    {
-        fieldListScrollPane = new JScrollPane(fieldList);
-        fieldListScrollPane.setBorder(BorderFactory.createLineBorder(fieldListBackgroundColor, 10));
-        fieldListScrollPane.getViewport().setBackground(fieldListBackgroundColor);
-        return fieldListScrollPane;
-    }
-    
     // Allow movement of the window by dragging
     // Adapted from: http://www.stupidjavatricks.com/?p=4
     // (with improvements).
-    protected void installListenersForMoveDrag()
+    protected void installListenersForMoveDrag(double curvedCornersMargin)
     {
-        addMouseListener( new MouseAdapter()
-        {
-            @Override
-            public void mousePressed( MouseEvent e )
-            {
-                initialClick = e.getPoint();
-            }
+        resizeListener.setCurvedCorners(curvedCornersMargin);
+        addEventHandler(MouseEvent.MOUSE_MOVED, resizeListener);
+        addEventHandler(MouseEvent.MOUSE_PRESSED, resizeListener);
+        // Must be filter to allows us to consume event before next handler for window-move:
+        addEventFilter(MouseEvent.MOUSE_DRAGGED, resizeListener);
+        addEventHandler(MouseEvent.MOUSE_EXITED, resizeListener);
+        addEventHandler(MouseEvent.MOUSE_EXITED_TARGET, resizeListener);
 
-            @Override
-            public void mouseReleased(MouseEvent e)
-            {
-                initialClick = null;
-            }
-        });
-     
-        // Move window when mouse is dragged
-        addMouseMotionListener( new MouseMotionAdapter()
+        addEventHandler(MouseEvent.MOUSE_PRESSED, e ->
         {
-            @Override
-            public void mouseDragged( MouseEvent e )
-            {
-                if (initialClick == null) {
-                    initialClick = e.getPoint();
-                    return;
-                }
-
-                // Determine how much the mouse moved since the initial click
-                int newXPos = e.getXOnScreen() - initialClick.x;
-                int newYPos = e.getYOnScreen() - initialClick.y;
-                
-                // Move window to this position
-                setLocation(newXPos, newYPos);
-            }
+            initialClickX = e.getScreenX() - getX();
+            initialClickY = e.getScreenY() - getY();
         });
+        //addEventHandler(MouseEvent.MOUSE_RELEASED,e -> { initialClick = null;});
+        addEventHandler(MouseEvent.MOUSE_DRAGGED, e ->
+        {
+            setX(e.getScreenX() - initialClickX);
+            setY(e.getScreenY() - initialClickY);
+        });
+
+
     }
     
-   /**
-    * Taken from the source code at: http://java.sun.com/developer/technicalArticles/GUI/translucent_shaped_windows/
-    *
-    * @author Anthony Petrov
-    */
-   private static class AWTUtilitiesWrapper {
+    @OnThread(Tag.Any)
+    public int getUniqueId()
+    {
+        return uniqueId;
+    }
 
-       private static Class<?> awtUtilitiesClass;
-       private static Class<?> translucencyClass;
-       // private static Method mIsTranslucencySupported,  mSetWindowShape,  mSetWindowOpacity;
-       private static Method mIsTranslucencyCapable, mSetWindowOpaque;
-       //public static Object PERPIXEL_TRANSPARENT,  TRANSLUCENT,  PERPIXEL_TRANSLUCENT;
+    // Adapted from HeavyweightDialog.positionStage
+    public void centerOnOwner()
+    {
+        // Firstly we need to force CSS and layout to happen, as the window
+        // may not have been shown yet (so it has no dimensions)
+        getScene().getRoot().applyCss();
+        getScene().getRoot().layout();
 
-       static void init() {
-           try {
-               awtUtilitiesClass = Class.forName("com.sun.awt.AWTUtilities");
-               translucencyClass = Class.forName("com.sun.awt.AWTUtilities$Translucency");
-               if (translucencyClass.isEnum()) {
-                   Object[] kinds = translucencyClass.getEnumConstants();
-                   if (kinds != null) {
-                       //PERPIXEL_TRANSPARENT = kinds[0];
-                       //TRANSLUCENT = kinds[1];
-                       //PERPIXEL_TRANSLUCENT = kinds[2];
-                   }
-               }
-               // mIsTranslucencySupported = awtUtilitiesClass.getMethod("isTranslucencySupported", translucencyClass);
-               mIsTranslucencyCapable = awtUtilitiesClass.getMethod("isTranslucencyCapable", GraphicsConfiguration.class);
-               // mSetWindowShape = awtUtilitiesClass.getMethod("setWindowShape", Window.class, Shape.class);
-               // mSetWindowOpacity = awtUtilitiesClass.getMethod("setWindowOpacity", Window.class, float.class);
-               mSetWindowOpaque = awtUtilitiesClass.getMethod("setWindowOpaque", Window.class, boolean.class);
-           } catch (ClassNotFoundException cnfe) {
-               Debug.log("Sun AWT translucency classes not available (ClassNotFoundException).");
-           } catch (Exception ex) {
-               Debug.reportError("Couldn't support AWTUtilities", ex);
-           }
-       }
+        final Window owner = getOwner();
+        if (owner == null)
+        {
+            centerOnScreen();
+            return;
+        }
+        final Scene ownerScene = owner.getScene();
 
-       static {
-           init();
-       }
-       
-       private static boolean isSupported(Method method, Object kind) {
-           if (awtUtilitiesClass == null ||
-                   method == null)
-           {
-               return false;
-           }
-           try {
-               Object ret = method.invoke(null, kind);
-               if (ret instanceof Boolean) {
-                   return ((Boolean)ret).booleanValue();
-               }
-           } catch (Exception ex) {
-               Debug.reportError("Couldn't support AWTUtilities", ex);
-           }
-           return false;
-       }
-       
-       /*
-       public static boolean isTranslucencySupported(Object kind) {
-           if (translucencyClass == null) {
-               return false;
-           }
-           return isSupported(mIsTranslucencySupported, kind);
-       }
-       */
-       
-       public static boolean isTranslucencyCapable(GraphicsConfiguration gc) {
-           return isSupported(mIsTranslucencyCapable, gc);
-       }
-       
-       private static void set(Method method, Window window, Object value) {
-           if (awtUtilitiesClass == null ||
-                   method == null || !isTranslucencyCapable(window.getGraphicsConfiguration()))
-           {
-               return;
-           }
-           try {
-               method.invoke(null, window, value);
-           } catch (Exception ex) {
-               Debug.reportError("Couldn't support AWTUtilities: ", ex);
-           }
-       }
-       
-       /*
-       public static void setWindowShape(Window window, Shape shape) {
-           set(mSetWindowShape, window, shape);
-       }
+        // scene.getY() seems to represent the y-offset from the top of the titlebar to the
+        // start point of the scene, so it is the titlebar height
+        final double titleBarHeight = ownerScene.getY();
 
-       public static void setWindowOpacity(Window window, float opacity) {
-           set(mSetWindowOpacity, window, Float.valueOf(opacity));
-       }
-       */
-       
-       public static void setWindowOpaque(Window window, boolean opaque) {
-           set(mSetWindowOpaque, window, Boolean.valueOf(opaque));
-       }
-       
-       public static GraphicsConfiguration getBestGC() {
-           GraphicsConfiguration translucencyCapableGC = GraphicsEnvironment.getLocalGraphicsEnvironment().getDefaultScreenDevice().getDefaultConfiguration();
-           if (!AWTUtilitiesWrapper.isTranslucencyCapable(translucencyCapableGC)) {
-               translucencyCapableGC = null;
+        // because Stage does not seem to centre itself over its owner, we
+        // do it here.
 
-               GraphicsEnvironment env =
-                       GraphicsEnvironment.getLocalGraphicsEnvironment();
-               GraphicsDevice[] devices = env.getScreenDevices();
+        // then we can get the dimensions and position the dialog appropriately.
+        final double dialogWidth = getScene().getRoot().prefWidth(-1);
+        final double dialogHeight = getScene().getRoot().prefHeight(dialogWidth);
 
-               for (int i = 0; i < devices.length && translucencyCapableGC == null; i++) {
-                   GraphicsConfiguration[] configs = devices[i].getConfigurations();
-                   for (int j = 0; j < configs.length && translucencyCapableGC == null; j++) {
-                       if (AWTUtilitiesWrapper.isTranslucencyCapable(configs[j])) {
-                           translucencyCapableGC = configs[j];
-                       }
-                   }
-               }
-           }
-           if (translucencyCapableGC == null) {
-               Debug.message("No translucency capable GC");
-           }
-           return translucencyCapableGC;
-       }
-   }
-   
-   protected void setWindowOpaque(boolean b)
-   {
-       AWTUtilitiesWrapper.setWindowOpaque(this, b);
-   }
-   
-   public int getUniqueId()
-   {
-       return uniqueId;
-   }
+//        stage.sizeToScene();
+
+        double x = owner.getX() + (ownerScene.getWidth() / 2.0) - (dialogWidth / 2.0);
+        double y = owner.getY() + titleBarHeight / 2.0 + (ownerScene.getHeight() / 2.0) - (dialogHeight / 2.0);
+
+        setX(x);
+        setY(y);
+    }
+
+    // Gets the content for the purposes of animation
+    public abstract Region getContent();
+
+    /**
+     * Adapted from:
+     * http://stackoverflow.com/questions/19455059/allow-user-to-resize-an-undecorated-stage
+     */
+    static class ResizeListener implements EventHandler<MouseEvent>
+    {
+        private Stage stage;
+        private Cursor cursorEvent = Cursor.DEFAULT;
+        private int border = 4;
+        private double startX = 0;
+        private double startY = 0;
+        private double curvedCornersMargin;
+
+        public ResizeListener(Stage stage) {
+            this.stage = stage;
+        }
+
+        @Override
+        public void handle(MouseEvent mouseEvent) {
+            EventType<? extends MouseEvent> mouseEventType = mouseEvent.getEventType();
+            Scene scene = stage.getScene();
+
+            double mouseEventX = mouseEvent.getSceneX(),
+                mouseEventY = mouseEvent.getSceneY(),
+                sceneWidth = scene.getWidth(),
+                sceneHeight = scene.getHeight();
+
+            if (MouseEvent.MOUSE_MOVED.equals(mouseEventType) == true) {
+                double cornerBorder = Math.max(curvedCornersMargin, border);
+                if (mouseEventX < cornerBorder && mouseEventY < cornerBorder) {
+                    cursorEvent = Cursor.NW_RESIZE;
+                } else if (mouseEventX < cornerBorder && mouseEventY > sceneHeight - cornerBorder) {
+                    cursorEvent = Cursor.SW_RESIZE;
+                } else if (mouseEventX > sceneWidth - cornerBorder && mouseEventY < cornerBorder) {
+                    cursorEvent = Cursor.NE_RESIZE;
+                } else if (mouseEventX > sceneWidth - cornerBorder && mouseEventY > sceneHeight - cornerBorder) {
+                    cursorEvent = Cursor.SE_RESIZE;
+                } else if (mouseEventX < border) {
+                    cursorEvent = Cursor.W_RESIZE;
+                } else if (mouseEventX > sceneWidth - border) {
+                    cursorEvent = Cursor.E_RESIZE;
+                } else if (mouseEventY < border) {
+                    cursorEvent = Cursor.N_RESIZE;
+                } else if (mouseEventY > sceneHeight - border) {
+                    cursorEvent = Cursor.S_RESIZE;
+                } else {
+                    cursorEvent = Cursor.DEFAULT;
+                }
+                scene.setCursor(cursorEvent);
+            } else if(MouseEvent.MOUSE_EXITED.equals(mouseEventType) || MouseEvent.MOUSE_EXITED_TARGET.equals(mouseEventType)){
+                scene.setCursor(Cursor.DEFAULT);
+            } else if (MouseEvent.MOUSE_PRESSED.equals(mouseEventType) == true) {
+                startX = stage.getWidth() - mouseEventX;
+                startY = stage.getHeight() - mouseEventY;
+            } else if (MouseEvent.MOUSE_DRAGGED.equals(mouseEventType) == true) {
+                if (Cursor.DEFAULT.equals(cursorEvent) == false) {
+                    if (Cursor.W_RESIZE.equals(cursorEvent) == false && Cursor.E_RESIZE.equals(cursorEvent) == false) {
+                        double minHeight = stage.getMinHeight() > (border*2) ? stage.getMinHeight() : (border*2);
+                        if (Cursor.NW_RESIZE.equals(cursorEvent) == true || Cursor.N_RESIZE.equals(cursorEvent) == true || Cursor.NE_RESIZE.equals(cursorEvent) == true) {
+                            if (stage.getHeight() > minHeight || mouseEventY < 0) {
+                                stage.setHeight(stage.getY() - mouseEvent.getScreenY() + stage.getHeight());
+                                stage.setY(mouseEvent.getScreenY());
+                            }
+                        } else {
+                            if (stage.getHeight() > minHeight || mouseEventY + startY - stage.getHeight() > 0) {
+                                stage.setHeight(mouseEventY + startY);
+                            }
+                        }
+                    }
+
+                    if (Cursor.N_RESIZE.equals(cursorEvent) == false && Cursor.S_RESIZE.equals(cursorEvent) == false) {
+                        double minWidth = stage.getMinWidth() > (border*2) ? stage.getMinWidth() : (border*2);
+                        if (Cursor.NW_RESIZE.equals(cursorEvent) == true || Cursor.W_RESIZE.equals(cursorEvent) == true || Cursor.SW_RESIZE.equals(cursorEvent) == true) {
+                            if (stage.getWidth() > minWidth || mouseEventX < 0) {
+                                stage.setWidth(stage.getX() - mouseEvent.getScreenX() + stage.getWidth());
+                                stage.setX(mouseEvent.getScreenX());
+                            }
+                        } else {
+                            if (stage.getWidth() > minWidth || mouseEventX + startX - stage.getWidth() > 0) {
+                                stage.setWidth(mouseEventX + startX);
+                            }
+                        }
+                    }
+
+                    mouseEvent.consume();
+                }
+
+            }
+        }
+
+        public void setCurvedCorners(double curvedCornersMargin)
+        {
+            this.curvedCornersMargin = curvedCornersMargin;
+        }
+    }
 }

@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2014,2016  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -21,6 +21,8 @@
  */
 package bluej.pkgmgr;
 
+import java.awt.SecondaryLoop;
+import java.awt.Toolkit;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
@@ -28,14 +30,17 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
+import javafx.application.Platform;
+import javafx.stage.Window;
 
-import javax.swing.JFrame;
-
+import bluej.extensions.SourceType;
 import bluej.parser.InfoParser;
 import bluej.parser.symtab.ClassInfo;
 import bluej.utility.Debug;
 import bluej.utility.DialogManager;
 import bluej.utility.JavaNames;
+import bluej.utility.javafx.FXPlatformSupplier;
 
 /**
  * Utility functions to help in the process of importing directory
@@ -63,7 +68,7 @@ public class Import
      * @param path       The path of the directory containing the project-to-be
      * @return  true if the conversion was successfully completed
      */
-    public static boolean convertNonBlueJ(JFrame parentWin, File path)
+    public static boolean convertNonBlueJ(FXPlatformSupplier<Window> parentWin, File path)
     {
         // find all sub directories with Java files in them
         // then find all the Java files in those directories
@@ -71,7 +76,7 @@ public class Import
 
         // check to make sure the path contains some java source files
         if (interestingDirs.size() == 0) {
-            DialogManager.showError(parentWin, "open-non-bluej-no-java");
+            Platform.runLater(() -> DialogManager.showErrorFX(parentWin.get(), "open-non-bluej-no-java"));
             return false;
         }
 
@@ -108,11 +113,17 @@ public class Import
 
         // now ask if they want to continue if we have detected mismatches
         if (mismatchFiles.size() > 0) {
-            ImportMismatchDialog imd = new ImportMismatchDialog(parentWin, mismatchFiles, mismatchPackagesOriginal,
-                    mismatchPackagesChanged);
-            imd.setVisible(true);
-
-            if (!imd.getResult())
+            AtomicBoolean shouldContinue = new AtomicBoolean();
+            SecondaryLoop loop = Toolkit.getDefaultToolkit().getSystemEventQueue().createSecondaryLoop();
+            Platform.runLater(() -> {
+                ImportMismatchDialog imd = new ImportMismatchDialog(parentWin.get(), mismatchFiles);
+                boolean cont = imd.showAndWait().orElse(false);
+                shouldContinue.set(cont);
+                loop.exit();
+            });
+            loop.enter();
+            
+            if (!shouldContinue.get())
                 return false;
         }
 
@@ -160,7 +171,7 @@ public class Import
                 }
             }
             else {
-                if (files[i].getName().endsWith(".java"))
+                if (files[i].getName().endsWith("." + SourceType.Java.toString().toLowerCase()))
                     imInteresting = true;
             }
         }
@@ -194,7 +205,7 @@ public class Import
             }
 
             for (int i=0; i<files.length; i++) {
-                if (files[i].isFile() && files[i].getName().endsWith(".java")) {
+                if (files[i].isFile() && files[i].getName().endsWith("." + SourceType.Java.toString().toLowerCase())) {
                     interesting.add(files[i]);
                 }
             }

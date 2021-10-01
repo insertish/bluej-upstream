@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2012,2015  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2012,2015,2016  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -26,14 +26,18 @@ import java.util.Properties;
 import bluej.extensions.BDependency.Type;
 import bluej.pkgmgr.Package;
 import bluej.pkgmgr.target.*;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 
 /**
  * An "implements" dependency between two (class) targets in a package
  *
  * @author  Michael Kolling
  */
+@OnThread(Tag.FXPlatform)
 public class ImplementsDependency extends Dependency
 {
+    @OnThread(Tag.Any)
     public ImplementsDependency(Package pkg, DependentTarget from, DependentTarget to)
     {
         super(pkg, from, to);
@@ -44,6 +48,7 @@ public class ImplementsDependency extends Dependency
         this(pkg, null, null);
     }
 
+    @OnThread(Tag.FXPlatform)
     public void save(Properties props, String prefix)
     {
         super.save(props, prefix);
@@ -61,8 +66,15 @@ public class ImplementsDependency extends Dependency
     }
     
     @Override
+    @OnThread(Tag.Any)
     public Type getType()
     {
         return Type.IMPLEMENTS;
+    }
+
+    @Override
+    public boolean isRemovable()
+    {
+        return true;
     }
 }

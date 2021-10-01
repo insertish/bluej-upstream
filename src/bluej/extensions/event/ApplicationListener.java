@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2016  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -24,7 +24,6 @@ package bluej.extensions.event;
 /**
  * This interface allows you to listen for application events.
  *
- * @version $Id: ApplicationListener.java 6215 2009-03-30 13:28:25Z polle $
  */
 public interface ApplicationListener
 {
@@ -37,4 +36,10 @@ public interface ApplicationListener
      * If a long operation must be performed you should start a Thread.
      */
     public void blueJReady (ApplicationEvent event);
+
+    /**
+     * This method will be called when submission to the current data recording server
+     * (Blackbox, or your local purpose-run recording server) has failed.
+     */
+    default public void dataSubmissionFailed(ApplicationEvent event) { }
 }

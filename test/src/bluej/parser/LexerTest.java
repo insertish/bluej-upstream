@@ -358,7 +358,7 @@ public class LexerTest extends junit.framework.TestCase
     
     public void testOther() throws Exception
     {
-        TokenStream ts = getLexerFor("\"a string\" an_identifier99 '\\n' 1234 1234l 0.34 .78 .56f 5.06d 0x1234");
+        TokenStream ts = getLexerFor("\"a string\" an_identifier99 '\\n' 1234 1234l 0.34 .78 01.2 .56f 5.06d 0x1234");
         LocatableToken token = (LocatableToken) ts.nextToken();
         assertEquals(JavaTokenTypes.STRING_LITERAL, token.getType());
         token = (LocatableToken) ts.nextToken();
@@ -370,6 +370,8 @@ public class LexerTest extends junit.framework.TestCase
         assertEquals(JavaTokenTypes.NUM_INT, token.getType());
         token = (LocatableToken) ts.nextToken();
         assertEquals(JavaTokenTypes.NUM_LONG, token.getType());
+        token = (LocatableToken) ts.nextToken();
+        assertEquals(JavaTokenTypes.NUM_DOUBLE, token.getType());
         token = (LocatableToken) ts.nextToken();
         assertEquals(JavaTokenTypes.NUM_DOUBLE, token.getType());
         token = (LocatableToken) ts.nextToken();
@@ -423,6 +425,7 @@ public class LexerTest extends junit.framework.TestCase
         assertEquals(1, token.getLine());
         assertEquals(33, token.getEndColumn());
         assertEquals(1, token.getEndLine());
+        assertEquals("// single line", token.getText());
         
         //more complicated comments
         ts = getNonfilteringLexerFor("/**test*this***/");
@@ -444,6 +447,7 @@ public class LexerTest extends junit.framework.TestCase
         ts = getNonfilteringLexerFor("// single line comment\n  an_identifier");
         token = (LocatableToken) ts.nextToken();
         assertEquals(JavaTokenTypes.SL_COMMENT, token.getType());
+        assertEquals("// single line comment", token.getText());
         token = (LocatableToken) ts.nextToken();
         assertEquals(JavaTokenTypes.IDENT, token.getType());
         token = (LocatableToken) ts.nextToken();

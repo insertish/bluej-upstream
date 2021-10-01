@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2011,2012  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2011,2012,2014,2015,2016  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -59,15 +59,14 @@ public class BlueJFileReader
      * The files are expected to be in ISO 8859-1 character encoding, with "slash-u-XXXX" unicode
      * escape sequences.
      *
-     * @param baseFileName  Base name of the help file
+     * @param file          The help file
      * @param textID        ID string for the help message
      * @param exactMatch    If true, match ID string exactly. If false,
      *                      wildcards are used.
      *
      * @return              The help text or null.
      */
-    public static String readHelpText(File file, String textID,
-                                      boolean exactMatch)
+    public static String readHelpText(File file, String textID, boolean exactMatch)
     {
         BufferedReader in = null;
 
@@ -202,7 +201,7 @@ public class BlueJFileReader
 
                     String key = buf.toString();
                     if (key.length() != 0) {
-                        String value = (String)translations.get(key);
+                        String value = translations.get(key);
 
                         if(value == null) {
                             out.write('$');
@@ -246,6 +245,51 @@ public class BlueJFileReader
                 }
             }
 
+            in.close();
+            out.close();
+        }
+        catch(IOException e) {
+            if(in != null) {
+                in.close();
+            }
+            if(out != null) {
+                out.close();
+            }
+            throw e;
+        }
+    }
+    
+    /**
+     * Copy a file while replacing a string with another within the file.
+     * <p>
+     * 'translations' contains definitions to be used as replacements.
+     * This is used to create a copy of a class with different names.
+     */
+    public static void duplicateFile(File original, File destination, Dictionary<String,String> translations)
+        throws IOException
+    {
+        BufferedReader in = null;
+        BufferedWriter out = null;
+      
+        try {
+            in = new BufferedReader(new FileReader(original));
+            out = new BufferedWriter(new FileWriter(destination));
+
+            String line;
+            while ((line = in.readLine()) != null) {
+                bluej.utility.Debug.message("line = " + line);
+                StringTokenizer st = new StringTokenizer(line, " (){}.,\"><", true);
+                while (st.hasMoreTokens()) {
+                    String key = st.nextToken();
+                    String value = translations.get(key);
+                    if(value == null) {
+                        value = key;
+                    }
+                    out.write(value);
+                }
+                out.newLine();
+            }
+            
             in.close();
             out.close();
         }

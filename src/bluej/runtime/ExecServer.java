@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2011,2012,2013,2014  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2011,2012,2013,2014,2016,2017  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -43,6 +43,17 @@ import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+
+import com.sun.javafx.stage.StageHelper;
+import javafx.application.Application;
+import javafx.application.Platform;
+import javafx.application.Preloader;
+import javafx.collections.ListChangeListener;
+import javafx.stage.Stage;
 
 import org.junit.runner.JUnitCore;
 import org.junit.runner.Request;
@@ -50,7 +61,6 @@ import org.junit.runner.Result;
 import org.junit.runner.notification.Failure;
 
 import bluej.utility.Utility;
-
 /**
  * Class that controls the runtime of code executed within BlueJ.
  * Sets up the initial thread state, etc.
@@ -93,7 +103,7 @@ public class ExecServer
     public static final String METHOD_RETURN_NAME = "methodReturn";
     public static final String EXCEPTION_NAME = "exception";
     public static final String EXECUTED_CLASS_NAME = "executedClass";
-    
+
     // Possible actions for the main thread
     public static final int EXEC_SHELL = 0;  // Execute a shell class
     public static final int TEST_SETUP = 1;
@@ -104,7 +114,9 @@ public class ExecServer
     public static final int INSTANTIATE_CLASS = 6; // use default constructor
     public static final int INSTANTIATE_CLASS_ARGS = 7; // use constructor
         // with specified parameter types and arguments
-    
+    public static final int LAUNCH_FX_APP = 8;
+
+
     // Parameter for worker thread actions
     public static int workerAction = EXIT_VM;
     public static String objectName;
@@ -239,7 +251,8 @@ public class ExecServer
                     if (source instanceof Window) {
                         addWindow((Window) source);
                         Utility.bringToFront((Window) source);
-                        // To make sure that screen readers announce the window being open,
+                        // To make sure that screen readers an
+                        // nounce the window being open,
                         // we de-focus and re-focus it once the right application has focus:
                         // Disabling this code due to it causing issues, see ticket #516.
                         //     KeyboardFocusManager.getCurrentKeyboardFocusManager().clearGlobalFocusOwner();
@@ -339,7 +352,7 @@ public class ExecServer
             // Should never happen but if it does we want to know about it
             System.err.println("ExecServer.newLoader() Malformed URL=" + splits[index]);
         }
-        
+
         currentLoader = new URLClassLoader(urls);
         
         synchronized (objectMaps) {
@@ -773,6 +786,28 @@ public class ExecServer
                             }
                             break;
                         }
+                        case LAUNCH_FX_APP:
+                            // The preloader will tell us the Application reference:
+                            CompletableFuture<Application> theApp = new CompletableFuture<>();
+                            new Thread(() -> {
+                                FXPreloader.theApp = theApp;
+                                // Use a preloader to be able to find out the Application reference:
+                                System.setProperty("javafx.preloader", FXPreloader.class.getName());
+                                Application.launch((Class<? extends Application>)loadAndInitClass(classToRun));
+                            }).start();
+                            // Return null if it takes too long to initialise.  This is most likely
+                            // due to the Application class's constructor doing a lot of work,
+                            // but it may also be related to a failure in loading.
+                            try
+                            {
+                                methodReturn = theApp.get(3000, TimeUnit.MILLISECONDS);
+                            }
+                            catch (InterruptedException | TimeoutException | ExecutionException e)
+                            {
+                                // If anything goes wrong, we just won't add to the object bench:
+                                methodReturn = null;
+                            }
+                            break;
                         case TEST_SETUP:
                             methodReturn = runTestSetUp(classToRun);
                             break;
@@ -879,14 +914,44 @@ public class ExecServer
     {
         return currentLoader;
     }
-    
-    /**
-     * Set the current class loader, to be used for loading user classes.
-     * 
-     * @param newLoader   The new class loader
-     */
-    public static void setClassLoader(ClassLoader newLoader)
+
+    // A preloader for FX, only used to find out the reference of the Application instance.
+    public static class FXPreloader extends Preloader
     {
-        currentLoader = newLoader;
+        // This should only be filled once per VM run because we exit afterwards.
+        // But just in case, we initialise it when we start each Application
+        public static CompletableFuture<Application> theApp;
+
+        @Override
+        public void start(Stage primaryStage) throws Exception
+        {
+            // Add a listener for a new Stage appearing
+
+            // Must initialise Stage class before using StageHelper:
+            new Stage();
+            StageHelper.getStages().addListener((ListChangeListener<Stage>)c -> {
+                boolean anyAdded = false;
+                while (c.next())
+                    anyAdded |= c.wasAdded();
+                if (anyAdded)
+                {
+                    // We don't bring the window itself to the front as that may
+                    // mess up user's program.  We just bring the app to the front:
+                    Utility.appToFront();
+                }
+            });
+        }
+
+        @Override
+        public void handleStateChangeNotification(StateChangeNotification info)
+        {
+            super.handleStateChangeNotification(info);
+            switch (info.getType())
+            {
+                case BEFORE_START:
+                    theApp.complete(info.getApplication());
+                    break;
+            }
+        }
     }
 }

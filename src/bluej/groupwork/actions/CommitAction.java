@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2012  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2012,2014,2016  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -29,6 +29,8 @@ import java.util.Set;
 
 import javax.swing.AbstractAction;
 
+import threadchecker.OnThread;
+import threadchecker.Tag;
 import bluej.Config;
 import bluej.collect.DataCollector;
 import bluej.groupwork.StatusHandle;
@@ -36,10 +38,12 @@ import bluej.groupwork.TeamStatusInfo;
 import bluej.groupwork.TeamUtils;
 import bluej.groupwork.TeamworkCommand;
 import bluej.groupwork.TeamworkCommandResult;
-import bluej.groupwork.ui.CommitCommentsFrame;
+import bluej.groupwork.ui.CommitAndPushInterface;
 import bluej.pkgmgr.PkgMgrFrame;
 import bluej.pkgmgr.Project;
 import bluej.utility.SwingWorker;
+import java.awt.Window;
+import javafx.application.Platform;
 
 
 /**
@@ -62,14 +66,14 @@ public class CommitAction extends AbstractAction
     private Set<File> newFiles; // which files are new files
     private Set<File> deletedFiles; // which files are to be removed
     private Set<File> files; // files to commit (includes both of above)
-    private CommitCommentsFrame commitCommentsFrame;
+    private CommitAndPushInterface commitCommentsFrame;
     private StatusHandle statusHandle;
     
     private CommitWorker worker;
     
-    public CommitAction(CommitCommentsFrame frame)
+    public CommitAction(CommitAndPushInterface frame)
     {
-        super(Config.getString("team.commit"));
+        super(Config.getString("team.commitButton"));
         commitCommentsFrame = frame; 
     }
     
@@ -106,6 +110,7 @@ public class CommitAction extends AbstractAction
     /**
      * Set the status handle to use in order to perform the commit operation.
      */
+    @OnThread(Tag.Any)
     public void setStatusHandle(StatusHandle statusHandle)
     {
         this.statusHandle = statusHandle;
@@ -120,7 +125,14 @@ public class CommitAction extends AbstractAction
         
         if (project != null) {
             commitCommentsFrame.startProgress();
-            PkgMgrFrame.displayMessage(project, Config.getString("team.commit.statusMessage"));
+            if (project.getTeamSettingsController().isDVCS()){
+                //if DVCS, display message on commit/push window.
+                commitCommentsFrame.displayMessage(Config.getString("team.commit.statusMessage"));
+            } else {
+                //if svn, display the message on the main BlueJ window.
+                PkgMgrFrame.displayMessage(project, Config.getString("team.commit.statusMessage"));
+            }
+            
             setEnabled(false);
             
             //doCommit(project);
@@ -152,6 +164,7 @@ public class CommitAction extends AbstractAction
         private TeamworkCommandResult result;
         private boolean aborted;
         
+        @OnThread(Tag.Swing)
         public CommitWorker(Project project)
         {
             String comment = commitCommentsFrame.getComment();
@@ -190,19 +203,27 @@ public class CommitAction extends AbstractAction
                 commitCommentsFrame.stopProgress();
                 if (! result.isError() && ! result.wasAborted()) {
                     DataCollector.teamCommitProject(project, statusHandle.getRepository(), files);
-                    EventQueue.invokeLater(new Runnable() {
-                        public void run() {
-                            PkgMgrFrame.displayMessage(project, Config.getString("team.commit.statusDone"));
-                        }
+                    EventQueue.invokeLater(() -> {
+                            if (project.getTeamSettingsController().isDVCS()) {
+                                //if DVCS, display message on commit/push window.
+                                commitCommentsFrame.displayMessage(Config.getString("team.commit.statusDone"));
+                            } else {
+                                //if svn, display the message on the main BlueJ window.
+                                PkgMgrFrame.displayMessage(project, Config.getString("team.commit.statusDone"));
+                            }
                     });
                 }
             }
-
-            TeamUtils.handleServerResponse(result, commitCommentsFrame);
+            
+            Platform.runLater(() -> TeamUtils.handleServerResponseFX(result, commitCommentsFrame.asWindow()));
             
             if (! aborted) {
                 setEnabled(true);
-                commitCommentsFrame.setVisible(false);
+                if (project.getTeamSettingsController().isDVCS()){
+                    commitCommentsFrame.setVisible(true);
+                } else {
+                    commitCommentsFrame.setVisible(false);
+                }
             }
         }
     }

@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2011,2013,2014,2015  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2011,2013,2014,2015,2016,2017  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -33,6 +33,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.Stack;
 
+import threadchecker.OnThread;
+import threadchecker.Tag;
 import bluej.debugger.gentype.BadInheritanceChainException;
 import bluej.debugger.gentype.GenTypeClass;
 import bluej.debugger.gentype.GenTypeDeclTpar;
@@ -47,7 +49,7 @@ import bluej.debugger.gentype.MethodReflective;
 import bluej.debugger.gentype.Reflective;
 import bluej.debugmgr.NamedValue;
 import bluej.debugmgr.ValueCollection;
-import bluej.debugmgr.texteval.DeclaredVar;
+import bluej.debugmgr.codepad.DeclaredVar;
 import bluej.parser.entity.ConstantFloatValue;
 import bluej.parser.entity.ConstantIntValue;
 import bluej.parser.entity.EntityResolver;
@@ -113,6 +115,7 @@ public class TextAnalyzer
      * <p>If the parsed string is then executed, the confirmCommand() method should
      * subsequently be called.
      */
+    @OnThread(Tag.Swing)
     public String parseCommand(String command)
     {
         importCandidate = "";
@@ -208,6 +211,7 @@ public class TextAnalyzer
         return null;
     }
     
+    @OnThread(Tag.Swing)
     private EntityResolver getResolver()
     {
         EntityResolver resolver = new EntityResolver()
@@ -256,6 +260,7 @@ public class TextAnalyzer
             }
             
             @Override
+            @OnThread(value = Tag.Swing, ignoreParent = true)
             public JavaEntity getValueEntity(String name, Reflective querySource)
             {
                 NamedValue obVal = objectBench.getNamedValue(name);
@@ -291,6 +296,7 @@ public class TextAnalyzer
      * executed. This allows TextParser to update internal state to reflect
      * changes caused by the execution of the command.
      */
+    @OnThread(Tag.Swing)
     public void confirmCommand()
     {
         if (importCandidate.length() != 0) {
@@ -300,22 +306,22 @@ public class TextAnalyzer
             if (parser.isStaticImport()) {
                 if (parser.isWildcardImport()) {
                     imports.addStaticWildcardImport(parser.getImportEntity()
-                            .resolveAsType());
+                            .resolveAsType(), null, null);
                 }
                 else {
                     imports.addStaticImport(parser.getMemberName(),
-                            parser.getImportEntity().resolveAsType());
+                            parser.getImportEntity().resolveAsType(), null, null);
                 }
             }
             else {
                 if (parser.isWildcardImport()) {
-                    imports.addWildcardImport(parser.getImportEntity().resolveAsPackageOrClass());
+                    imports.addWildcardImport(parser.getImportEntity().resolveAsPackageOrClass(), null, null);
                 }
                 else {
                     JavaEntity importEntity = parser.getImportEntity();
                     TypeEntity classEnt = importEntity.resolveAsType();
                     String name = classEnt.getType().toString(true);
-                    imports.addNormalImport(name, classEnt);
+                    imports.addNormalImport(name, classEnt, null, null);
                 }
             }
         }

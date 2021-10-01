@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2011,2014  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2011,2014,2016  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -34,8 +34,12 @@ import java.util.Properties;
 
 import javax.swing.Action;
 import javax.swing.JMenuItem;
-import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
+import javax.swing.SwingUtilities;
+
+import bluej.pkgmgr.target.DependentTarget.State;
+import javafx.collections.ObservableList;
+import javafx.scene.control.MenuItem;
 
 import bluej.Config;
 import bluej.debugmgr.ConstructAction;
@@ -47,11 +51,14 @@ import bluej.pkgmgr.target.ClassTarget;
 import bluej.prefmgr.PrefMgr;
 import bluej.utility.BlueJFileReader;
 import bluej.utility.Debug;
+import bluej.utility.Utility;
 import bluej.views.CallableView;
 import bluej.views.ConstructorView;
 import bluej.views.MethodView;
 import bluej.views.View;
 import bluej.views.ViewFilter;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 
 /**
  * A class role in a class target, providing behaviour specific to particular
@@ -66,6 +73,7 @@ public abstract class ClassRole
     private final Color defaultbg = Config.getOptionalItemColour("colour.class.bg.default");
     protected final Color envOpColour = Config.ENV_COLOUR;
 
+    @OnThread(Tag.Any)
     public String getRoleName()
     {
         return CLASS_ROLE_NAME;
@@ -81,6 +89,7 @@ public abstract class ClassRole
      * @param prefix
      *            prefix to identifiy this role's target
      */
+    @OnThread(Tag.FXPlatform)
     public void save(Properties props, int modifiers, String prefix)
     {
     }
@@ -129,6 +138,7 @@ public abstract class ClassRole
      * on classes in the UML diagram along with the class name. It may return
      * null if there is no stereotype label.
      */
+    @OnThread(Tag.Any)
     public String getStereotypeLabel()
     {
         return null;
@@ -158,6 +168,8 @@ public abstract class ClassRole
         else {
             translations.put("PKGLINE", "package " + pkg.getQualifiedName() + ";" + Config.nl + Config.nl);
         }
+        // For Stride, we just put the package name:
+        translations.put("PKGNAME", pkg.getQualifiedName());
 
         try {
             // Check for existing file. Normally this won't happen (the check for duplicate
@@ -180,34 +192,6 @@ public abstract class ClassRole
         }
     }
 
-    /**
-     * Adds a single item to this roles popup menu.
-     * 
-     * This method is used by ClassTarget to add some standard menus as well as
-     * by the roles to add menus. It should be overridden with caution.
-     * 
-     * @param menu
-     *            the popup menu the item is to be added to
-     * @param action
-     *            the action to be registered with this menu item
-     * @param itemString
-     *            the String to be displayed on menu item
-     * @param enabled
-     *            boolean value representing whether item should be enabled
-     *  
-     */
-    public void addMenuItem(JPopupMenu menu, Action action, boolean enabled)
-    {
-        JMenuItem item;
-
-        item = new JMenuItem();
-        item.setAction(action);
-        item.setFont(PrefMgr.getPopupMenuFont());
-        item.setForeground(envOpColour);
-        item.setEnabled(enabled);
-
-        menu.add(item);
-    }
 
     /**
      * Adds role specific items at the top of the popup menu for this class
@@ -222,7 +206,8 @@ public abstract class ClassRole
      * 
      * @return true if any menu items have been added
      */
-    public boolean createRoleMenu(JPopupMenu menu, ClassTarget ct, Class<?> cl, int state)
+    @OnThread(Tag.FXPlatform)
+    public boolean createRoleMenu(ObservableList<MenuItem> menu, ClassTarget ct, Class<?> cl, State state)
     {
         return false;
     }
@@ -240,7 +225,8 @@ public abstract class ClassRole
      * 
      * @return true if any menu items have been added
      */
-    public boolean createRoleMenuEnd(JPopupMenu menu, ClassTarget ct, int state)
+    @OnThread(Tag.FXPlatform)
+    public boolean createRoleMenuEnd(ObservableList<MenuItem> menu, ClassTarget ct, State state)
     {
         return false;
     }
@@ -253,7 +239,8 @@ public abstract class ClassRole
      * @param cl
      *            Class object associated with this class target
      */
-    public boolean createClassConstructorMenu(JPopupMenu menu, ClassTarget ct, Class<?> cl)
+    @OnThread(Tag.FXPlatform)
+    public boolean createClassConstructorMenu(ObservableList<MenuItem> menu, ClassTarget ct, Class<?> cl)
     {
         ViewFilter filter;
         View view = View.getView(cl);
@@ -269,7 +256,8 @@ public abstract class ClassRole
         return false;
     }
 
-    public boolean createClassStaticMenu(JPopupMenu menu, ClassTarget ct, Class<?> cl)
+    @OnThread(Tag.FXPlatform)
+    public boolean createClassStaticMenu(ObservableList<MenuItem> menu, ClassTarget ct, boolean hasSource, Class<?> cl)
     {
         ViewFilter filter;
         View view = View.getView(cl);
@@ -286,8 +274,53 @@ public abstract class ClassRole
      * Create the menu items for the given members (constructors or methods).
      * @return  true if any items were created
      */
-    public static boolean createMenuItems(JPopupMenu menu, CallableView[] members, ViewFilter filter, int first, int last,
+    @OnThread(Tag.FXPlatform)
+    private static boolean createMenuItems(ObservableList<MenuItem> menu, CallableView[] members, ViewFilter filter, int first, int last,
             String prefix, InvokeListener il)
+    {
+        // Debug.message("Inside ClassTarget.createMenuItems\n first = " + first
+        // + " last = " + last);
+        boolean hasEntries = false;
+        JMenuItem item;
+
+        for (int i = first; i < last; i++) {
+            try {
+                CallableView m = members[last - i - 1];
+                if (!filter.accept(m))
+                    continue;
+                // Debug.message("createSubMenu - creating MenuItem");
+
+                Action callAction = null;
+                if (m instanceof MethodView)
+                {
+                    MenuItem menuItem = new MenuItem(prefix + m.getLongDesc());
+                    menu.add(menuItem);
+                    menuItem.setOnAction(e -> SwingUtilities.invokeLater(() ->
+                    {
+                        new InvokeAction((MethodView)m, il, prefix + m.getLongDesc()).actionPerformed(null);
+                    }));
+                    hasEntries = true;
+                }
+                else if (m instanceof ConstructorView)
+                {
+                    MenuItem menuItem = new MenuItem(prefix + m.getLongDesc());
+                    menu.add(menuItem);
+                    menuItem.setOnAction(e -> SwingUtilities.invokeLater(() -> {
+                        new ConstructAction((ConstructorView) m, il, prefix + m.getLongDesc()).actionPerformed(null);
+                    }));
+                    hasEntries = true;
+                }
+            }
+            catch (Exception e) {
+                Debug.reportError("Exception accessing methods: " + e);
+                e.printStackTrace();
+            }
+        }
+        return hasEntries;
+    }
+    // Swing version, for Greenfoot:
+    public static boolean createMenuItems(JPopupMenu menu, CallableView[] members, ViewFilter filter, int first, int last,
+                                          String prefix, InvokeListener il)
     {
         // Debug.message("Inside ClassTarget.createMenuItems\n first = " + first
         // + " last = " + last);
@@ -331,11 +364,11 @@ public abstract class ClassRole
      */
     public List<File> getAllFiles(ClassTarget ct)
     {
-        // Source, .class, .ctxt, and doc (.html)
+        // .frame (if available), .java, .class, .ctxt, and doc (.html)
         List<File> rlist = new ArrayList<File>();
         
         rlist.add(ct.getClassFile());
-        rlist.add(ct.getSourceFile());
+        rlist.addAll(Utility.mapList(ct.getAllSourceFilesJavaLast(), sf -> sf.file));
         rlist.add(ct.getContextFile());
         rlist.add(ct.getDocumentationFile());
         
@@ -346,4 +379,12 @@ public abstract class ClassRole
         
         return rlist;
     }
+
+    /**
+     * True if this can be converted to Stride (assuming Java source is available;
+     * this method does not need to check for that).  Returns false for unsupported
+     * class types, like enums or unit tests.
+     */
+    @OnThread(Tag.Any)
+    public abstract boolean canConvertToStride();
 }

@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2012,2013  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2012,2013,2014,2016,2017  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -21,10 +21,20 @@
  */
 package bluej.editor;
 
+import java.util.List;
+
+import bluej.collect.DiagnosticWithShown;
+import bluej.collect.StrideEditReason;
+import bluej.compiler.CompileReason;
+import bluej.compiler.CompileType;
+import bluej.extensions.SourceType;
+import threadchecker.OnThread;
+import threadchecker.Tag;
+
 /**
- * @author Michael Kolling
  * Interface between the editor and the rest of BlueJ
  * The editor uses this class
+ * @author Michael Kolling
  */
 public interface EditorWatcher
 {
@@ -51,13 +61,8 @@ public interface EditorWatcher
      * @param set    whether the breakpoint is set (true) or cleared
      * @return             An error message or null if okay.
      */
-    String breakpointToggleEvent(Editor editor, int lineNo, boolean set);
+    String breakpointToggleEvent(int lineNo, boolean set);
 
-    /**
-     * Called by Editor when a file is to be compiled
-     */
-    void compile(Editor editor);
-    
     /**
      * Called by Editor when documentation is to be compiled
      */
@@ -72,7 +77,52 @@ public interface EditorWatcher
      * Gets a property
      */
     String getProperty(String key);
-    
-    void recordEdit(String curSource, boolean includeOneLineEdits);
 
-} // end class EditorWatcher
+    /**
+     * Schedule compilation due to reload or modification
+     * @param immediate  True if compilation should be performed immediately; false if compilation should be
+     *                   postponed until the user VM is idle
+     * @param reason    Reason for compilation
+     */
+    @OnThread(Tag.Any)
+    public void scheduleCompilation(boolean immediate, CompileReason reason, CompileType type);
+    
+    default void recordEdit(SourceType sourceType, String curSource, boolean includeOneLineEdits)
+    {
+        recordEdit(sourceType, curSource, includeOneLineEdits, null);
+    }
+
+    void recordEdit(SourceType sourceType, String curSource, boolean includeOneLineEdits, StrideEditReason reason);
+
+    void clearAllBreakpoints();
+
+    void recordOpen();
+
+    void recordSelected();
+
+    void recordClose();
+
+    void recordShowErrorIndicator(int identifier);
+
+    void recordShowErrorMessage(int identifier, List<String> quickFixes);
+
+    void recordEarlyErrors(List<DiagnosticWithShown> diagnostics);
+
+    void recordLateErrors(List<DiagnosticWithShown> diagnostics);
+
+    void recordFix(int errorIdentifier, int fixIndex);
+
+    // Either lineNumber and columnNumber are non-null and xpath and elementOffset are null,
+    // or vice versa
+    void recordCodeCompletionStarted(Integer lineNumber, Integer columnNumber, String xpath, Integer elementOffset, String stem);
+
+    // If replacement is null, it was cancelled
+    void recordCodeCompletionEnded(Integer lineNumber, Integer columnNumber, String xpath, Integer elementOffset, String stem, String replacement);
+
+    void recordUnknownCommandKey(String enclosingFrameXpath, int cursorIndex, char key);
+
+    /**
+     * Notifies watcher whether we are showing the interface (docs) or not
+     */
+    void showingInterface(boolean showingInterface);
+}

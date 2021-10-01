@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2012  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2012,2014,2016  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -25,6 +25,8 @@ package bluej.extensions;
 import java.awt.EventQueue;
 import java.io.File;
 
+import threadchecker.OnThread;
+import threadchecker.Tag;
 import bluej.extensions.BDependency.Type;
 import bluej.pkgmgr.Package;
 import bluej.pkgmgr.PkgMgrFrame;
@@ -65,6 +67,7 @@ class Identifier
     /**
      * Constructor for the Identifier object
      */
+    @OnThread(Tag.Any)
     Identifier(Project bluejProject)
     {
         this(bluejProject, null, null);
@@ -74,6 +77,7 @@ class Identifier
     /**
      * Constructor for the Identifier object
      */
+    @OnThread(Tag.Any)
     Identifier(Project bluejProject, Package bluejPackage)
     {
         this(bluejProject, bluejPackage, null);
@@ -83,6 +87,7 @@ class Identifier
     /**
      * Constructor for the Identifier object
      */
+    @OnThread(Tag.Any)
     Identifier(Project bluejProject, Package bluejPackage, String aQualifiedClassName)
     {
         projectId = bluejProject.getProjectDir();
@@ -151,17 +156,12 @@ class Identifier
         Package thisPkg = getBluejPackage();
 
         // Get a frame for the package.
-        final PkgMgrFrame pmf = PkgMgrFrame.createFrame(thisPkg);
+        final PkgMgrFrame pmf = PkgMgrFrame.createFrame(thisPkg, null);
 
         EventQueue.invokeLater(new Runnable() {
             public void run()
             {
-                // Check if it's already visible first, as calling
-                // setVisible(true) causes frame to grab focus on
-                // Windows
-                if(!pmf.isVisible()) {
-                    pmf.setVisible(true);
-                }
+                pmf.setVisible(true);
             }
         });
         return pmf;
@@ -246,7 +246,7 @@ class Identifier
 
         if ((origin != null) && (target != null)) {
             Package bluejPackage = getBluejPackage();
-            return bluejPackage.getDependency(origin, target, type);
+            return bluejPackage.getEditor().getDependency(origin, target, type);
         }
 
         return null;

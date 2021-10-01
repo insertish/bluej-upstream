@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2015,2017  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -22,12 +22,17 @@
 package bluej;
 
 import java.awt.Dimension;
+import java.awt.Graphics;
+import java.awt.Image;
+import java.awt.Toolkit;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.net.URL;
 
 import javax.imageio.ImageIO;
+import javax.swing.ImageIcon;
 import javax.swing.JComponent;
+import javax.swing.JPanel;
 
 
 /**
@@ -36,35 +41,36 @@ import javax.swing.JComponent;
  * @author Poul Henriksen
  * @version $Id$
  */
-public abstract class SplashLabel extends JComponent
+public class SplashLabel extends JComponent
 {
-    private BufferedImage image;
-    
+    // We use ImageIcon because it loads the HiDPI version of 
+    // the image when on a Retina machine.
+    private ImageIcon image;
+
     public SplashLabel(String imageName)
     {
         loadImage(imageName);
         //setBorder(BorderFactory.createLineBorder(Color.black, 1));
     }
-    
-    public BufferedImage getImage() {
-        return image;
-    }
    
+    @Override
     public Dimension getMinimumSize()
     {
         return getPreferredSize();
     }
 
+    @Override
     public Dimension getMaximumSize()
     {
         return getPreferredSize();
     }
 
+    @Override
     public Dimension getPreferredSize()
     {
         Dimension prefSize = new Dimension();
         if(image != null) {
-            prefSize.setSize(image.getWidth(), image.getHeight());
+            prefSize.setSize(image.getIconWidth(), image.getIconHeight());
         }
         return prefSize;
     }
@@ -76,11 +82,15 @@ public abstract class SplashLabel extends JComponent
             System.out.println("cannot find splash image: " + imageName);
             return;
         }
-        try {
-            image = ImageIO.read(splashURL);
-        }
-        catch (IOException exc) { // ignore
-        }
+
+        image = new ImageIcon(splashURL);
     }
 
+    @Override
+    protected void paintComponent(Graphics g)
+    {
+        super.paintComponent(g);
+        if (image != null)
+            image.paintIcon(this, g, 0, 0);
+    }
 }

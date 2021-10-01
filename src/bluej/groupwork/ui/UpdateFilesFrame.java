@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2014,2016  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -44,6 +44,11 @@ import javax.swing.JList;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 
+import javafx.application.Platform;
+
+import bluej.utility.javafx.SwingNodeDialog;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 import bluej.BlueJTheme;
 import bluej.Config;
 import bluej.groupwork.Repository;
@@ -61,7 +66,6 @@ import bluej.pkgmgr.Project;
 import bluej.utility.DBox;
 import bluej.utility.DBoxLayout;
 import bluej.utility.DialogManager;
-import bluej.utility.EscapeDialog;
 import bluej.utility.SwingWorker;
 import bluej.utility.Utility;
 
@@ -71,7 +75,7 @@ import bluej.utility.Utility;
  * @author Bruce Quig
  * @author Davin McCall
  */
-public class UpdateFilesFrame extends EscapeDialog
+public class UpdateFilesFrame extends SwingNodeDialog
 {
     private JList updateFiles;
     private JPanel topPanel;
@@ -92,7 +96,10 @@ public class UpdateFilesFrame extends EscapeDialog
     private boolean includeLayout = true;
     
     private static String noFilesToUpdate = Config.getString("team.noupdatefiles"); 
+    private static String needUpdate = Config.getString("team.pullNeeded"); 
 
+    private boolean pullWithNoChanges = false;
+    
     public UpdateFilesFrame(Project proj)
     {
         project = proj;
@@ -126,7 +133,8 @@ public class UpdateFilesFrame extends EscapeDialog
                     String msg = DialogManager.getMessage("team-error-saving-project");
                     if (msg != null) {
                         msg = Utility.mergeStrings(msg, ioe.getLocalizedMessage());
-                        DialogManager.showErrorText(this, msg);
+                        String msgFinal = msg;
+                        Platform.runLater(() -> DialogManager.showErrorTextFX(this.asWindow(), msgFinal));
                     }
                 }
                 startProgress();
@@ -148,15 +156,7 @@ public class UpdateFilesFrame extends EscapeDialog
         updateListModel = new DefaultListModel();
         
         //setIconImage(BlueJTheme.getIconImage());
-        setLocation(Config.getLocation("bluej.updatedisplay"));
-
-        // save position when window is moved
-        addComponentListener(new ComponentAdapter() {
-                public void componentMoved(ComponentEvent event)
-                {
-                    Config.putLocation("bluej.updatedisplay", getLocation());
-                }
-            });
+        rememberPosition("bluej.updatedisplay");
 
         topPanel = new JPanel();
 
@@ -171,7 +171,11 @@ public class UpdateFilesFrame extends EscapeDialog
             topPanel.add(updateFilesLabel, BorderLayout.NORTH);
 
             updateFiles = new JList(updateListModel);
-            updateFiles.setCellRenderer(new FileRenderer(project));
+            if (project.getTeamSettingsController().isDVCS()){
+                updateFiles.setCellRenderer(new FileRenderer(project, true));
+            } else {
+                updateFiles.setCellRenderer(new FileRenderer(project));
+            }
             updateFiles.setEnabled(false);
             updateFileScrollPane.setViewportView(updateFiles);
             
@@ -192,7 +196,7 @@ public class UpdateFilesFrame extends EscapeDialog
                    includeLayoutCheckbox.setEnabled(false);
                 } 
             });
-            getRootPane().setDefaultButton(updateButton);
+            setDefaultButton(updateButton);
 
             JButton closeButton = BlueJTheme.getCancelButton();
             closeButton.addActionListener(new ActionListener() {
@@ -203,6 +207,8 @@ public class UpdateFilesFrame extends EscapeDialog
                         setVisible(false);
                     }
                 });
+            Platform.runLater(() -> setCloseIsButton(closeButton));
+
            
             DBox buttonPanel = new DBox(DBoxLayout.X_AXIS, 0, BlueJTheme.commandButtonSpacing, 0.5f);
             buttonPanel.setBorder(BlueJTheme.generalBorder);
@@ -371,6 +377,7 @@ public class UpdateFilesFrame extends EscapeDialog
         /* (non-Javadoc)
          * @see bluej.groupwork.StatusListener#gotStatus(bluej.groupwork.TeamStatusInfo)
          */
+        @OnThread(Tag.Any)
         public void gotStatus(TeamStatusInfo info)
         {
             response.add(info);
@@ -379,11 +386,14 @@ public class UpdateFilesFrame extends EscapeDialog
         /* (non-Javadoc)
          * @see bluej.groupwork.StatusListener#statusComplete(bluej.groupwork.CommitHandle)
          */
+        @OnThread(Tag.Any)
         public void statusComplete(StatusHandle statusHandle)
         {
+            pullWithNoChanges = statusHandle.pullNeeded();
             this.statusHandle = statusHandle;
         }
         
+        @OnThread(Tag.Unique)
         public Object construct()
         {
             result = command.getResult();
@@ -401,8 +411,7 @@ public class UpdateFilesFrame extends EscapeDialog
             stopProgress();
             if (! aborted) {
                 if (result.isError()) {
-                    TeamUtils.handleServerResponse(result, UpdateFilesFrame.this);
-                    setVisible(false);
+                    UpdateFilesFrame.this.dialogThenHide(() -> TeamUtils.handleServerResponseFX(result, UpdateFilesFrame.this.asWindow()));
                 }
                 else {
                     Set<File> filesToUpdate = new HashSet<File>();
@@ -426,8 +435,8 @@ public class UpdateFilesFrame extends EscapeDialog
                             filesList += "    (and more - check status)";
                         }
 
-                        DialogManager.showMessageWithText(UpdateFilesFrame.this, "team-unresolved-conflicts", filesList);
-                        UpdateFilesFrame.this.setVisible(false);
+                        String filesListFinal = filesList;
+                        UpdateFilesFrame.this.dialogThenHide(() -> DialogManager.showMessageWithTextFX(UpdateFilesFrame.this.asWindow(), "team-unresolved-conflicts", filesListFinal));
                         return;
                     }
 
@@ -455,10 +464,13 @@ public class UpdateFilesFrame extends EscapeDialog
                         addModifiedLayouts();
                     }
 
-                    if(updateListModel.isEmpty()) {
+                    if(updateListModel.isEmpty() && !pullWithNoChanges) {
                         updateListModel.addElement(noFilesToUpdate);
                     }
                     else {
+                        if (project.getTeamSettingsController().isDVCS() && pullWithNoChanges && updateListModel.isEmpty()){
+                            updateListModel.addElement(needUpdate);
+                        }
                         updateAction.setEnabled(true);
                     }
                 }
@@ -481,7 +493,8 @@ public class UpdateFilesFrame extends EscapeDialog
             TeamViewFilter viewFilter = new TeamViewFilter();
             for (Iterator<TeamStatusInfo> it = info.iterator(); it.hasNext();) {
                 TeamStatusInfo statusInfo = it.next();
-                int status = statusInfo.getStatus();
+                //update must look in the remoteStatus in a DVCS. if not DVCS, look into the local status.
+                int status = project.getTeamSettingsController().isDVCS()?statusInfo.getRemoteStatus():statusInfo.getStatus();
                 if(filter.accept(statusInfo)) {
                     if (!BlueJPackageFile.isPackageFileName(statusInfo.getFile().getName())) { 
                         updateListModel.addElement(statusInfo);

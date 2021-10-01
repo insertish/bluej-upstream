@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2010  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2010,2016  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -22,11 +22,16 @@
 package bluej.pkgmgr;
 
 import java.util.EventObject;
+import java.util.Optional;
+
+import javafx.geometry.Point2D;
 
 import bluej.debugger.DebuggerObject;
 import bluej.debugger.gentype.GenTypeClass;
 import bluej.testmgr.record.InvokerRecord;
 import bluej.views.CallableView;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 
 /**
  * The event which occurs while editing a package
@@ -44,6 +49,9 @@ public class PackageEditorEvent extends EventObject
     public final static int TARGET_MAKETESTCASE = 7;    // only for unit tests
 
     public final static int OBJECT_PUTONBENCH = 8;
+    @OnThread(Tag.Any)
+    private boolean askForName = true;
+    private Optional<Point2D> animateFromScenePoint = Optional.empty();
 
     protected int id;
     protected CallableView cv;
@@ -99,7 +107,14 @@ public class PackageEditorEvent extends EventObject
         this.id = id;
         this.obj = obj;
         this.iType = iType;
-	this.ir = ir;
+        this.ir = ir;
+    }
+
+    public PackageEditorEvent(Object source, int id, DebuggerObject obj, GenTypeClass iType, InvokerRecord ir, boolean askForName, Optional<Point2D> animateFromScenePoint)
+    {
+        this(source, id, obj, iType, ir);
+        this.animateFromScenePoint = animateFromScenePoint;
+        this.askForName = askForName;
     }
 
     public int getID()
@@ -129,6 +144,17 @@ public class PackageEditorEvent extends EventObject
     
     public InvokerRecord getInvokerRecord()
     {
-    	return ir;	
+        return ir;
+    }
+
+    @OnThread(Tag.Any)
+    public boolean askForName()
+    {
+        return askForName;
+    }
+
+    public Optional<Point2D> getAnimateFromScenePoint()
+    {
+        return animateFromScenePoint;
     }
 }

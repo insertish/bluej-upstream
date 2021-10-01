@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2014,2016  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -21,30 +21,55 @@
  */
 package bluej.pkgmgr;
 
-import bluej.*;
+import java.awt.Component;
+import java.awt.FlowLayout;
+
+import javax.swing.Box;
+import javax.swing.BoxLayout;
+import javax.swing.JButton;
+import javax.swing.JCheckBox;
+import javax.swing.JPanel;
+
+import bluej.utility.javafx.SwingNodeDialog;
+import javafx.application.Platform;
+import threadchecker.OnThread;
+import threadchecker.Tag;
+import bluej.BlueJTheme;
 import bluej.Config;
-
 import bluej.utility.DialogManager;
-import bluej.utility.EscapeDialog;
-
-import java.awt.*;
-import java.awt.event.*;
-
-import javax.swing.*;
 
 
 /**
  * Dialog for creating a new Package
  * 
- * @version $Id: ProjectPrintDialog.java 7055 2010-01-27 13:58:55Z plcs $
  * @author Bruce Quig
  */
-public class ProjectPrintDialog extends EscapeDialog
+public class ProjectPrintDialog extends SwingNodeDialog
 {
-    private boolean ok; // result: which button?
-    private JCheckBox printDiagram;
+    private boolean ok = false; // result: which button?
+
+    // Hidden temporary for the preview version
+//    private JCheckBox printDiagram;
     private JCheckBox printSource;
     private JCheckBox printReadme;
+    
+    private JCheckBox printLineNumbers;
+    private JCheckBox printHighlighting;
+    
+    // We store these values for use afterwards, off the Swing thread:
+
+    // Hidden temporary for the preview version
+//    @OnThread(value = Tag.Any, requireSynchronized = true)
+//    private boolean printDiagramSelected;
+    @OnThread(value = Tag.Any, requireSynchronized = true)
+    private boolean printSourceSelected;
+    @OnThread(value = Tag.Any, requireSynchronized = true)
+    private boolean printReadmeSelected;
+
+    @OnThread(value = Tag.Any, requireSynchronized = true)
+    private boolean printLineNumbersSelected;
+    @OnThread(value = Tag.Any, requireSynchronized = true)
+    private boolean printHighlightingSelected;
 
     /**
      * Creates a new ProjectPrintDialog object.
@@ -53,15 +78,10 @@ public class ProjectPrintDialog extends EscapeDialog
      */
     public ProjectPrintDialog(PkgMgrFrame parent)
     {
-        super(parent, Config.getString("pkgmgr.printDialog.title"), true);
+        super(parent::getFXWindow);
+        setTitle(Config.getString("pkgmgr.printDialog.title"));
+        setModal(true);
 
-        addWindowListener(new WindowAdapter() {
-            public void windowClosing(WindowEvent E)
-            {
-                ok = false;
-                setVisible(false);
-            }
-        });
 
         JPanel mainPanel = new JPanel();
 
@@ -70,9 +90,10 @@ public class ProjectPrintDialog extends EscapeDialog
         mainPanel.add(Box.createVerticalStrut(
                               BlueJTheme.dialogCommandButtonsVertical));
 
-        printDiagram = new JCheckBox(Config.getString("pkgmgr.printDialog.printDiagram"));
-        printDiagram.setSelected(true);
-        mainPanel.add(printDiagram);
+        // Hidden temporary for the preview version
+//        printDiagram = new JCheckBox(Config.getString("pkgmgr.printDialog.printDiagram"));
+//        printDiagram.setSelected(true);
+//        mainPanel.add(printDiagram);
                 
         printSource = new JCheckBox(Config.getString("pkgmgr.printDialog.printSource"));
         mainPanel.add(printSource);
@@ -82,23 +103,28 @@ public class ProjectPrintDialog extends EscapeDialog
             mainPanel.add(printReadme);
         }
         mainPanel.add(Box.createVerticalStrut(BlueJTheme.generalSpacingWidth));
+        
+        printLineNumbers = new JCheckBox(Config.getString("editor.printDialog.printLineNumbers"));
+        printLineNumbers.setSelected(true);
+        mainPanel.add(printLineNumbers);
+                
+        printHighlighting = new JCheckBox(Config.getString("editor.printDialog.printHighlighting"));
+        mainPanel.add(printHighlighting);
+        
+        mainPanel.add(Box.createVerticalStrut(BlueJTheme.generalSpacingWidth));
 
         JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
-        buttonPanel.setAlignmentX(LEFT_ALIGNMENT);
+        buttonPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
 
         JButton okButton = BlueJTheme.getOkButton();
-        okButton.addActionListener(new ActionListener() {
-			public void actionPerformed(ActionEvent evt) { doOK(); }        		
-        });
+        okButton.addActionListener(event -> doOK());
         
         JButton cancelButton = BlueJTheme.getCancelButton();
-        cancelButton.addActionListener(new ActionListener() {
-        	public void actionPerformed(ActionEvent evt) { doCancel(); }        		
-		});
+        cancelButton.addActionListener(event -> doCancel());
 
         DialogManager.addOKCancelButtons(buttonPanel, okButton, cancelButton);
 
-        getRootPane().setDefaultButton(okButton);
+        setDefaultButton(okButton);
 
         mainPanel.add(buttonPanel);
 
@@ -106,6 +132,9 @@ public class ProjectPrintDialog extends EscapeDialog
         pack();
 
         DialogManager.centreDialog(this);
+
+        //close button to solve the cross icon button not working
+        Platform.runLater(() -> setCloseIsButton(cancelButton));
     }
 
     /**
@@ -129,6 +158,7 @@ public class ProjectPrintDialog extends EscapeDialog
     public void doOK()
     {
         ok = (printDiagram() || printSource() || printReadme());
+        storeValues();
         setVisible(false);
     }
 
@@ -147,9 +177,12 @@ public class ProjectPrintDialog extends EscapeDialog
      * @return true if radio button is selected meaning  diagram should be
      *         printed
      */
-    public boolean printDiagram()
+    @OnThread(Tag.Any)
+    public synchronized boolean printDiagram()
     {
-        return printDiagram.isSelected();
+        // Hidden temporary for the preview version
+//        return printDiagramSelected;
+        return false;
     }
 
     /**
@@ -158,9 +191,10 @@ public class ProjectPrintDialog extends EscapeDialog
      * @return true if radio button is selected meaning  source code should be
      *         printed
      */
-    public boolean printSource()
+    @OnThread(Tag.Any)
+    public synchronized boolean printSource()
     {
-        return printSource.isSelected();
+        return printSourceSelected;
     }
 
     /**
@@ -169,8 +203,32 @@ public class ProjectPrintDialog extends EscapeDialog
      * @return true if radio button is selected meaning  readme should be
      *         printed
      */
-    public boolean printReadme()
+    @OnThread(Tag.Any)
+    public synchronized boolean printReadme()
     {
-        return (printReadme != null && printReadme.isSelected());
+        return printReadmeSelected;
+    }
+                
+    // While on Swing thread, store selections ready for later retrieval from another thread:
+    private synchronized void storeValues()
+    {
+        // Hidden temporary for the preview version
+//        printDiagramSelected = printDiagram.isSelected();
+        printSourceSelected = printSource.isSelected();
+        printReadmeSelected = (printReadme != null && printReadme.isSelected());
+        printLineNumbersSelected = printLineNumbers.isSelected();
+        printHighlightingSelected = printHighlighting.isSelected();
+    }
+    
+    @OnThread(Tag.Any)
+    public synchronized boolean printLineNumbers()
+    {
+        return printLineNumbersSelected;
+    }
+    
+    @OnThread(Tag.Any)
+    public synchronized boolean printHighlighting()
+    {
+        return printHighlightingSelected;
     }
 }

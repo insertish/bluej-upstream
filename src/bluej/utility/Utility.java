@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2011,2012,2013,2014  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2011,2012,2013,2014,2015,2016,2017  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -29,14 +29,15 @@ import java.awt.Graphics;
 import java.awt.Insets;
 import java.awt.Shape;
 import java.awt.Window;
-import java.awt.color.ColorSpace;
-import java.awt.image.BufferedImage;
-import java.awt.image.ColorConvertOp;
 import java.io.BufferedReader;
+import java.io.BufferedWriter;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
+import java.io.FileReader;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
@@ -45,21 +46,58 @@ import java.net.MalformedURLException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
+import java.util.ListIterator;
+import java.util.Map;
+import java.util.Map.Entry;
+import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.function.BiConsumer;
+import java.util.function.BiFunction;
+import java.util.function.BinaryOperator;
+import java.util.function.Consumer;
+import java.util.function.Function;
+import java.util.function.Predicate;
+import java.util.function.Supplier;
 import java.util.jar.JarEntry;
 import java.util.jar.JarInputStream;
+import java.util.stream.Collector;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import javax.swing.AbstractButton;
+import javax.swing.SwingUtilities;
 import javax.swing.UIDefaults;
 import javax.swing.border.Border;
 import javax.swing.text.TabExpander;
 
-import com.apple.eawt.Application;
+import bluej.pkgmgr.target.Target;
+import bluej.utility.javafx.FXPlatformSupplier;
+import javafx.application.Platform;
+import javafx.stage.Stage;
 
+import nu.xom.Document;
+import nu.xom.Element;
+import nu.xom.Serializer;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 import bluej.Config;
+
+import com.apple.eawt.Application;
 
 /**
  * Some generally useful utility methods available to all of bluej.
@@ -69,6 +107,9 @@ import bluej.Config;
  */
 public class Utility
 {
+    private static final DamerauLevenshteinAlgorithm dla
+      = new DamerauLevenshteinAlgorithm(1, 1, 1, 1);
+    private final static ScheduledExecutorService background = Executors.newScheduledThreadPool(8);
     /**
      * Used to track which events have occurred for firstTimeThisRun()
      */
@@ -95,9 +136,11 @@ public class Utility
     /**
      * Draw stripes over a rectangle - yet another thing missing from the AWT
      */
-    public static void stripeRect(Graphics g, int x, int y, int width, int height, int separation, int thickness)
+    public static void stripeRect(Graphics g, int x, int y, int width, int height, int separation, int thickness, Color color)
     {
-        for (int offset = 0; offset < width + height; offset += separation)
+        Color prev = g.getColor();
+        g.setColor(color);
+        for (int offset = 0; offset < width + height; offset += separation) {
             for (int i = 0; i < thickness; i++, offset++) {
                 int x1, y1, x2, y2;
 
@@ -121,6 +164,8 @@ public class Utility
 
                 g.drawLine(x1, y1, x2, y2);
             }
+        }
+        g.setColor(prev);
     }
 
     /**
@@ -252,11 +297,7 @@ public class Utility
         return buf.toString();
     }
 
-    /**
-     * Translate a given, qualified class name into a URL where we believe its
-     * documentation to be, and display that URL in a web browser.
-     */
-    public static void showClassDocumentation(String classname, String suffix)
+    public static String getDocURL(String classname, String suffix)
     {
         classname = classname.replace('.', '/');
         String docURL = Config.getPropString("bluej.url.javaStdLib");
@@ -265,8 +306,8 @@ public class Utility
             if (lastSlash != -1)
                 docURL = docURL.substring(0, lastSlash + 1);
         }
-        // Debug.message(docURL + classname + ".html" + suffix);
-        openWebBrowser(docURL + classname + ".html" + suffix);
+        String finalURL = docURL + classname + ".html" + suffix;
+        return finalURL;
     }
 
     /**
@@ -275,6 +316,7 @@ public class Utility
      * @param url the URL or file path to be shown.
      * @return true if the web browser could be started, false otherwise.
      */
+    @OnThread(Tag.Swing)
     public static boolean openWebBrowser(String url)
     {
         if (Config.isWinOS()) { // Windows
@@ -321,6 +363,7 @@ public class Utility
      * @param url the URL to be shown.
      * @return true if the web browser could be started, false otherwise.
      */
+    @OnThread(Tag.Swing)
     public static boolean openWebBrowser(URL url)
     {
         if (Config.isWinOS()) {
@@ -377,6 +420,7 @@ public class Utility
             final String command2 = cmd2;
             final Process process = p;
             new Thread() {
+                @Override
                 public void run()
                 {
                     runUnixWebBrowser(process, command2);
@@ -385,7 +429,7 @@ public class Utility
         }
         return true;
     }
-
+    
     /**
      * Wait for the given process to finish, try running the second command if
      * it returns false.
@@ -414,13 +458,14 @@ public class Utility
             Debug.reportError("caught exc " + ioe);
         }
     }
-
+    
     /**
      * Let the given file be shown in a browser window.
      * 
      * @param file the file to be shown.
      * @return true if the web browser could be started, false otherwise.
      */
+    @OnThread(Tag.Swing)
     public static boolean openWebBrowser(File file)
     {
         if (Config.isWinOS()) { // Windows
@@ -436,7 +481,7 @@ public class Utility
             }
         }
     }
-    
+
     /**
      * Method copied from Boot since we don't always have access to Boot here (if this method is called from the user VM for instance).
      * 
@@ -460,10 +505,7 @@ public class Utility
                     startingDir = startingDir.getParentFile();
                 }
                 
-                if (startingDir == null) {
-                    bluejDir = null;
-                }
-                else {
+                if (startingDir != null) {
                     bluejDir = new File(startingDir.getParentFile(), "lib");
                 }
             }
@@ -481,8 +523,7 @@ public class Utility
         
         return bluejDir;
     }
-    
-    
+
     /**
      * Bring the current process to the front in the OS window stacking order.
      * The given window will be brought to the front.
@@ -492,6 +533,7 @@ public class Utility
      * @param window   the window to be brought to the front. If null, the process
      *                 is brought to the front.
      */
+    @OnThread(Tag.Swing)
     public static void bringToFront(final Window window)
     {
         // If not showing at all we return now.
@@ -501,7 +543,28 @@ public class Utility
             }
             window.toFront();
         }
-        
+
+        appToFront();
+    }
+
+    @OnThread(Tag.FX)
+    public static void bringToFrontFX(final javafx.stage.Window window)
+    {
+        // If not showing at all we return now.
+        if (window != null) {
+            if (!window.isShowing()) {
+                return;
+            }
+            if (window instanceof Stage)
+                ((Stage)window).toFront();
+        }
+
+        appToFront();
+    }
+
+
+    public static void appToFront()
+    {
         if (Config.isMacOS()) {
             Application.getApplication().requestForeground(false);
             return;
@@ -515,7 +578,7 @@ public class Utility
             // a window to front.
             File libdir = calculateBluejLibDir();
             String[] command = new String[] {"cscript","\"" + libdir.getAbsolutePath() + "\\windowtofront.js\"",pid };
-            
+
             final StringBuffer commandAsStr = new StringBuffer();
             for (int i = 0; i < command.length; i++) {
                 commandAsStr.append(command[i] + " ");
@@ -529,7 +592,11 @@ public class Utility
                     // input if the script is executed while a popup window is showing.
                     // In an attempt to avoid that we'll wait for the script to execute
                     // now:
-                    new ProcessWaiter(p).waitForProcess(500);
+                    if (Platform.isFxApplicationThread())
+                        // Don't wait on FX as it makes call to FX thread, so would deadlock:
+                        new ProcessWaiter(p);
+                    else
+                        new ProcessWaiter(p).waitForProcess(500);
                 }
             }
             catch (IOException e) {
@@ -539,92 +606,33 @@ public class Utility
         }
     }
 
-    private static class ExternalProcessLogger extends Thread
+    public static <T extends Comparable<T>> Comparator<List<T>> listComparator()
     {
-        String commandAsStr;
-        String processName; 
-        Process p;
-        
-        public ExternalProcessLogger(String processName, String command, Process process)
-        {
-            this.processName = processName;
-            commandAsStr = command;
-            p = process;
-        }
-        
-        @Override
-        public void run()
-        {
-            BufferedReader br = new BufferedReader(new InputStreamReader(p.getErrorStream()));
-            StringBuffer extra = new StringBuffer();
-
-            try {
-                char[] buf = new char[1024];
-                Thread.sleep(1000);
-
-                // discontinue if no data available or stream closed
-                if (br.ready()) {
-                    int len = br.read(buf);
-                    if (len != -1) {
-                        extra.append(buf, 0, len);
-                    }
-                }
-                
-                if (extra.length() != 0) {
-                    Debug.message("When trying to launch " + processName + ":" + commandAsStr);
-                    Debug.message(" This error was recieved: " + extra);
-                }
+        return Comparator.<List<T>>comparingInt(List::size).thenComparing((a, b) -> {
+            // We know lists are same size because we have reached here:
+            for (int i = 0; i < a.size(); i++)
+            {
+                int cmp = a.get(i) == null ? (b.get(i) == null ? -1 : 0) : a.get(i).compareTo(b.get(i));
+                if (cmp != 0)
+                    return cmp;
             }
-            catch (InterruptedException ie) {}
-            catch (IOException ioe) {}
-            finally {
-                try {
-                    br.close();
-                }
-                catch (IOException ioe) {}
-            }
-        }
+            return 0;
+        });
     }
-    
-    /**
-     * A utility class to wait for an external process to complete.
-     * This allows waiting with a timeout, unlike the Process.waitFor()
-     * method. Simply create a ProcessWaiter, and then call {@code wait()}
-     * or {@code wait(long)} on the ProcessWaiter.
-     */
-    private static class ProcessWaiter
+
+    public static <T> Comparator<List<T>> listComparator(Comparator<T> itemComparator)
     {
-        boolean complete = false;
-        
-        public ProcessWaiter(final Process p)
-        {
-            new Thread() {
-                public void run() {
-                    try {
-                        p.waitFor();
-                    }
-                    catch (InterruptedException ie) {}
-                    synchronized (ProcessWaiter.this) {
-                        complete = true;
-                        ProcessWaiter.this.notify();
-                    }
-                };
-            }.start();
-        }
-        
-        /**
-         * Wait for the process to complete, with the given timeout.
-         * If the timeout is 0, wait indefinitely.
-         */
-        public synchronized void waitForProcess(long timeout)
-            throws InterruptedException
-        {
-            while (! complete) {
-                wait(timeout);
+        return Comparator.<List<T>>comparingInt(List::size).thenComparing((a, b) -> {
+            // We know lists are same size because we have reached here:
+            for (int i = 0; i < a.size(); i++)
+            {
+                int cmp = itemComparator.compare(a.get(i), b.get(i));
+                if (cmp != 0)
+                    return cmp;
             }
-        }
+            return 0;
+        });
     }
-    
     
     /**
      * Get the process ID of this process.
@@ -802,6 +810,7 @@ public class Utility
      * 
      * @param button The button that should be changed.
      */
+    @OnThread(Tag.Swing)
     public static void changeToMacButton(AbstractButton button)
     {
         // available button styles, as of MacOS 10.5:
@@ -899,7 +908,8 @@ public class Utility
      *          or null if the archive couldn't be extracted (in which case
      *          an error dialog is displayed).
      */
-    public static File maybeExtractArchive(File archive, Component parent)
+    @OnThread(Tag.Swing)
+    public static File maybeExtractArchive(File archive, FXPlatformSupplier<javafx.stage.Window> parent)
     {
         JarInputStream jarInStream = null;
         File oPath = archive.getParentFile();
@@ -925,22 +935,23 @@ public class Utility
                 }
                 oPath = new File(oPath, strippedName);
                 if (oPath.exists()) {
-                    DialogManager.showErrorWithText(parent, "jar-output-dir-exists", oPath.toString());
+                    final File oPathFinal = oPath;
+                    Platform.runLater(() -> DialogManager.showErrorWithTextFX(parent.get(), "jar-output-dir-exists", oPathFinal.toString()));
                     return null;
                 }
                 else if (! oPath.mkdir()) {
-                    DialogManager.showErrorWithText(parent, "jar-output-no-write", archive.toString());
+                    Platform.runLater(() -> DialogManager.showErrorWithTextFX(parent.get(), "jar-output-no-write", archive.toString()));
                     return null;
                 }
             }
             else {
                 File prefixFolderFile = new File(oPath, prefixFolder);
                 if (prefixFolderFile.exists()) {
-                    DialogManager.showErrorWithText(parent, "jar-output-dir-exists", prefixFolderFile.toString());
+                    Platform.runLater(() -> DialogManager.showErrorWithTextFX(parent.get(), "jar-output-dir-exists", prefixFolderFile.toString()));
                     return null;
                 }
                 if (! prefixFolderFile.mkdir()) {
-                    DialogManager.showErrorWithText(parent, "jar-output-no-write", archive.toString());
+                    Platform.runLater(() -> DialogManager.showErrorWithTextFX(parent.get(), "jar-output-no-write", archive.toString()));
                     return null;
                 }
             }
@@ -984,7 +995,7 @@ public class Utility
         }
         catch (Exception e) {
             e.printStackTrace();
-            DialogManager.showError(parent, "jar-extraction-error");
+            Platform.runLater(() -> DialogManager.showErrorFX(parent.get(), "jar-extraction-error"));
             return null;
         }
         finally {
@@ -1123,6 +1134,7 @@ public class Utility
      * @param JEditorPane     the pane to apply the background colour to
      * @param color           the colour to be applied to the panel.
      */
+    @OnThread(Tag.Swing)
     public static void setJEditorPaneBackground(javax.swing.JEditorPane jEditorPane, Color color)
     {
         Color bgColor = new Color(250, 246, 229);
@@ -1132,5 +1144,404 @@ public class Utility
         jEditorPane.putClientProperty("Nimbus.Overrides.InheritDefaults", true);
         jEditorPane.setBackground(bgColor);
     }
+
+    // Damerau-Levenshtein distance
+    public static int editDistance(String s, String t)
+    {
+        return dla.execute(s, t);
+    }
     
+    public static String escapeAngleBrackets(String sig)
+    {
+        return sig.replace("<", "&lt;").replace(">", "&gt;");
+    }
+
+    public static <SRC, DEST> List<DEST> mapList(Collection<SRC> original, Function<SRC, DEST> func)
+    {
+        return original.stream().map(func).collect(Collectors.toList());
+    }
+
+    /*
+     * NOTE: the functions below are all generic and many use lambdas.  There is/was an Eclipse
+     * bug, 436542 ( https://bugs.eclipse.org/bugs/show_bug.cgi?id=436542 ) that meant lambdas
+     * in these static and generic methods would produce an invalid class file that javac
+     * would reject if you combined Eclipse and javac (e.g. build with Eclipse, later run the
+     * ant task in Greenfoot).
+     * 
+     * To work around this bug, I have re-implemented all these methods with anonymous inner classes
+     * instead of lambdas.  When the Eclipse bug is fixed, we should change them back to lambdas.
+     * 
+     * I have also named the type arguments uniquely.  This is a bit ugly, but it helps a lot if the
+     * problem recurs, because finding which "T" type is causing the problem is much harder than
+     * finding "T8". 
+     */
+    
+    /** Concatenates any non-null streams in the list together */
+    @SafeVarargs
+    public static <T3> Stream<T3> concat(Stream<? extends T3>... streams)
+    {
+        List<Stream<? extends T3>> l = Arrays.asList(streams);
+        return l.stream().filter(t -> t != null).flatMap(Function.identity());
+    }
+
+    /** Concatenates any non-null lists in the list together */
+    @SafeVarargs
+    public static <T4> List<T4> concat(List<T4>... lists)
+    {
+        List<List<T4>> l = Arrays.asList(lists);
+        return l.stream().filter(new Predicate<List<T4>>() {
+            @Override
+            public boolean test(List<T4> t) {
+                return t != null;
+            }
+        }).flatMap(List::stream).collect(Collectors.toList());
+    }
+    
+    /** If the value is null, returns null.  Otherwise, applies the function. */
+    public static <T5, R> R orNull(T5 t, Function<T5, R> f)
+    {
+        return t == null ? null : f.apply(t);
+    }
+
+    public static <T5B> void ifNotNull(T5B t, Consumer<T5B> f)
+    {
+        if (t != null)
+            f.accept(t);
+    }
+    
+    /**
+     * Collects the items into a list, but adds the given element between each of the collected
+     * elements.  Like a mix of Collectors.toList and Collectors.joining
+     */
+    public static <T7> Collector<T7, ArrayList<T7>, ArrayList<T7>> intersperse(Supplier<T7> makeInbetween)
+    {
+        return Collector.of(ArrayList::new, new BiConsumer<ArrayList<T7>, T7>()
+        {
+            @Override
+            public void accept(ArrayList<T7> l, T7 x)
+            {
+                if (!l.isEmpty())
+                    l.add(makeInbetween.get());
+                l.add(x);
+            }
+        }, new BinaryOperator<ArrayList<T7>>()
+        {
+            @Override
+            public ArrayList<T7> apply(ArrayList<T7> a, ArrayList<T7> b)
+            {
+                a.addAll(b);
+                return a;
+            }
+        });
+    }
+
+    /**
+     * As intersperse, but uses a fixed element instead of dynamically generating it
+     */
+    public static <T8> Collector<T8, ArrayList<T8>, ArrayList<T8>> intersperse(T8 inbetween)
+    {
+        return intersperse(new Supplier<T8>()
+        {
+            @Override
+            public T8 get()
+            {
+                return inbetween;
+            }
+        });
+    }
+    
+    // Interleaves two streams.  Returns first element of a, then first element of b,
+    // then second of a, second of b, third of a and so on.  Once one stream runs out, just
+    // returns the rest of the remaining stream
+    public static <T9> Stream<T9> interleave(Stream<T9> a, Stream<T9> b)
+    {
+        // I'm sure there is a cleverer way to do this, but never mind:
+        List<T9> ar = a.collect(Collectors.toList());
+        List<T9> br = b.collect(Collectors.toList());
+        ArrayList<T9> r = new ArrayList<>(ar.size() + br.size());
+        for (int i = 0; i < Math.max(ar.size(), br.size()); i++)
+        {
+            if (i < ar.size())
+                r.add(ar.get(i));
+            if (i < br.size())
+                r.add(br.get(i));
+            
+        }
+        return r.stream();
+    }
+
+    public static <T> CompletableFuture<T> swingFuture(SwingSupplier<T> func)
+    {
+        CompletableFuture<T> f = new CompletableFuture<>();
+        SwingUtilities.invokeLater(() -> f.complete(func.get()));
+        return f;
+    }
+    
+    public static <T> Optional<T> findLast(Stream<T> s)
+    {
+        return Optional.ofNullable(s.reduce(null, (p, c) -> c));
+    }
+
+    public static <K, V> Map<K, V> mergeMaps(Map<K, V> a, Map<K, V> b, BiFunction<V, V, V> mergeFunction)
+    {
+        Map<K, V> r = new HashMap<>(a);
+        for (Entry<K, V> e : b.entrySet())
+        {
+            r.merge(e.getKey(), e.getValue(), mergeFunction);
+        }
+        return r;
+    }
+    
+    public static <T> Iterable<T> iterableStream(Stream<T> s)
+    {
+        // Via http://stackoverflow.com/a/20130475/412908 :
+        return s::iterator;
+    }
+
+    public static <T> List<T> nonNulls(List<T> orig)
+    {
+        return orig.stream().filter(x -> x != null).collect(Collectors.toList());
+    }
+
+    /**
+     * Tries to locate the top level greenfoot dir. This method takes the
+     * different platforms into account. Specifically the Mac has a different
+     * structure.
+     * 
+     * @throws IOException If it can't read the greenfoot dir.
+     * 
+     */
+    public static File getGreenfootDir()
+        throws IOException
+    {
+        File libDir = Config.getBlueJLibDir();
+        // The parent dir of the lib dir is the top level dir of greenfoot
+        File greenfootDir = libDir.getParentFile();
+        if (greenfootDir == null || !(greenfootDir.isDirectory() && greenfootDir.canRead())) {
+            throw new IOException("Could not read from greenfoot directory: " + greenfootDir);
+        }
+        return greenfootDir;
+    }
+
+    public static String getGreenfootApiDocURL(String page) throws IOException,
+            MalformedURLException
+    {
+        String customUrl = Config.getPropString("greenfoot.url.javadoc", null);
+        if(customUrl != null)
+        {
+            if (!customUrl.endsWith("/"))
+                customUrl += "/";
+            customUrl += page;
+        }
+        else
+        {
+            File greenfootDir = getGreenfootDir();
+            File location = new File(greenfootDir, "/doc/API/" + page);
+            if (location.canRead()) {
+                customUrl = location.toURI().toURL().toString();
+            }
+        }
+        return customUrl;
+    }
+
+    /**
+     * Provides an iterable view of a list, going backwards through it
+     */
+    public static <T> Iterable<T> backwards(List<T> src)
+    {
+        return new Iterable<T>() {
+            private final ListIterator<T> listIterator = src.listIterator(src.size());
+    
+            public Iterator<T> iterator() {
+                return new Iterator<T>() {
+    
+                    public boolean hasNext() {
+                        return listIterator.hasPrevious();
+                    }
+    
+                    public T next() {
+                        return listIterator.previous();
+                    }
+    
+                    public void remove() {
+                        listIterator.remove();
+                    }
+    
+                };
+            }
+        };
+    }
+
+    public static <T> List<T> filterList(Collection<T> src, Predicate<T> keep)
+    {
+        return src.stream().filter(keep).collect(Collectors.toList());
+    }
+
+    /**
+     * Rounds the number to the nearest integer + 0.5 value.
+     *
+     * Note, this is not the same as rounding to the nearest half-integer.
+     * 1.2 will be rounded to 1.5.  But 1.0 will also be rounded to 1.5.
+     * 0.9 will be rounded to 0.5, and so on.
+     *
+     * This is useful when you want to draw a smooth JavaFX line
+     * which must be drawn at 0.5 pixel intervals.
+     */
+    public static double roundHalf(double x)
+    {
+        // Simplest implementation I could think of:
+        return 0.5 + Math.round(x - 0.5);
+    }
+
+    @FunctionalInterface
+    public static interface BackgroundRunnable
+    {
+        @OnThread(Tag.Worker)
+        public void run();
+    }
+
+    // The Runnable will run on an arbitrary thread
+    @OnThread(Tag.Any)
+    public static void runBackground(BackgroundRunnable r)
+    {
+        long queue = System.currentTimeMillis();
+        background.execute(() -> {
+            long started = System.currentTimeMillis();
+            r.run();
+            long ended = System.currentTimeMillis();
+            //Debug.time("Queue->start: " + (started - queue) + " start->end:" + (ended - started) + " " + r);
+        });
+    }
+
+    public static <T> Stream<T> streamOptional(Optional<T> optional)
+    {
+        return optional.isPresent() ? Stream.of(optional.get()) : Stream.empty();
+    }
+    
+    /**
+     * Finds the index of the first item in the list where the given predicate returns true,
+     * or -1 if none match
+     */
+    public static <T> int findIndex(List<T> list, Predicate<T> criteria)
+    {
+        for (int i = 0; i < list.size(); i++)
+        {
+            if (criteria.test(list.get(i)))
+                return i;
+        }
+        return -1;
+    }
+
+    @OnThread(Tag.Any)
+    public static String serialiseCodeToString(Element xml) throws IOException
+    {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        serialiseCodeTo(xml, baos);
+        return baos.toString("UTF-8");
+    }
+
+    @OnThread(Tag.Any)
+    public static void serialiseCodeTo(Element xml, OutputStream os) throws IOException
+    {
+        Serializer s = new Serializer(os);
+        s.setLineSeparator("\n");
+        s.setIndent(4);
+        xml.addNamespaceDeclaration("xml", "http://www.w3.org/XML/1998/namespace");
+        s.write(new Document(xml));
+        s.flush();
+    }
+
+    @FunctionalInterface
+    public static interface SwingSupplier<T>
+    {
+        @OnThread(Tag.Swing)
+        public T get();
+    }
+
+    private static class ExternalProcessLogger extends Thread
+    {
+        String commandAsStr;
+        String processName; 
+        Process p;
+        
+        public ExternalProcessLogger(String processName, String command, Process process)
+        {
+            this.processName = processName;
+            commandAsStr = command;
+            p = process;
+        }
+        
+        @Override
+        public void run()
+        {
+            BufferedReader br = new BufferedReader(new InputStreamReader(p.getErrorStream()));
+            StringBuffer extra = new StringBuffer();
+
+            try {
+                char[] buf = new char[1024];
+                Thread.sleep(1000);
+
+                // discontinue if no data available or stream closed
+                if (br.ready()) {
+                    int len = br.read(buf);
+                    if (len != -1) {
+                        extra.append(buf, 0, len);
+                    }
+                }
+                
+                if (extra.length() != 0) {
+                    Debug.message("When trying to launch " + processName + ":" + commandAsStr);
+                    Debug.message(" This error was recieved: " + extra);
+                }
+            }
+            catch (InterruptedException ie) {}
+            catch (IOException ioe) {}
+            finally {
+                try {
+                    br.close();
+                }
+                catch (IOException ioe) {}
+            }
+        }
+    }
+
+    /**
+     * A utility class to wait for an external process to complete.
+     * This allows waiting with a timeout, unlike the Process.waitFor()
+     * method. Simply create a ProcessWaiter, and then call {@code wait()}
+     * or {@code wait(long)} on the ProcessWaiter.
+     */
+    private static class ProcessWaiter
+    {
+        boolean complete = false;
+        
+        public ProcessWaiter(final Process p)
+        {
+            new Thread() {
+                @Override
+                public void run() {
+                    try {
+                        p.waitFor();
+                    }
+                    catch (InterruptedException ie) {}
+                    synchronized (ProcessWaiter.this) {
+                        complete = true;
+                        ProcessWaiter.this.notify();
+                    }
+                }
+            }.start();
+        }
+        
+        /**
+         * Wait for the process to complete, with the given timeout.
+         * If the timeout is 0, wait indefinitely.
+         */
+        public synchronized void waitForProcess(long timeout)
+            throws InterruptedException
+        {
+            while (! complete) {
+                wait(timeout);
+            }
+        }
+    }
 }

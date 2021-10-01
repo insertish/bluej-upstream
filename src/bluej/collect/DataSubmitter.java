@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 2013  Michael Kolling and John Rosenberg 
+ Copyright (C) 2013,2016  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -21,12 +21,21 @@
  */
 package bluej.collect;
 
+import javax.swing.*;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
+import javafx.application.Platform;
+
+import bluej.Boot;
+import bluej.Config;
+import bluej.extensions.event.ApplicationEvent;
+import bluej.extmgr.ExtensionsManager;
+import bluej.pkgmgr.Project;
 import org.apache.http.Header;
 import org.apache.http.HttpResponse;
 import org.apache.http.client.ClientProtocolException;
@@ -50,10 +59,10 @@ import org.apache.http.util.EntityUtils;
 class DataSubmitter
 {
     private static final String submitUrl = "http://blackbox.bluej.org/master_events";
-        //For testing: "http://localhost:3000/master_events"; 
+        //For testing: "http://localhost:3000/master_events";
 
     
-    private static volatile boolean givenUp = false;
+    private static AtomicBoolean givenUp = new AtomicBoolean(false);
     
     /**
      * isRunning is only touched while synchonized on queue
@@ -81,7 +90,7 @@ class DataSubmitter
     static void submitEvent(Event evt)
     {
         //This thread only reads the boolean, and is an optimisation:
-        if (givenUp)
+        if (givenUp.get())
             return;
         
         synchronized (queue) {
@@ -116,9 +125,24 @@ class DataSubmitter
             }
             
 
-            if (!givenUp)
+            if (!givenUp.get())
             {
-                givenUp = !postData(evt);
+                givenUp.set(!postData(evt));
+                // If we just gave up on this event:
+                if (givenUp.get())
+                {
+                    SwingUtilities.invokeLater(() -> {
+                        ExtensionsManager.getInstance().delegateEvent(new ApplicationEvent(ApplicationEvent.DATA_SUBMISSION_FAILED_EVENT));
+                        if (Boot.isTrialRecording())
+                        {
+                            // If we just gave up, and we are specifically in a trial, show a dialog
+                            // to the user warning them of this:
+                            if (!Config.isGreenfoot()) // Greenfoot shows the dialog on the Greenfoot VM, only show if we are BlueJ:
+                                Platform.runLater(() -> new DataSubmissionFailedDialog().show());
+                            Project.getProjects().forEach(project -> project.setAllEditorStatus(" - NOT RECORDING"));
+                        }
+                    });
+                }
             }
         }
     }
@@ -131,8 +155,8 @@ class DataSubmitter
     private static boolean postData(Event evt)
     {   
         HttpParams params = new BasicHttpParams();
-        HttpConnectionParams.setConnectionTimeout(params, 10000);
-        HttpConnectionParams.setSoTimeout(params, 10000);
+        HttpConnectionParams.setConnectionTimeout(params, Boot.isTrialRecording() ? 30000 : 10000);
+        HttpConnectionParams.setSoTimeout(params, Boot.isTrialRecording() ? 30000 : 10000);
         HttpClient client = new DefaultHttpClient(params);
         
         try {
@@ -232,5 +256,10 @@ class DataSubmitter
     {
         sequenceNum = 1; //Server relies on it starting at 1, do not change
         
+    }
+
+    public static boolean hasGivenUp()
+    {
+        return givenUp.get();
     }
 }

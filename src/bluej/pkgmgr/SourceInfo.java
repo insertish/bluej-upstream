@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2014,2016  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -33,22 +33,15 @@ import bluej.parser.symtab.ClassInfo;
  * automatic editing of the source.
  *
  * @author  Michael Kolling
- * @version $Id: SourceInfo.java 8295 2010-09-10 06:03:56Z davmac $
+ * @version $Id: SourceInfo.java 16066 2016-06-21 20:19:57Z nccb $
  */
 public final class SourceInfo
 {
-    private boolean valid;
     private ClassInfo info;
 
     public SourceInfo()
     {
-        valid = true;
         info = null;
-    }
-
-    public boolean isValid()
-    {
-        return valid;
     }
 
     public void setSourceModified()
@@ -60,13 +53,13 @@ public final class SourceInfo
     {
         if(info == null)
         {
-            try {
-                info = InfoParser.parse(sourceFile, pkg);
-                valid = info != null && ! info.hadParseError();
+            try
+            {
+                info = InfoParser.parseWithPkg(sourceFile, pkg);
             }
-            catch (FileNotFoundException fnfe) {
-                info = null;
-                valid = false;
+            catch (FileNotFoundException fnfe)
+            {
+                // info remains null
             }
         }
 

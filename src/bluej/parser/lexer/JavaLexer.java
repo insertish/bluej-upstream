@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 2009,2010,2011,2012,2014  Michael Kolling and John Rosenberg 
+ Copyright (C) 2009,2010,2011,2012,2014,2016  Michael Kolling and John Rosenberg 
 
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -44,6 +44,7 @@ public final class JavaLexer implements TokenStream
     private int beginColumn, beginLine, beginPosition;
     private int endColumn, endLine, endPosition;
     private boolean generateWhitespaceTokens = false;
+    private boolean handleComments = true; // When false, doesn't recognise /*..*/ or //..\n as comments (for frames)
     
     private static Map<String,Integer> keywords = new HashMap<String,Integer>();
     
@@ -108,6 +109,15 @@ public final class JavaLexer implements TokenStream
     public JavaLexer(Reader in)
     {
         this(in, 1, 1, 0);
+    }
+    
+    /**
+     * Construct a lexer which readers from the given Reader.
+     */
+    public JavaLexer(Reader in, boolean handleComments)
+    {
+        this(in, 1, 1, 0);
+        this.handleComments = handleComments;
     }
 
     /**
@@ -311,11 +321,10 @@ public final class JavaLexer implements TokenStream
             }
             else if (Character.isDigit((char) rval)) {
                 do {
-                    // octal?
+                    // octal integer literal, or floating-point literal with leading 0
                     textBuffer.append((char) rval);
                     rval = readNextChar();
                 } while (Character.isDigit((char) rval) || rval == '_');
-                fpValid = false;
             }
             ch = (char) rval;
         }
@@ -458,10 +467,10 @@ public final class JavaLexer implements TokenStream
     
     private int getSLCommentType(char ch)
     {
-        int rval=0;     
+        int rval=ch;     
 
         do{  
-            textBuffer.append(ch);
+            textBuffer.append((char)rval);
             rval=readNextChar();
             //eof
             if (rval==-1 || rval == '\n') {
@@ -493,6 +502,7 @@ public final class JavaLexer implements TokenStream
         if (':' == ch) {
             int rval = readNextChar();
             if (rval == ':') {
+                textBuffer.append((char)rval);
                 readNextChar();
                 return JavaTokenTypes.METHOD_REFERENCE;
             }
@@ -728,10 +738,10 @@ public final class JavaLexer implements TokenStream
             readNextChar();
             return JavaTokenTypes.DIV_ASSIGN; 
         }
-        if (thisChar=='/') {
+        if (thisChar=='/' && handleComments) {
             return getSLCommentType(thisChar);
         }
-        if (thisChar=='*') {
+        if (thisChar=='*' && handleComments) {
             return getMLCommentType(thisChar);
         }
 

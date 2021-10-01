@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2016  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -24,12 +24,13 @@ package bluej.pkgmgr.target.role;
 import java.awt.*;
 
 import bluej.Config;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 
 /**
  * A role object to represent the behaviour of interfaces.
  *
  * @author  Andrew Patterson 
- * @version $Id: InterfaceClassRole.java 7594 2010-05-18 14:39:08Z nccb $
  */
 public class InterfaceClassRole extends ClassRole
 {
@@ -43,11 +44,13 @@ public class InterfaceClassRole extends ClassRole
     {
     }
 
+    @OnThread(Tag.Any)
     public String getRoleName()
     {
         return INTERFACE_ROLE_NAME;
     }
 
+    @OnThread(Tag.Any)
     public String getStereotypeLabel()
     {
         return "interface";
@@ -65,4 +68,10 @@ public class InterfaceClassRole extends ClassRole
         }
     }
 
+    @Override
+    @OnThread(Tag.Any)
+    public boolean canConvertToStride()
+    {
+        return true; // interfaces are supported
+    }
 }

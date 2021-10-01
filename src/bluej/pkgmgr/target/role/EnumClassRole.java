@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2016  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -25,9 +25,17 @@ import java.awt.Color;
 import java.awt.Paint;
 
 import javax.swing.JPopupMenu;
+
+import bluej.pkgmgr.target.DependentTarget.State;
+import javafx.collections.ObservableList;
+import javafx.scene.control.MenuItem;
+import javafx.scene.control.SeparatorMenuItem;
+
 import bluej.Config;
 import bluej.pkgmgr.target.ClassTarget;
 import bluej.prefmgr.PrefMgr;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 
 /**
  * A role object to represent the behaviour of enums.
@@ -46,11 +54,13 @@ public class EnumClassRole extends ClassRole
     {
     }
 
+    @OnThread(Tag.Any)
     public String getRoleName()
     {
         return ENUM_ROLE_NAME;
     }
 
+    @OnThread(Tag.Any)
     public String getStereotypeLabel()
     {
         return "enum";
@@ -77,7 +87,9 @@ public class EnumClassRole extends ClassRole
      * @param menu the popup menu to add the class menu items to
      * @param cl Class object associated with this class target
      */
-    public boolean createClassConstructorMenu(JPopupMenu menu, ClassTarget ct, Class<?> cl)
+    @Override
+    @OnThread(Tag.FXPlatform)
+    public boolean createClassConstructorMenu(ObservableList<MenuItem> menu, ClassTarget ct, Class<?> cl)
     {
         return false;
     }
@@ -91,16 +103,23 @@ public class EnumClassRole extends ClassRole
      *
      * @return true if any menu items have been added
      */
-    public boolean createRoleMenuEnd(JPopupMenu menu, ClassTarget ct, int state)
+    @Override
+    @OnThread(Tag.FXPlatform)
+    public boolean createRoleMenuEnd(ObservableList<MenuItem> menu, ClassTarget ct, State state)
     {
         if(PrefMgr.getFlag(PrefMgr.SHOW_TEST_TOOLS)) {
             if (ct.getAssociation() == null) {
-                menu.addSeparator();
-                addMenuItem(menu, ct.new CreateTestAction(), true);
+                menu.add(new SeparatorMenuItem());
+                menu.add(ct.new CreateTestAction());
             }
         }
         return true;
     }
-    
-    
+
+    @Override
+    @OnThread(Tag.Any)
+    public boolean canConvertToStride()
+    {
+        return false; //enums are not supported
+    }
 }

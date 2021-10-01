@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2016  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -22,6 +22,7 @@
 package bluej.pkgmgr.actions;
 
 import bluej.pkgmgr.PkgMgrFrame;
+import javafx.application.Platform;
 
 /**
  * User chooses "close project". Save & close the current project. If the command
@@ -29,18 +30,18 @@ import bluej.pkgmgr.PkgMgrFrame;
  * the window regardless.
  * 
  * @author Davin McCall
- * @version $Id: CloseProjectAction.java 6215 2009-03-30 13:28:25Z polle $
+ * @version $Id: CloseProjectAction.java 16695 2016-10-07 11:34:53Z nccb $
  */
 final public class CloseProjectAction extends PkgMgrAction
 {
-    public CloseProjectAction()
+    public CloseProjectAction(PkgMgrFrame pmf)
     {
-        super("menu.package.close");
+        super(pmf, "menu.package.close");
     }
     
     public void actionPerformed(PkgMgrFrame pmf)
     {
         pmf.menuCall();
-        pmf.doClose(true, true);
+        Platform.runLater(() -> pmf.doClose(true, true));
     }
 }

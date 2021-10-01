@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2016  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -22,7 +22,7 @@
 package bluej.groupwork.actions;
 
 import bluej.Config;
-import bluej.groupwork.ui.CommitCommentsFrame;
+import bluej.groupwork.ui.CommitAndPushInterface;
 import bluej.pkgmgr.PkgMgrFrame;
 import bluej.pkgmgr.Project;
 
@@ -36,9 +36,9 @@ import bluej.pkgmgr.Project;
  */
 public class CommitCommentAction extends TeamAction
 {
-    public CommitCommentAction()
+    public CommitCommentAction(PkgMgrFrame pmf, String label)
     {
-        super("team.commit", true);
+        super(pmf, label, true);
         putValue(SHORT_DESCRIPTION, Config.getString("tooltip.commit"));
     }
     
@@ -54,7 +54,7 @@ public class CommitCommentAction extends TeamAction
     {
         if(!pmf.isEmptyFrame()) {
             Project project = pmf.getProject();
-            CommitCommentsFrame dialog = project.getCommitCommentsDialog();
+            CommitAndPushInterface dialog = project.getCommitCommentsDialog();
             
             dialog.reset();
             dialog.setVisible(true);

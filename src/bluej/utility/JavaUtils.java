@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2011,2012,2014  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2011,2012,2014,2015,2016  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -32,6 +32,7 @@ import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -87,6 +88,10 @@ public abstract class JavaUtils
      */
     static public String getFQTypeName(Class<?> type)
     {
+        // Early exit for common case:
+        if (!type.isArray())
+            return type.getName();
+
         Class<?> primtype = type;
         int dimensions = 0;
         while (primtype.isArray()) {
@@ -274,7 +279,7 @@ public abstract class JavaUtils
      * Get a list of the type parameters for a generic constructor.
      * (return an empty list if the method is not generic).
      * 
-     * @param method   The method fro which to find the type parameters
+     * @param cons   The constructors for which to find the type parameters
      * @return  A list of GenTypeDeclTpar
      */
     abstract public List<GenTypeDeclTpar> getTypeParams(Constructor<?> cons);
@@ -334,7 +339,7 @@ public abstract class JavaUtils
      * In the case of a varargs method, the last argument will be an array
      * type.
      * 
-     * @param method  the method whose argument types to get
+     * @param constructor  the constructor whose argument types to get
      * @return  the argument types
      */
     abstract public JavaType[] getParamGenTypes(Constructor<?> constructor) throws ClassNotFoundException;
@@ -543,7 +548,66 @@ public abstract class JavaUtils
         return outbuf.toString();
     }
     
+    public static class Javadoc
+    {
+        private final String intro;
+        private final List<String> blocks;
+        
+        public Javadoc(String intro, List<String> blocks)
+        {
+            this.intro = intro;
+            this.blocks = blocks;
+        }
+        
+        public String getHeader()
+        {
+            return intro;
+        }
+        
+        // Minus the leading '@'
+        public List<String> getBlocks()
+        {
+            return blocks;
+        }
+    }
     
+    public static Javadoc parseJavadoc(String javadocString)
+    {
+        if (javadocString == null)
+            return null;
+        
+        // find the first block tag
+        int i;
+        for (i = 0; i < javadocString.length(); i++) {
+            // Here we are the start of the line
+            while (i < javadocString.length() && Character.isWhitespace(javadocString.charAt(i))) {
+                i++;
+            }
+            if (i >= javadocString.length() || javadocString.charAt(i) == '@') {
+                break;
+            }
+            while (i < javadocString.length()
+                    && javadocString.charAt(i) != '\n'
+                    && javadocString.charAt(i) != '\r') {
+                i++;
+            }
+        }
+        
+        if (i >= javadocString.length()) {
+            return new Javadoc(javadocString, Collections.emptyList());
+        }
+        
+        // Process the block tags
+        String header = javadocString.substring(0, i);
+        String blocksText = javadocString.substring(i);
+        String[] lines = Utility.splitLines(blocksText);
+
+        List<String> blocks = getBlockTags(lines);
+        
+        return new Javadoc(header, blocks);
+    }
+    
+
     /**
      * Strip leading asterisk characters (and any preceding whitespace) from a single
      * line of text.
@@ -598,32 +662,18 @@ public abstract class JavaUtils
         return new GenTypeClass(new JavaReflective(c));
     }
     
-    private static final Pattern headerPattern = Pattern.compile("{1,}\\s@\\w");
+//    private static final Pattern headerPattern = Pattern.compile("{1,}\\s@\\w");
     private static final Pattern paramNamePattern = Pattern.compile("param\\s+\\w"); // regular expression for the parameter name
     private static final Pattern paramDescPattern = Pattern.compile("\\s+\\w");  // regular expression for the parameter description
-    
+
     /**
-     * Convert javadoc comment body (as extracted by javadocToString for
-     * instance) to HTML suitable for display by HTMLEditorKit.
+     * Convert javadoc comment body (as extracted by javadocToString for instance)
+     * to HTML suitable for display by HTMLEditorKit.
      */
     public static String javadocToHtml(String javadocString)
     {
-        // find the first block tag
-        
-        Matcher matcher = headerPattern.matcher(javadocString);
-        int i = -1;
-        if (matcher.find()) {
-            i = matcher.start();
-        }
-        if (i == -1) {//not found
-            return makeCommentColour(javadocString);
-        }
-        // Process the block tags
-        String header = javadocString.substring(0, i);
-        String blocksText = javadocString.substring(i);
-        String[] lines = Utility.splitLines(blocksText);
-
-        List<String> blocks = getBlockTags(lines);
+        String javadocStringCodeTagged = convertCodeTokens(javadocString);
+        Javadoc j = parseJavadoc(javadocStringCodeTagged);
 
         StringBuilder rest = new StringBuilder();
         StringBuilder params = new StringBuilder();
@@ -631,8 +681,8 @@ public abstract class JavaUtils
         boolean hasParamDoc = false;
         
 
-        for (String block : blocks) {
-            matcher = paramNamePattern.matcher(block); //search the current block
+        for (String block : j.getBlocks()) {
+            Matcher matcher = paramNamePattern.matcher(block); //search the current block
             String paramName = "";
             String paramDesc = "";
             if (matcher.find()) {
@@ -652,15 +702,43 @@ public abstract class JavaUtils
                 params.append("</td></tr>");
                 hasParamDoc = true;
             } else {
-                rest.append(convertBlockTag(block)).append("<br>");
+                String blockTag = convertBlockTag(block);
+                if (!blockTag.isEmpty())
+                    rest.append(blockTag).append("<br>");
             }
         }
 
         params.append("</table><p>");
 
-        StringBuilder result = new StringBuilder(makeCommentColour(header));
-        result.append((hasParamDoc ? params.toString() : "<p>")).append(rest.toString());
-        return result.toString();
+        String result = makeCommentColour(j.getHeader()) + (hasParamDoc ? params.toString() : "<p>") + rest.toString();
+        return result;
+    }
+
+    private static String convertCodeTokens(String rawString)
+    {
+        String result = rawString;
+
+        int startIndex;
+        while ((startIndex = result.indexOf("{@code")) != -1) {
+            int insideOpeningBrackets = 0;
+            int endIndex = -1;
+            for (int i = startIndex + 6; i < result.length(); i++) {
+                if (result.charAt(i) == '{') {
+                    insideOpeningBrackets++;
+                }
+                else if (result.charAt(i) == '}') {
+                    if (insideOpeningBrackets != 0) {
+                        insideOpeningBrackets--;
+                    }
+                    else {
+                        endIndex = i;
+                        break;
+                    }
+                }
+            }
+            result = result.substring(0, startIndex) + "<code>" + result.substring(startIndex + 6, endIndex) + " </code>" + result.substring(endIndex + 1);
+        }
+        return result;
     }
 
     private static String makeCommentColour(String text)
@@ -675,7 +753,7 @@ public abstract class JavaUtils
      */
     private static List<String> getBlockTags(String[] lines)
     {
-        LinkedList<String> blocks = new LinkedList<String>();
+        LinkedList<String> blocks = new LinkedList<>();
         StringBuilder cur = new StringBuilder();
         for (String line : lines) {
             line = line.trim();
@@ -695,9 +773,13 @@ public abstract class JavaUtils
 
     private static String convertBlockTag(String block)
     {
-        int k = block.indexOf(' ');
-        String r = "<b>" + block.substring(0, k) + "</b> - " + makeCommentColour(block.substring(k));
-        return r;
+        int spaceIndex = block.indexOf(' ');
+        if (spaceIndex < 0) {
+            return "";
+        }
+        // block.substring(0, spaceIndex) returns the Tag Name
+        // block.substring(spaceIndex) returns the Description
+        return "<b>" + block.substring(0, spaceIndex) + "</b> - " + makeCommentColour(block.substring(spaceIndex));
     }
 
     public static String escapeAngleBrackets(String sig)

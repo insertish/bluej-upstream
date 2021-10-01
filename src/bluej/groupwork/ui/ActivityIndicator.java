@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2014,2016  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -21,18 +21,22 @@
  */
 package bluej.groupwork.ui;
 
+import bluej.prefmgr.PrefMgr;
 import java.awt.Dimension;
 import java.awt.EventQueue;
 
 import javax.swing.JComponent;
+import javax.swing.JLabel;
 import javax.swing.JProgressBar;
 import javax.swing.OverlayLayout;
 
-public class ActivityIndicator extends JComponent implements Runnable
+import threadchecker.OnThread;
+import threadchecker.Tag;
+
+public class ActivityIndicator extends JComponent
 {
     private JProgressBar progressBar;
-    private boolean running;
-    
+    private JLabel messageLabel;
     public ActivityIndicator()
     {
         setBorder(null);
@@ -41,6 +45,10 @@ public class ActivityIndicator extends JComponent implements Runnable
         progressBar.setIndeterminate(true);
         progressBar.setVisible(false);
         add(progressBar);
+        messageLabel = new JLabel();
+        messageLabel.setFont(PrefMgr.getStandardFont());
+        messageLabel.setVisible(false);
+        add(messageLabel);
     }
     
     /**
@@ -49,24 +57,26 @@ public class ActivityIndicator extends JComponent implements Runnable
      * 
      * @param running  The new running state
      */
+    @OnThread(Tag.Any)
     public void setRunning(boolean running)
     {
-        this.running = running;
-        if (EventQueue.isDispatchThread()) {
+        EventQueue.invokeLater(() -> {
+            messageLabel.setVisible(!running);
             progressBar.setVisible(running);
-        }
-        else {
-            EventQueue.invokeLater(this);
-        }
+                });
     }
-    
-    /*
-     * The run() method will only be called on the event dispatch thread, and
-     * is used to update the current running state.
+    /**
+     * Set message to display when the activity indicator is not in a running state.
+     * @param msg 
      */
-    public void run()
+    @OnThread(Tag.Any)
+    public void setMessage(String msg)
     {
-        progressBar.setVisible(running);
+        EventQueue.invokeLater(() -> {
+            if (msg != null){
+                messageLabel.setText(msg);
+            }
+        });
     }
     
     public Dimension getPreferredSize()

@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2016  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -21,6 +21,8 @@
  */
 package bluej.groupwork.actions;
 
+import javafx.application.Platform;
+
 import bluej.Config;
 import bluej.groupwork.ui.HistoryFrame;
 import bluej.pkgmgr.PkgMgrFrame;
@@ -29,19 +31,19 @@ import bluej.pkgmgr.PkgMgrFrame;
  * An action to show the repository history.
  * 
  * @author Davin McCall
- * @version $Id: ShowLogAction.java 6215 2009-03-30 13:28:25Z polle $
+ * @version $Id: ShowLogAction.java 16722 2016-10-10 16:33:55Z nccb $
  */
 public class ShowLogAction extends TeamAction
 {
-    public ShowLogAction()
+    public ShowLogAction(PkgMgrFrame pmf)
     {
-        super(Config.getString("team.history"), false);
+        super(pmf, Config.getString("team.history"), false);
     }
     
     public void actionPerformed(PkgMgrFrame pmf)
     {
         HistoryFrame hd = new HistoryFrame(pmf);
-        hd.setLocationRelativeTo(pmf);
+        Platform.runLater(() -> hd.setLocationRelativeTo(pmf.getFXWindow()));
         hd.setVisible(true);
     }
 

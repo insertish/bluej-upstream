@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2011,2012  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2011,2012,2016  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -41,19 +41,21 @@ class Job
     CompileObserver observer;
     File destDir;
     BPClassLoader bpClassLoader;
-    File sources[];
+    CompileInputFile sources[];
     boolean internal; // true for compiling shell files, 
                       // or user files if we want to suppress 
                       // "unchecked" warnings, false otherwise
     private List<String> userCompileOptions;
     private Charset fileCharset;
+    private CompileType type;
+    private CompileReason reason;
     
     /**
      * Create a job with a set of sources.
      */
-    public Job(File[] sourceFiles, Compiler compiler, CompileObserver observer,
+    public Job(CompileInputFile[] sourceFiles, Compiler compiler, CompileObserver observer,
                         BPClassLoader bpClassLoader, File destDir, boolean internal,
-                        List<String> userCompileOptions, Charset fileCharset)
+                        List<String> userCompileOptions, Charset fileCharset, CompileType type, CompileReason reason)
     {
         this.sources = sourceFiles;
         this.compiler = compiler;
@@ -63,6 +65,8 @@ class Job
         this.internal = internal;
         this.userCompileOptions = userCompileOptions;
         this.fileCharset = fileCharset;
+        this.type = type;
+        this.reason = reason;
     }
     
     /**
@@ -72,7 +76,7 @@ class Job
     {
         try {
             if(observer != null) {
-                observer.startCompile(sources);
+                observer.startCompile(sources, reason, type);
             }
 
             if(destDir != null) {
@@ -80,26 +84,26 @@ class Job
             }
 
             compiler.setClasspath(bpClassLoader.getClassPathAsFiles());
-            if (bpClassLoader.loadsForJavaMEproject()) {
-                compiler.setBootClassPath(bpClassLoader.getJavaMElibsAsFiles());
-            }
-            else {
-                compiler.setBootClassPath(null);
-                String majorVersion = System.getProperty("java.specification.version"); 
-                userCompileOptions.add(0, "-source");
-                userCompileOptions.add(1, majorVersion);
-            }
 
-            boolean successful = compiler.compile(sources, observer, internal, userCompileOptions, fileCharset);
+            compiler.setBootClassPath(null);
+            String majorVersion = System.getProperty("java.specification.version");
+            userCompileOptions.add(0, "-source");
+            userCompileOptions.add(1, majorVersion);
+
+            File[] actualSourceFiles = new File[sources.length];
+            for (int i = 0; i < sources.length; i++)
+                actualSourceFiles[i] = sources[i].getJavaCompileInputFile();
+
+            boolean successful = compiler.compile(actualSourceFiles, observer, internal, userCompileOptions, fileCharset, type);
 
             if(observer != null) {
-                observer.endCompile(sources, successful);
+                observer.endCompile(sources, successful, type);
             }
         } catch(Exception e) {
             System.err.println(Config.getString("compileException") + ": " + e);
             e.printStackTrace();
             if (observer != null) {
-                observer.endCompile(sources, false);
+                observer.endCompile(sources, false, type);
             }
         }
     }

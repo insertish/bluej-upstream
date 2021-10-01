@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2013  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2013,2014,2016  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -47,9 +47,7 @@ import bluej.utility.SortedProperties;
  */
 public final class ClassInfo
 {
-    private static final String[] appletClasses = { "java.applet.Applet", "javax.swing.JApplet" };
     private static final String[] unitTestClasses = { "junit.framework.TestCase" };
-    private static final String[] midletClasses = { "javax.microedition.midlet.MIDlet" }; 
 
     private boolean foundPublicClass = false;
 
@@ -70,25 +68,23 @@ public final class ClassInfo
 
     private boolean isInterface = false;
     private boolean isAbstract = false;
-    private boolean isApplet = false;
     private boolean isUnitTest = false;
     private boolean isEnum = false;
-    private boolean isMIDlet = false;
     
     private boolean hadParseError = false;
 
-    private class SavedComment
+    public class SavedComment
     {
-        public String target;   // the method signature of the item we have a
-                                // comment for. Can be class name or interface
-                                // name in the case of a comment for a whole
-                                // class/interface
+        public final String target; // the method signature of the item we have a
+                                    // comment for. Can be class name or interface
+                                    // name in the case of a comment for a whole
+                                    // class/interface
 
-        public String comment;  // the actual text of the comment
+        public final String comment;  // the actual text of the comment
 
-        public String paramnames;   // if this is a method or constructor, then
-                                    // this is a comma seperated list of name
-                                    // associated with the parameters
+        public final String paramnames;  // if this is a method or constructor, then
+                                         // this is a comma seperated list of name
+                                         // associated with the parameters
 
         public SavedComment(String target, String comment, String paramnames)
         {
@@ -140,21 +136,9 @@ public final class ClassInfo
             used.remove(name);
         }
 
-        for (int i = 0; i < appletClasses.length; i++) {
-            if(name.equals(appletClasses[i])) {
-                isApplet = true;
-            }
-        }
-
         for (int i = 0; i < unitTestClasses.length; i++) {
             if(name.equals(unitTestClasses[i])) {
                 isUnitTest = true;
-            }
-        }
-        
-        for (int i = 0; i < midletClasses.length; i++) {
-            if(name.equals(midletClasses[i])) {
-                isMIDlet = true;
             }
         }
     }
@@ -505,6 +489,11 @@ public final class ClassInfo
         }
         return props;
     }
+    
+    public List<SavedComment> getCommentsAsList()
+    {
+        return Collections.unmodifiableList(comments);
+    }
 
     public boolean isInterface()
     {
@@ -514,16 +503,6 @@ public final class ClassInfo
     public boolean isAbstract()
     {
         return this.isAbstract;
-    }
-
-    public boolean isApplet()
-    {
-        return this.isApplet;
-    }
-
-    public boolean isMIDlet()
-    {
-        return this.isMIDlet;
     }
     
     public boolean isUnitTest()

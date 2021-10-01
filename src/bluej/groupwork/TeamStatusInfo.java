@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2016  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -28,7 +28,6 @@ import java.io.File;
  * Team status information for a file
  * 
  * @author Davin McCall
- * @version $Id: TeamStatusInfo.java 6215 2016-01-21 12:14:10Z polle $
  */
 public class TeamStatusInfo
 {
@@ -36,6 +35,7 @@ public class TeamStatusInfo
     private String localVersion;
     private String remoteVersion;
     private int status;
+    private int remoteStatus;
     
     /** The file is up-to-date, the local revision is the same as in the repository */
     public final static int STATUS_UPTODATE = 0;
@@ -83,11 +83,27 @@ public class TeamStatusInfo
      * Locally deleted, but modified in repository (conflict)
      */
     public final static int STATUS_CONFLICT_LDRM = 14;
+
+    /** The file was renamed **/
+    public final static int STATUS_RENAMED = 15;
     
     
     /* It has no status, only used for default constructor while waiting for cvs */
     public final static int STATUS_BLANK = 11;
+
+    /* File needs to be pushed to remote repository*/
+    public final static int STATUS_NEEDS_PUSH = 16;
+
+    /* File is up-to-date on the remote repository*/
+    public final static int REMOTE_STATUS_UPTODATE = STATUS_UPTODATE;
+
+    /* File has been modified on remote repository */
+    public final static int REMOTE_STATUS_MODIFIED = STATUS_NEEDSUPDATE;
     
+    /* File has been renamed */
+    public final static int REMOTE_STATUS_RENAMED = STATUS_RENAMED;
+    
+
     public final static String [] statusStrings = {
         "team.statusinfo.upToDate",
         "team.statusinfo.needsCheckout",
@@ -103,7 +119,49 @@ public class TeamStatusInfo
         "",
         "team.statusinfo.conflictAdd",
         "team.statusinfo.conflictLMRD",
-        "team.statusinfo.conflictLDRM"
+        "team.statusinfo.conflictLDRM",
+        "team.statusinfo.renamed",
+        "team.statusinfo.dcvs.needsPush"
+    };
+    
+    public final static String [] dcvsStatusStrings = {
+        "",
+        "",
+        "team.statusinfo.dcvs.local.deleted",
+        "",
+        "team.statusinfo.dcvs.local.modified",
+        "team.statusinfo.needsMerge",
+        "team.statusinfo.dcvs.local.new",    
+        "",
+        "team.statusinfo.unresolved",
+        "team.statusinfo.hasConflicts",
+        "team.statusinfo.weird",
+        "",
+        "team.statusinfo.conflictAdd",
+        "team.statusinfo.conflictLMRD",
+        "team.statusinfo.conflictLDRM",
+        "team.statusinfo.renamed",
+        ""
+    };
+    
+    public final static String[] dcvsRemoteStatusStrings = {
+        "",
+        "team.statusinfo.dcvs.remote.needs.pull",
+        "team.statusinfo.dcvs.remote.deleted",
+        "team.statusinfo.dcvs.remote.needs.pull",
+        "team.statusinfo.dcvs.remote.modified",
+        "team.statusinfo.needsMerge",
+        "team.statusinfo.dcvs.remote.new",
+        "team.statusinfo.dcvs.remote.needs.pull",
+        "team.statusinfo.unresolved",
+        "team.statusinfo.hasConflicts",
+        "team.statusinfo.weird",
+        "",
+        "team.statusinfo.conflictAdd",
+        "team.statusinfo.conflictLMRD",
+        "team.statusinfo.conflictLDRM",
+        "team.statusinfo.renamed",
+        "team.statusinfo.dcvs.needsPush"
     };
     
     /**
@@ -112,7 +170,7 @@ public class TeamStatusInfo
      */
     public TeamStatusInfo()
     {
-        this(new File(""), "", "", STATUS_BLANK);
+        this(new File(""), "", "", STATUS_BLANK, STATUS_BLANK);
     }
     
     public TeamStatusInfo(File file, String localVersion, String remoteVersion, int status)
@@ -121,6 +179,23 @@ public class TeamStatusInfo
         this.localVersion = localVersion;
         this.remoteVersion = remoteVersion;
         this.status = status;
+        this.remoteStatus = TeamStatusInfo.REMOTE_STATUS_UPTODATE; //no information about the remote status, therefore assume it is up-to-date: 
+                                                                   //this will be re-writen by getStatus command, if necessary.
+    }
+    
+    /**
+     * constructor used with DVCS.
+     * 
+     * @param file file in the local file system.
+     * @param localVersion file version in the local repository.
+     * @param remoteVersion file version in the remote server. 
+     * @param status file status in the local repository.
+     * @param remoteStatus file status in the remote server.
+     */
+        public TeamStatusInfo(File file, String localVersion, String remoteVersion, int status, int remoteStatus)
+    {
+        this(file, localVersion, remoteVersion, status);
+        this.remoteStatus = remoteStatus;
     }
     
     public File getFile()
@@ -144,6 +219,22 @@ public class TeamStatusInfo
         return status;
     }
     
+    public void setStatus(int s)
+    {
+        status = s;
+    }
+    
+    public int getRemoteStatus()
+    {
+        return remoteStatus;
+    }
+
+    public void setRemoteStatus(int s)
+    {
+        remoteStatus = s;
+    }
+    
+    @Override
     public String toString()
     {
         return getFile().getName();
@@ -154,6 +245,19 @@ public class TeamStatusInfo
         if(status == STATUS_BLANK)
             return "";
         return Config.getString(statusStrings[status]);
+    }
+    
+    public static String getDCVSStatusString(int status, boolean remote)
+    {
+        if (status == STATUS_BLANK) {
+            return "";
+        }
+        if (remote){
+            return Config.getString(dcvsRemoteStatusStrings[status]);
+        } else {
+            return Config.getString(dcvsStatusStrings[status]);
+        }
+        
     }
     
 }

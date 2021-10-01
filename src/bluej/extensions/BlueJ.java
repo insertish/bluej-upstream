@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2012,2013  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2012,2013,2014,2016  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -28,7 +28,7 @@ import bluej.extensions.painter.ExtensionClassTargetPainter;
 import bluej.extmgr.*;
 import bluej.pkgmgr.*;
 import bluej.pkgmgr.Package;
-import bluej.pkgmgr.graphPainter.ClassTargetPainter.Layer;
+import bluej.pkgmgr.Layer;
 import java.awt.*;
 import java.io.*;
 import java.util.*;
@@ -69,7 +69,6 @@ import javax.swing.*;
  * after its <code>terminate()</code> method has been called will result
  * in an (unchecked) <code>ExtensionUnloadedException</code> being thrown.
  *
- * @version    $Id: BlueJ.java 10528 2013-03-22 14:09:18Z davmac $
  */
 
 /*
@@ -79,6 +78,10 @@ import javax.swing.*;
 public final class BlueJ
 {
     public static final int SE_PROJECT = 0;
+    /**
+     * This is left here for compatibility with old extensions, but
+     * will never be used.
+     */
     public static final int ME_PROJECT = 1;
     
     private final ExtensionWrapper myWrapper;
@@ -141,7 +144,7 @@ public final class BlueJ
         if (directory == null)
             return null;
 
-        Project openProj = Project.openProject(directory.getAbsolutePath(), null);
+        Project openProj = Project.openProject(directory.getAbsolutePath());
         if (openProj == null)
             return null;
 
@@ -169,7 +172,7 @@ public final class BlueJ
      * Creates a new BlueJ project.
      *
      * @param  directory    where you want the project be placed, it must be writable.
-     * @param  projectType  the type of project, such as ME or SE.
+     * @param  projectType  the type of project, currently only SE_PROJECT is available.
      * @return              the newly created BProject if successful, null otherwise.
      */
     public BProject newProject(File directory, int projectType )
@@ -181,7 +184,7 @@ public final class BlueJ
         if (!pathString.endsWith(File.separator))
             pathString += File.separator;
             
-        if (!Project.createNewProject(pathString, projectType == ME_PROJECT))
+        if (!Project.createNewProject(pathString))
             return null;
             
         return openProject(directory);
@@ -266,7 +269,7 @@ public final class BlueJ
         if (!myWrapper.isValid())
             throw new ExtensionUnloadedException();
 
-        return PkgMgrFrame.getMostRecent();
+        return PkgMgrFrame.getMostRecent().getWindow();
     }
 
 
@@ -532,6 +535,10 @@ public final class BlueJ
             synchronized (applicationListeners) {
                 applicationListeners.add(listener);
             }
+
+            // Relay a previous given up message:
+            if (DataCollector.hasGivenUp())
+                listener.dataSubmissionFailed(new ApplicationEvent(ApplicationEvent.DATA_SUBMISSION_FAILED_EVENT));
         }
     }
 
@@ -745,8 +752,10 @@ public final class BlueJ
         
         for (int i = 0; i < listeners.length; i++) {
             ApplicationListener eventListener = listeners[i];
-            // Just this for the time being.
-            eventListener.blueJReady(event);
+            if (event.getEvent() == ApplicationEvent.APP_READY_EVENT)
+                eventListener.blueJReady(event);
+            else if (event.getEvent() == ApplicationEvent.DATA_SUBMISSION_FAILED_EVENT)
+                eventListener.dataSubmissionFailed(event);
         }
     }
 
@@ -761,7 +770,7 @@ public final class BlueJ
         PackageListener [] listeners;
         
         synchronized (packageListeners) {
-            listeners = (PackageListener []) packageListeners.toArray(new PackageListener[packageListeners.size()]);
+            listeners = packageListeners.toArray(new PackageListener[packageListeners.size()]);
         }
         
         int thisEvent = event.getEvent();

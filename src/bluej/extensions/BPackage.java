@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2010,2012  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2010,2012,2014,2016  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -21,17 +21,27 @@
  */
 package bluej.extensions;
 
-import bluej.compiler.*;
-import bluej.debugmgr.objectbench.*;
-import bluej.extensions.BDependency.Type;
-import bluej.pkgmgr.*;
-import bluej.pkgmgr.Package;
-import bluej.pkgmgr.dependency.Dependency;
-import bluej.pkgmgr.target.*;
-import java.awt.*;
-import java.io.*;
-import java.util.*;
+import java.awt.Frame;
+import java.io.File;
+import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
+
+import bluej.compiler.CompileReason;
+import bluej.compiler.CompileType;
+import threadchecker.OnThread;
+import bluej.compiler.JobQueue;
+import bluej.debugmgr.objectbench.ObjectBench;
+import bluej.debugmgr.objectbench.ObjectWrapper;
+import bluej.extensions.BDependency.Type;
+import bluej.pkgmgr.Package;
+import bluej.pkgmgr.PkgMgrFrame;
+import bluej.pkgmgr.Project;
+import bluej.pkgmgr.dependency.Dependency;
+import bluej.pkgmgr.target.ClassTarget;
+import bluej.pkgmgr.target.PackageTarget;
+import bluej.pkgmgr.target.Target;
+import threadchecker.Tag;
 
 
 /**
@@ -48,6 +58,7 @@ public class BPackage
     /**
      * Constructor for a BPackage.
      */
+    @OnThread(Tag.Any)
     BPackage (Identifier aPackageId)
     {
         packageId=aPackageId;
@@ -116,17 +127,30 @@ public class BPackage
      * @throws PackageNotFoundException if the package has been deleted by the user.
      * @throws MissingJavaFileException if the .java file for the new class does not exist.
      */
-    public BClass newClass ( String className )
+    public BClass newClass (String className)
+        throws ProjectNotOpenException, PackageNotFoundException, MissingJavaFileException
+    {
+        return newClass(className, SourceType.Java);
+    }
+    
+    /**
+     * Creates a new Class with the given name.
+     * The class name must not be a fully qualified name, and the .java file must already exist.
+     * @throws ProjectNotOpenException if the project this package is part of has been closed by the user.
+     * @throws PackageNotFoundException if the package has been deleted by the user.
+     * @throws MissingJavaFileException if the .java file for the new class does not exist.
+     */
+    public BClass newClass (String className, SourceType sourceType)
     throws ProjectNotOpenException, PackageNotFoundException, MissingJavaFileException
     {
         Package bluejPkg = packageId.getBluejPackage();
         PkgMgrFrame bluejFrame = packageId.getPackageFrame();
 
-        File classJavaFile = new File (bluejPkg.getPath(),className+".java");
+        File classJavaFile = new File (bluejPkg.getPath(), className + "." + sourceType.getExtension());
         if ( ! classJavaFile.canWrite() ) 
             throw new MissingJavaFileException (classJavaFile.toString());
 
-        bluejFrame.createNewClass(className,null,true);
+        bluejFrame.createNewClass(className,null,sourceType,true,-1,-1);
         return getBClass ( className );
     }
     
@@ -136,10 +160,11 @@ public class BPackage
      * @throws ProjectNotOpenException if the project this package is part of has been closed by the user.
      * @throws PackageNotFoundException if the package has been deleted by the user.
      */
+    @Deprecated
     public Frame getFrame() 
     throws ProjectNotOpenException, PackageNotFoundException
     {
-        return packageId.getPackageFrame();
+        return packageId.getPackageFrame().getWindow();
     }
     
     /**
@@ -263,7 +288,7 @@ public class BPackage
             throw new CompilationNotStartedException ("BlueJ is currently executing Java code");
 
         // Start compilation
-        bluejPkg.compile();
+        bluejPkg.compile(CompileReason.EXTENSION, CompileType.EXTENSION);
 
         // if requested wait for the compilation to finish.
         if ( waitCompileEnd ) JobQueue.getJobQueue().waitForEmptyQueue();
@@ -303,14 +328,14 @@ public class BPackage
         throws ProjectNotOpenException, PackageNotFoundException
     {
         Package bluejPkg = packageId.getBluejPackage();    
-        Target [] targets = bluejPkg.getSelectedTargets();
+        List<Target> targets = bluejPkg.getSelectedTargets();
         ArrayList<BClass> aList  = new ArrayList<BClass>();
         
-        for(int index=0; index<targets.length; index++) 
+        for (Target t : targets) 
         {
-            if ( !(targets[index] instanceof ClassTarget )) continue; 
+            if ( !(t instanceof ClassTarget )) continue; 
 
-            ClassTarget target = (ClassTarget)targets[index];
+            ClassTarget target = (ClassTarget)t;
             aList.add(target.getBClass());
         }
 
@@ -378,7 +403,7 @@ public class BPackage
             throws ProjectNotOpenException, PackageNotFoundException
     {
         Package bluejPackage = packageId.getBluejPackage();
-        Dependency dependency = bluejPackage.getDependency(from.getClassTarget(), to.getClassTarget(), type);
+        Dependency dependency = bluejPackage.getEditor().getDependency(from.getClassTarget(), to.getClassTarget(), type);
         
         return (dependency != null) ? dependency.getBDependency() : null;
     }
@@ -386,6 +411,7 @@ public class BPackage
     /**
      * Returns a string representation of the package object
      */
+    @Override
     public String toString () 
     {
         try 
@@ -397,5 +423,30 @@ public class BPackage
         {
             return "BPackage: INVALID";  
         }
+    }
+
+    /**
+     * Schedules a compilation of the package.
+     *
+     * @param immediate If true, compile now.  Otherwise, wait for the default time
+     *                  (currently 1 second) then perform a compilation.  Any other
+     *                  compilation requests from extensions or internally (e.g. due to code
+     *                  editing) will reset the timer to 1 second again, so the compilation
+     *                  will always occur 1 second after the call to the most recent scheduleCompilation
+     *                  call.  e.g. if you call this every 900ms, compilation will never occur.
+     * @throws ProjectNotOpenException if the project has been closed by the user
+     * @throws PackageNotFoundException if the package has been deleted
+     */
+    public void scheduleCompilation(boolean immediate) throws ProjectNotOpenException, PackageNotFoundException
+    {
+        Package bjPkg = packageId.getBluejPackage();
+        Project bjProject = bjPkg.getProject();
+        bjProject.scheduleCompilation(immediate, CompileReason.EXTENSION, CompileType.EXTENSION, bjPkg);
+    }
+
+    //package-visible
+    PkgMgrFrame getPkgMgrFrame() throws ProjectNotOpenException, PackageNotFoundException
+    {
+        return packageId.getPackageFrame();
     }
 }

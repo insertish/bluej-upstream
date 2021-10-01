@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2014  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2014,2016  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -22,14 +22,31 @@
 package bluej.utility;
 
 import java.awt.Component;
-import java.io.*;
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.lang.reflect.Array;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 
 import javax.swing.JFileChooser;
-import javax.swing.filechooser.FileFilter;
 
+import bluej.pkgmgr.Package;
+import javafx.stage.DirectoryChooser;
+import javafx.stage.FileChooser;
+import javafx.stage.FileChooser.ExtensionFilter;
+import javafx.stage.Window;
+
+import threadchecker.OnThread;
+import threadchecker.Tag;
 import bluej.Config;
+import bluej.extensions.SourceType;
 import bluej.prefmgr.PrefMgr;
 
 /**
@@ -38,6 +55,7 @@ import bluej.prefmgr.PrefMgr;
  * @author  Markus Ostman
  * @author  Michael Kolling
  */
+@OnThread(Tag.Swing)
 public class FileUtility
 {
     /** 
@@ -45,112 +63,174 @@ public class FileUtility
      * @author polle
      * @see FileUtility#getVistaWriteCapabilities(File)
      */
-    public enum WriteCapabilities {READ_ONLY, NORMAL_WRITE, VIRTUALIZED_WRITE, UNKNOWN};
+    public enum WriteCapabilities {READ_ONLY, NORMAL_WRITE, VIRTUALIZED_WRITE, UNKNOWN}
 
-    private static final String sourceSuffix = ".java";
-
-    private static JFileChooser pkgChooser = null;
     private static JFileChooser pkgChooserNonBlueJ = null;
-    private static JFileChooser fileChooser = null;
     private static PackageChooser directoryChooser = null;
-    private static JFileChooser multiFileChooser = null;
-    
-
-
-    public static File getPackageName(Component parent)
-    {
-        JFileChooser chooser = getPackageChooser();
-
-        if (chooser.showOpenDialog(parent) != JFileChooser.APPROVE_OPTION) {
-            return null;
-        }
-        PrefMgr.setProjectDirectory(
-                         chooser.getSelectedFile().getParentFile().getPath());
-        
-        return chooser.getSelectedFile();
-    }
-
-    public static File getNonBlueJDirectoryName(Component parent)
-    {
-        JFileChooser chooser = getNonBlueJPackageChooser();
-
-        if (chooser.showOpenDialog(parent) != JFileChooser.APPROVE_OPTION) {
-            return null;
-        }
-        return chooser.getSelectedFile();
-    }
 
     /**
-     *  Get file(s) from the user, using a file selection dialogue.
-     *  If cancelled or an invalid name was specified, return null.
-     *  @return a File array containing the selected files
+     * Gets a directory containing a project to open.
+     *
+     * First, the user is shown a directory chooser.  If this is a BlueJ/Greenfoot *package*,
+     * we navigate up the hierarchy to find the uppermost (parent-most?) directory with
+     * a package, i.e. the surrounding project.  (This effectively was done using the Swing chooser, because it was
+     * impossible to navigate into a project to choose a sub-package, and attempting
+     * to paste the path of a sub-package would navigate upwards to find the project.)  We
+     * don't want to let the user select sub-packages, anyway.
+     *
+     * If the user selects a directory which is not a BlueJ/Greenfoot package, we present
+     * a dialog telling them so, and invite them to choose again or cancel.  As an additional
+     * help, if any subdirectories of the chosen item are packages, we offer a handful of them
+     * as options in this dialog.
+     *
+     * @param parent The parent window for the file chooser and dialog
+     * @return A chosen File with a BlueJ/Greenfoot project, or null if the user cancelled.
      */
-    public static File[] getMultipleFiles(Component parent, String title,
-            String buttonLabel, FileFilter filter)
+    @OnThread(Tag.FXPlatform)
+    public static File getOpenProjectFX(Window parent)
     {
-        JFileChooser newMultiChooser = getMultipleFileChooser();
-
-        newMultiChooser.setDialogTitle(title);
-
-        if(filter == null)
-            filter = newMultiChooser.getAcceptAllFileFilter();
-        newMultiChooser.setFileFilter(filter);
-        
-        int result = newMultiChooser.showDialog(parent, buttonLabel);
-
-        if (result == JFileChooser.APPROVE_OPTION) {
-            
-            return newMultiChooser.getSelectedFiles();
-        }
-        else if (result == JFileChooser.CANCEL_OPTION)
+        File originalDir = getOpenDirFX(parent, Config.getString("pkgmgr.openPkg.title"), true);
+        // They cancelled; nothing more to do:
+        if (originalDir == null)
             return null;
-        else {
-            DialogManager.showError(parent, "error-no-name");
-            return null;
+
+        File dir = originalDir;
+        // Navigate up the parents if they are projects too
+        //   We don't need to check if we are currently a package.
+        //   If we aren't, it's good we go to the parent if it is.
+        //   If we are a package, we want to favour the parent.
+        while (dir != null && dir.getParentFile() != null && Package.isPackage(dir.getParentFile()))
+        {
+            dir = dir.getParentFile();
         }
-    }
-    
-    /**
-     *  Get a file name from the user, using a file selection dialogue.
-     *  If cancelled or an invalid name was specified, return null.
-     */
-    public static File getFile(Component parent, String title,
-                                   String buttonLabel, FileFilter filter,
-                                   boolean rememberDir)
-    {
-        JFileChooser newChooser = getFileChooser(false, filter);
-        
-        newChooser.setDialogTitle(title);
 
-        int result = newChooser.showDialog(parent, buttonLabel);
-
-        if (result == JFileChooser.APPROVE_OPTION) {
-            if (rememberDir) {
-                PrefMgr.setProjectDirectory(
-                      newChooser.getSelectedFile().getParentFile().getPath());
+        if (!Package.isPackage(dir))
+        {
+            // We are not a package.  See if any child directories are:
+            List<File> subDirs = null;
+            if (dir != null)
+            {
+                subDirs = Arrays.asList(dir.listFiles(f -> f.isDirectory() && Package.isPackage(f)));
             }
-            return newChooser.getSelectedFile();
+
+            NotAProjectDialog dlg = new NotAProjectDialog(parent, originalDir, subDirs);
+            dlg.showAndWait();
+            if (dlg.isCancel())
+                return null;
+            else if (dlg.isChooseAgain())
+                return getOpenProjectFX(parent);
+            else
+                return dlg.getSelectedDir();
         }
-        else if (result == JFileChooser.CANCEL_OPTION) {
-            return null;
-        }
-        else {
-            DialogManager.showError(parent, "error-no-name");
-            return null;
-        }
-    }
-    
-    public static String getFileName(Component parent, String title,
-            String buttonLabel, FileFilter filter,
-            boolean rememberDir)
-    {
-        File file = getFile(parent, title, buttonLabel, filter, rememberDir);
-        if (file == null)
-            return null;
         else
-            return file.getPath();
+        {
+            // We are a package; all is well:
+            return dir;
+        }
     }
-    
+
+    @OnThread(Tag.FXPlatform)
+    public static File getSaveProjectFX(Window parent, String title)
+    {
+        // JavaFX only has a directory-open dialog, so we use that:
+        File chosen = new ProjectLocationDialog(parent, title).showAndWait();
+
+        // If they cancelled, just stop:
+        if (chosen == null)
+            return null;
+
+        if (chosen != null && chosen.getParentFile() != null)
+        {
+            PrefMgr.setProjectDirectory(chosen.getParentFile().getPath());
+        }
+        return chosen;
+    }
+
+    @OnThread(Tag.FXPlatform)
+    public static List<File> getMultipleFilesFX(Window parent, String title, ExtensionFilter filter)
+    {
+        FileChooser chooser = new FileChooser();
+        chooser.setInitialDirectory(PrefMgr.getProjectDirectory());
+        if (filter != null)
+            chooser.getExtensionFilters().setAll(filter);
+        chooser.setTitle(title);
+        return chooser.showOpenMultipleDialog(parent);
+    }
+
+    @OnThread(Tag.FXPlatform)
+    public static List<File> getOpenFilesFX(Window parent, String title,
+                                            List<FileChooser.ExtensionFilter> filters,
+                                            boolean rememberDir)
+    {
+        FileChooser newChooser = new FileChooser();
+        newChooser.getExtensionFilters().setAll(filters);
+        newChooser.setTitle(title);
+        newChooser.setInitialDirectory(PrefMgr.getProjectDirectory());
+        
+        List<File> chosen = newChooser.showOpenMultipleDialog(parent);
+
+        if (chosen != null && chosen.size() > 0 && chosen.get(0).getParentFile() != null && rememberDir)
+        {
+            PrefMgr.setProjectDirectory(chosen.get(0).getParentFile().getPath());
+        }
+        return chosen;
+    }
+
+    @OnThread(Tag.FXPlatform)
+    public static File getSaveFileFX(Window parent, String title,
+                                            List<FileChooser.ExtensionFilter> filters,
+                                            boolean rememberDir)
+    {
+        FileChooser newChooser = new FileChooser();
+        if (filters != null)
+            newChooser.getExtensionFilters().setAll(filters);
+        newChooser.setTitle(title);
+        newChooser.setInitialDirectory(PrefMgr.getProjectDirectory());
+
+        File chosen = newChooser.showSaveDialog(parent);
+
+        if (chosen != null && chosen.getParentFile() != null &&  rememberDir)
+        {
+            PrefMgr.setProjectDirectory(chosen.getParentFile().getPath());
+        }
+        return chosen;
+    }
+
+    @OnThread(Tag.FXPlatform)
+    public static File getOpenArchiveFX(Window parent, String title, boolean rememberDir)
+    {
+        FileChooser chooser = new FileChooser();
+        chooser.getExtensionFilters().setAll(new ExtensionFilter("ZIP/JAR file", "*.zip", "*.jar"));
+        if (title != null)
+            chooser.setTitle(title);
+        chooser.setInitialDirectory(PrefMgr.getProjectDirectory());
+
+        File chosen = chooser.showOpenDialog(parent);
+
+        if (chosen != null && chosen.getParentFile() != null && rememberDir)
+        {
+            PrefMgr.setProjectDirectory(chosen.getParentFile().getPath());
+        }
+        return chosen;
+    }
+
+    @OnThread(Tag.FXPlatform)
+    public static File getOpenDirFX(Window parent, String title, boolean rememberDir)
+    {
+        DirectoryChooser newChooser = new DirectoryChooser();
+        newChooser.setTitle(title);
+        if (PrefMgr.getProjectDirectory() != null)
+            newChooser.setInitialDirectory(PrefMgr.getProjectDirectory());
+
+        File chosen = newChooser.showDialog(parent);
+
+        if (chosen != null && chosen.getParentFile() != null &&  rememberDir)
+        {
+            PrefMgr.setProjectDirectory(chosen.getParentFile().getPath());
+        }
+        return chosen;
+    }
+
     /**
      *  Get a directory name from the user, using a file selection dialogue.
      *  If cancelled or an invalid name was specified, return null.
@@ -213,74 +293,10 @@ public class FileUtility
         }
     }
 
-
-    public static FileFilter getJavaSourceFilter()
+    @OnThread(Tag.FX)
+    public static ExtensionFilter getJavaStrideSourceFilterFX()
     {
-        return new JavaSourceFilter();
-    }
-
-    /**
-     * Get a file chooser which can be used to select files or directories,
-     * and which knows about BlueJ packages.<p>
-     * 
-     * The caller should use setDialogTitle() to set an appropriate title
-     * for the returned chooser.
-     * 
-     * @param directoriesOnly  True to return a chooser which only allows
-     *                         selecting directories
-     * @param filter  The file filter to use, may be null to allow 'all files'
-     * 
-     * @return  A file chooser
-     */
-    private static JFileChooser getFileChooser(boolean directoriesOnly, FileFilter filter)
-    {
-        JFileChooser newChooser;
-        
-        if (directoriesOnly) {
-            newChooser = getDirectoryChooser();
-        }
-        else {
-            newChooser = getFileChooser();
-            newChooser.setFileSelectionMode(JFileChooser.FILES_AND_DIRECTORIES);
-        }
-
-        if(filter == null) {
-            filter = newChooser.getAcceptAllFileFilter();
-        }
-        newChooser.setFileFilter(filter);
-        
-        return newChooser;
-    }
-    
-    
-    /**
-     * Return a BlueJ package chooser, i.e. a file chooser which
-     * recognises BlueJ packages and treats them differently.
-     */
-    private static JFileChooser getPackageChooser()
-    {
-        if(pkgChooser == null) {
-            pkgChooser = new PackageChooserStrict(new File(PrefMgr.getProjectDirectory()));
-        }
-        pkgChooser.setDialogTitle(Config.getString("pkgmgr.openPkg.title"));
-        pkgChooser.setApproveButtonText(Config.getString("pkgmgr.openPkg.buttonLabel"));
-
-        return pkgChooser;
-    }
-
-    /**
-     * Return a BlueJ package chooser, i.e. a file chooser which
-     * recognises BlueJ packages and treats them differently.
-     */
-    private static JFileChooser getNonBlueJPackageChooser()
-    {
-        if(pkgChooserNonBlueJ == null)
-            pkgChooserNonBlueJ = new PackageChooser(new File(PrefMgr.getProjectDirectory()), true, true);
-
-        pkgChooserNonBlueJ.setDialogTitle(Config.getString("pkgmgr.openNonBlueJPkg.title"));
-        pkgChooserNonBlueJ.setApproveButtonText(Config.getString("pkgmgr.openNonBlueJPkg.buttonLabel"));
-
-        return pkgChooserNonBlueJ;
+        return new ExtensionFilter("Java/Stride source", "*." + SourceType.Java.getExtension(), "*." + SourceType.Stride.getExtension());
     }
 
     /**
@@ -289,66 +305,17 @@ public class FileUtility
     private static PackageChooser getDirectoryChooser()
     {
         if (directoryChooser == null) {
-            directoryChooser = new PackageChooser(new File(PrefMgr.getProjectDirectory()), false, false);
+            directoryChooser = new PackageChooser(PrefMgr.getProjectDirectory(), false, false);
         }
         
         return directoryChooser;
     }
 
     /**
-     * return a file chooser for choosing any file (default behaviour)
-     */
-    private static JFileChooser getFileChooser()
-    {
-        if(fileChooser == null) {
-            fileChooser = new BlueJFileChooser(PrefMgr.getProjectDirectory());
-        }
-
-        return fileChooser;
-    }
-
-    /**
-     * return a file chooser for choosing any directory (default behaviour)
-     * that is allows selection of multiple files
-     */
-    private static JFileChooser getMultipleFileChooser()
-    {
-        if(multiFileChooser == null) {
-            multiFileChooser = new BlueJFileChooser(PrefMgr.getProjectDirectory());
-            multiFileChooser.setMultiSelectionEnabled(true);
-        }
-
-        return multiFileChooser;
-    }
-    
-
-    private static class JavaSourceFilter extends FileFilter
-    {
-        /**
-         * This method only accepts files that are Java source files.
-         * Whether a file is a Java source file is determined by the fact that
-         * its filename ends with ".java".
-         */
-        public boolean accept(File pathname)
-        {
-            if (pathname.isDirectory() ||
-                pathname.getName().endsWith(sourceSuffix))
-                   return true;
-            else
-                return false;
-        }
-
-        public String getDescription()
-        {
-            return "Java Source";
-        }
-    }
-
-
-    /**
      * Copy file 'source' to file 'dest'. The source file must exist,
      * the destination file will be created. Returns true if successful.
      */
+    @OnThread(Tag.Any)
     public static void copyFile(String source, String dest)
         throws IOException
     {
@@ -363,6 +330,7 @@ public class FileUtility
      * Copy file 'srcFile' to file 'destFile'. The source file must exist,
      * the destination file will be created. Returns true if successful.
      */
+    @OnThread(Tag.Any)
     public static void copyFile(File srcFile, File destFile)
         throws IOException
     {
@@ -392,11 +360,13 @@ public class FileUtility
     /**
      * Copy stream 'in' to stream 'out'.
      */
+    @OnThread(Tag.Any)
     public static void copyStream(InputStream in, OutputStream out)
         throws IOException
     {
-        for(int c; (c = in.read()) != -1; )
-            out.write(c);
+        byte[] buffer = new byte[4096];
+        for(int c; (c = in.read(buffer)) != -1; )
+            out.write(buffer, 0, c);
     }
 
 
@@ -409,6 +379,7 @@ public class FileUtility
     public static final int DEST_EXISTS_NOT_DIR = 4;
     public static final int DEST_EXISTS_NON_EMPTY = 5;
 
+    @OnThread(Tag.Any)
     public static int copyDirectory(File srcFile, File destFile)
     {
         if(!srcFile.isDirectory())
@@ -526,10 +497,10 @@ public class FileUtility
             }
         }
 
-        if (failed.size() > 0)
-            return (File [])failed.toArray(new File[0]);
-        else
-            return null;
+        if (failed.size() > 0) {
+            return failed.toArray(new File[0]);
+        }
+        return null;
     }
 
 
@@ -599,6 +570,7 @@ public class FileUtility
      * @param directory   The directory that will be deleted.
      *
      */
+    @OnThread(Tag.Any)
     public static void deleteDir(File directory)
     {
         File[] fileList = directory.listFiles();
@@ -634,6 +606,7 @@ public class FileUtility
      * @param file    The file to get the relative path to
      * @return   The relative path between parent and file
      */
+    @OnThread(Tag.Any)
     public static String makeRelativePath(File parent, File file)
     {
         String filePath = file.getAbsolutePath();

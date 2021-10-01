@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2012  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2012,2014,2016  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -25,19 +25,41 @@ import java.awt.Dimension;
 import java.awt.Frame;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Set;
 
-import javax.swing.*;
+import javax.swing.Box;
+import javax.swing.BoxLayout;
+import javax.swing.JButton;
+import javax.swing.JComboBox;
+import javax.swing.JLabel;
+import javax.swing.JList;
+import javax.swing.JPanel;
+import javax.swing.JScrollPane;
 
+import javafx.application.Platform;
+
+import bluej.utility.javafx.SwingNodeDialog;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 import bluej.BlueJTheme;
 import bluej.Config;
 import bluej.collect.DataCollector;
-import bluej.groupwork.*;
+import bluej.groupwork.HistoryInfo;
+import bluej.groupwork.LogHistoryListener;
+import bluej.groupwork.Repository;
+import bluej.groupwork.TeamUtils;
+import bluej.groupwork.TeamworkCommand;
+import bluej.groupwork.TeamworkCommandResult;
 import bluej.pkgmgr.PkgMgrFrame;
 import bluej.pkgmgr.Project;
 import bluej.utility.DBox;
 import bluej.utility.DBoxLayout;
-import bluej.utility.EscapeDialog;
 import bluej.utility.SwingWorker;
 
 /**
@@ -46,7 +68,7 @@ import bluej.utility.SwingWorker;
  * 
  * @author Davin McCall
  */
-public class HistoryFrame extends EscapeDialog
+public class HistoryFrame extends SwingNodeDialog
 {
     Project project;
     ActivityIndicator activityBar;
@@ -68,7 +90,7 @@ public class HistoryFrame extends EscapeDialog
      */
     public HistoryFrame(PkgMgrFrame pmf)
     {
-        super((Frame) null, Config.getString("team.history.title"));
+        setTitle(Config.getString("team.history.title"));
         project = pmf.getProject();
         buildUI();
         pack();
@@ -101,14 +123,20 @@ public class HistoryFrame extends EscapeDialog
         contentPane.add(historyPane);
         
         // Find a suitable size for the history list
-        List<HistoryInfo> tempList = new ArrayList<HistoryInfo>(5);
-        HistoryInfo tempInfo = new HistoryInfo(new String[] {"somepath/abcdefg.java"}, "1.1", "2006/11/34 12:34:56", "abraham", "this is the expected comment length of comments");
+        List<HistoryInfo> tempList = new ArrayList<>(5);
+        HistoryInfo tempInfo;
+        if (project.getTeamSettingsController().isDVCS()){
+            tempInfo = new HistoryInfo(new String[] {"somepath/abcdefg.java"}, "", "2006/11/34 12:34:56", "John Smith J. Doe", "this is the expected comment length of comments");
+        } else {
+            tempInfo = new HistoryInfo(new String[] {"somepath/abcdefg.java"}, "1.1", "2006/11/34 12:34:56", "abraham", "this is the expected comment length of comments");
+        }
+        
         for (int i = 0; i < 8; i++) {
             tempList.add(tempInfo);
         }
         listModel.setListData(tempList);
         Dimension size = historyList.getPreferredSize();
-        listModel.setListData(Collections.<HistoryInfo>emptyList());
+        listModel.setListData(Collections.emptyList());
         historyList.setPreferredSize(size);
         
         contentPane.add(Box.createVerticalStrut(BlueJTheme.generalSpacingWidth));
@@ -157,6 +185,7 @@ public class HistoryFrame extends EscapeDialog
                 dispose();
             }
         });
+        Platform.runLater(() -> setCloseIsButton(closeButton));
         buttonBox.add(closeButton);
         buttonBox.setAlignmentX(0f);
         contentPane.add(buttonBox);
@@ -170,7 +199,14 @@ public class HistoryFrame extends EscapeDialog
         super.setVisible(vis);
         
         if (vis) {
-            Repository repository = project.getRepository();
+            Repository repository;
+            if (project.getTeamSettingsController().isDVCS()){
+                //don't connect to the remote repository if git.
+                repository = project.getTeamSettingsController().getRepository(false);
+            } else {
+                //we need to connect to the remote repository if svn.
+                repository = project.getRepository();
+            }
             
             if (repository != null) {
                 worker = new HistoryWorker(repository);
@@ -302,12 +338,14 @@ public class HistoryFrame extends EscapeDialog
             this.repository = repository;
         }
         
+        @OnThread(Tag.Unique)
         public Object construct()
         {
             response = command.getResult();
             return response;
         }
         
+        @OnThread(Tag.Any)
         public void logInfoAvailable(HistoryInfo hInfo)
         {
             responseList.add(hInfo);
@@ -319,8 +357,7 @@ public class HistoryFrame extends EscapeDialog
                 activityBar.setRunning(false);
                 command = null; // marks the command as finished
                 if (response.isError()) {
-                    TeamUtils.handleServerResponse(response, HistoryFrame.this);
-                    setVisible(false);
+                    HistoryFrame.this.dialogThenHide(() -> TeamUtils.handleServerResponseFX(response, HistoryFrame.this.asWindow()));
                 }
                 else {
                     

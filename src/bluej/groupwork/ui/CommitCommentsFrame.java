@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2014,2016  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -40,16 +40,17 @@ import java.util.Map;
 import java.util.Set;
 
 import javax.swing.BorderFactory;
-import javax.swing.DefaultListModel;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JLabel;
-import javax.swing.JList;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
 import javax.swing.JTextArea;
 
+import bluej.utility.javafx.SwingNodeDialog;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 import bluej.BlueJTheme;
 import bluej.Config;
 import bluej.groupwork.CommitFilter;
@@ -66,17 +67,18 @@ import bluej.pkgmgr.Project;
 import bluej.utility.DBox;
 import bluej.utility.DBoxLayout;
 import bluej.utility.DialogManager;
-import bluej.utility.EscapeDialog;
 import bluej.utility.SwingWorker;
 import bluej.utility.Utility;
+import javax.swing.DefaultListModel;
+import javax.swing.JList;
+import javafx.application.Platform;
 
 
 /**
  * A Swing based user interface to add commit comments.
  * @author Bruce Quig
- * @version $Id$
  */
-public class CommitCommentsFrame extends EscapeDialog
+public class CommitCommentsFrame extends SwingNodeDialog implements CommitAndPushInterface
 {
     private JList commitFiles;
     private JPanel topPanel;
@@ -132,7 +134,8 @@ public class CommitCommentsFrame extends EscapeDialog
                     String msg = DialogManager.getMessage("team-error-saving-project");
                     if (msg != null) {
                         msg = Utility.mergeStrings(msg, ioe.getLocalizedMessage());
-                        DialogManager.showErrorText(this, msg);
+                        String msgFinal = msg;
+                        Platform.runLater(() -> DialogManager.showErrorTextFX(asWindow(), msgFinal));
                     }
                 }
                 startProgress();
@@ -154,15 +157,7 @@ public class CommitCommentsFrame extends EscapeDialog
         commitListModel = new DefaultListModel();
         
         //setIconImage(BlueJTheme.getIconImage());
-        setLocation(Config.getLocation("bluej.commitdisplay"));
-
-        // save position when window is moved
-        addComponentListener(new ComponentAdapter() {
-                public void componentMoved(ComponentEvent event)
-                {
-                    Config.putLocation("bluej.commitdisplay", getLocation());
-                }
-            });
+        rememberPosition("bluej.commitdisplay");
 
         JSplitPane splitPane = new JSplitPane(JSplitPane.VERTICAL_SPLIT);
         splitPane.setBorder(BlueJTheme.generalBorderWithStatusBar);
@@ -184,7 +179,7 @@ public class CommitCommentsFrame extends EscapeDialog
             commitFiles.setCellRenderer(new FileRenderer(project));
             commitFiles.setEnabled(false);
             commitFileScrollPane.setViewportView(commitFiles);
-            
+
             topPanel.add(commitFileScrollPane, BorderLayout.CENTER);
         }
 
@@ -215,17 +210,20 @@ public class CommitCommentsFrame extends EscapeDialog
             commitAction = new CommitAction(this);
             commitButton = BlueJTheme.getOkButton();
             commitButton.setAction(commitAction);
-            getRootPane().setDefaultButton(commitButton);
-
+            setDefaultButton(commitButton);
+            
             JButton closeButton = BlueJTheme.getCancelButton();
-            closeButton.addActionListener(new ActionListener() {
-                    public void actionPerformed(ActionEvent e)
-                    {
-                        commitWorker.abort();
-                        commitAction.cancel();
-                        setVisible(false);
-                    }
-                });
+            closeButton.addActionListener(new ActionListener()
+            {
+                public void actionPerformed(ActionEvent e)
+                {
+                    commitWorker.abort();
+                    commitAction.cancel();
+                    setVisible(false);
+                }
+            });
+
+            Platform.runLater(() -> setCloseIsButton(closeButton));
            
             DBox buttonPanel = new DBox(DBoxLayout.X_AXIS, 0, BlueJTheme.commandButtonSpacing, 0.5f);
             buttonPanel.setBorder(BlueJTheme.generalBorder);
@@ -237,19 +235,19 @@ public class CommitCommentsFrame extends EscapeDialog
             includeLayout = new JCheckBox(Config.getString("team.commit.includelayout"));
             includeLayout.setEnabled(false);
             includeLayout.addActionListener(new ActionListener() {
-                public void actionPerformed(ActionEvent e)
-                {
-                    JCheckBox layoutCheck = (JCheckBox)e.getSource();
-                    if(layoutCheck.isSelected()) {
-                        addModifiedLayouts();
-                        if(!commitButton.isEnabled())
-                            commitAction.setEnabled(true);
+            public void actionPerformed(ActionEvent e)
+            {
+                JCheckBox layoutCheck = (JCheckBox)e.getSource();
+                if(layoutCheck.isSelected()) {
+                    addModifiedLayouts();
+                    if(!commitButton.isEnabled())
+                        commitAction.setEnabled(true);
                     }
-                    // unselected
-                    else {
-                        removeModifiedLayouts();
-                        if(isCommitListEmpty())
-                            commitAction.setEnabled(false);
+                // unselected
+                else {
+                    removeModifiedLayouts();
+                    if(isCommitListEmpty())
+                        commitAction.setEnabled(false);
                     }
                 }
             });
@@ -389,8 +387,8 @@ public class CommitCommentsFrame extends EscapeDialog
     {
         includeLayout.setEnabled(hasChanged);
     }
-
-    /**
+    
+        /**
     * Inner class to do the actual cvs status check to populate commit dialog
     * to ensure that the UI is not blocked during remote call
     */
@@ -408,52 +406,57 @@ public class CommitCommentsFrame extends EscapeDialog
             FileFilter filter = project.getTeamSettingsController().getFileFilter(true);
             command = repository.getStatus(this, filter, false);
         }
-        
+
         /*
          * @see bluej.groupwork.StatusListener#gotStatus(bluej.groupwork.TeamStatusInfo)
          */
+        @OnThread(Tag.Any)
+        @Override
         public void gotStatus(TeamStatusInfo info)
         {
             response.add(info);
         }
-        
+
         /*
          * @see bluej.groupwork.StatusListener#statusComplete(bluej.groupwork.CommitHandle)
          */
+        @OnThread(Tag.Any)
+        @Override
         public void statusComplete(StatusHandle statusHandle)
         {
             commitAction.setStatusHandle(statusHandle);
         }
-        
+
+        @OnThread(Tag.Unique)
+        @Override
         public Object construct()
         {
             result = command.getResult();
             return response;
         }
-        
+
         public void abort()
         {
             command.cancel();
             aborted = true;
         }
 
+        @Override
         public void finished()
         {
             stopProgress();
-            if (! aborted) {
+            if (!aborted) {
                 if (result.isError()) {
-                    TeamUtils.handleServerResponse(result, CommitCommentsFrame.this);
-                    setVisible(false);
-                }
-                else if (response != null) {
-                    Set<File> filesToCommit = new HashSet<File>();
-                    Set<File> filesToAdd = new LinkedHashSet<File>();
-                    Set<File> filesToDelete = new HashSet<File>();
-                    Set<File> mergeConflicts = new HashSet<File>();
-                    Set<File> deleteConflicts = new HashSet<File>();
-                    Set<File> otherConflicts = new HashSet<File>();
-                    Set<File> needsMerge = new HashSet<File>();
-                    Set<File> modifiedLayoutFiles = new HashSet<File>();
+                    CommitCommentsFrame.this.dialogThenHide(() -> TeamUtils.handleServerResponseFX(result, CommitCommentsFrame.this.asWindow()));
+                } else if (response != null) {
+                    Set<File> filesToCommit = new HashSet<>();
+                    Set<File> filesToAdd = new LinkedHashSet<>();
+                    Set<File> filesToDelete = new HashSet<>();
+                    Set<File> mergeConflicts = new HashSet<>();
+                    Set<File> deleteConflicts = new HashSet<>();
+                    Set<File> otherConflicts = new HashSet<>();
+                    Set<File> needsMerge = new HashSet<>();
+                    Set<File> modifiedLayoutFiles = new HashSet<>();
 
                     List<TeamStatusInfo> info = response;
                     getCommitFileSets(info, filesToCommit, filesToAdd, filesToDelete,
@@ -473,48 +476,42 @@ public class CommitCommentsFrame extends EscapeDialog
                     commitAction.setDeletedFiles(filesToDelete);
                 }
 
-                if(commitListModel.isEmpty()) {
+                if (commitListModel.isEmpty()) {
                     commitListModel.addElement(noFilesToCommit);
-                }
-                else {
+                } else {
                     commitText.setEnabled(true);
                     commitText.requestFocusInWindow();
                     commitAction.setEnabled(true);
                 }
             }
         }
-        
+
         private void handleConflicts(Set<File> mergeConflicts, Set<File> deleteConflicts,
                 Set<File> otherConflicts, Set<File> needsMerge)
         {
             String dlgLabel;
             String filesList;
-            
+
             // If there are merge conflicts, handle those first
-            if (! mergeConflicts.isEmpty()) {
+            if (!mergeConflicts.isEmpty()) {
                 dlgLabel = "team-resolve-merge-conflicts";
                 filesList = buildConflictsList(mergeConflicts);
-            }
-            else if (! deleteConflicts.isEmpty()) {
+            } else if (!deleteConflicts.isEmpty()) {
                 dlgLabel = "team-resolve-conflicts-delete";
                 filesList = buildConflictsList(deleteConflicts);
-            }
-            else if (! otherConflicts.isEmpty()) {
+            } else if (!otherConflicts.isEmpty()) {
                 dlgLabel = "team-update-first";
                 filesList = buildConflictsList(otherConflicts);
-            }
-            else {
+            } else {
                 stopProgress();
-                DialogManager.showMessage(CommitCommentsFrame.this, "team-uptodate-failed");
-                CommitCommentsFrame.this.setVisible(false);
+                CommitCommentsFrame.this.dialogThenHide(() -> DialogManager.showMessageFX(CommitCommentsFrame.this.asWindow(), "team-uptodate-failed"));
                 return;
             }
 
             stopProgress();
-            DialogManager.showMessageWithText(CommitCommentsFrame.this, dlgLabel, filesList);
-            CommitCommentsFrame.this.setVisible(false);
+            CommitCommentsFrame.this.dialogThenHide(() -> DialogManager.showMessageWithTextFX(CommitCommentsFrame.this.asWindow(), dlgLabel, filesList));
         }
-        
+
         /**
          * Buid a list of files, max out at 10 files.
          * @param conflicts
@@ -532,15 +529,15 @@ public class CommitCommentsFrame extends EscapeDialog
             if (i.hasNext()) {
                 filesList += "    " + Config.getString("team.commit.moreFiles");
             }
-            
+
             return filesList;
         }
-        
+
         /**
          * Go through the status list, and figure out which files to commit, and
          * of those which are to be added (i.e. which aren't in the repository) and
          * which are to be removed.
-         * 
+         *
          * @param info  The list of files with status (List of TeamStatusInfo)
          * @param filesToCommit  The set to store the files to commit in
          * @param filesToAdd     The set to store the files to be added in
@@ -553,29 +550,28 @@ public class CommitCommentsFrame extends EscapeDialog
          * @param needsMerge     The set of files which are updated locally as
          *                       well as in the repository (required merging).
          * @param conflicts      The set to store unresolved conflicts in
+         * 
          */
         private void getCommitFileSets(List<TeamStatusInfo> info, Set<File> filesToCommit, Set<File> filesToAdd,
                 Set<File> filesToRemove, Set<File> mergeConflicts, Set<File> deleteConflicts,
                 Set<File> otherConflicts, Set<File> needsMerge, Set<File> modifiedLayoutFiles)
         {
-            //boolean includeLayout = project.getTeamSettingsController().includeLayout();
-            
+
             CommitFilter filter = new CommitFilter();
-            Map<File,File> modifiedLayoutDirs = new HashMap<File,File>();
+            Map<File,File> modifiedLayoutDirs = new HashMap<>();
 
             for (Iterator<TeamStatusInfo> it = info.iterator(); it.hasNext();) {
                 TeamStatusInfo statusInfo = it.next();
                 File file = statusInfo.getFile();
                 boolean isPkgFile = BlueJPackageFile.isPackageFileName(file.getName());
                 int status = statusInfo.getStatus();
-                if(filter.accept(statusInfo)) {
-                    if (! isPkgFile) {
+                if (filter.accept(statusInfo,true)) {
+                    if (!isPkgFile) {
                         commitListModel.addElement(statusInfo);
                         filesToCommit.add(file);
-                    }
-                    else if (status == TeamStatusInfo.STATUS_NEEDSADD
-                                || status == TeamStatusInfo.STATUS_DELETED
-                                || status == TeamStatusInfo.STATUS_CONFLICT_LDRM) {
+                    } else if (status == TeamStatusInfo.STATUS_NEEDSADD
+                            || status == TeamStatusInfo.STATUS_DELETED
+                            || status == TeamStatusInfo.STATUS_CONFLICT_LDRM) {
                         // Package file which must be committed.
                         if (packagesToCommmit.add(statusInfo.getFile().getParentFile())) {
                             commitListModel.addElement(statusInfo);
@@ -586,51 +582,45 @@ public class CommitCommentsFrame extends EscapeDialog
                             }
                         }
                         filesToCommit.add(statusInfo.getFile());
-                    }
-                    else {
+                    } else {
                         // add file to list of files that may be added to commit
                         File parentFile = file.getParentFile();
-                        if (! packagesToCommmit.contains(parentFile)) {
+                        if (!packagesToCommmit.contains(parentFile)) {
                             modifiedLayoutFiles.add(file);
                             modifiedLayoutDirs.put(parentFile, file);
                             // keep track of StatusInfo objects representing changed diagrams
                             changedLayoutFiles.add(statusInfo);
-                        }
-                        else {
+                        } else {
                             // We must commit the file unconditionally
                             filesToCommit.add(file);
                         }
                     }
-                    
+
                     if (status == TeamStatusInfo.STATUS_NEEDSADD) {
                         filesToAdd.add(statusInfo.getFile());
-                    }
-                    else if (status == TeamStatusInfo.STATUS_DELETED
+                    } else if (status == TeamStatusInfo.STATUS_DELETED
                             || status == TeamStatusInfo.STATUS_CONFLICT_LDRM) {
                         filesToRemove.add(statusInfo.getFile());
                     }
-                }
-                else {
-                    if(! isPkgFile) {
-                        if (status == TeamStatusInfo.STATUS_HASCONFLICTS) {
-                            mergeConflicts.add(statusInfo.getFile());
-                        }
-                        if (status == TeamStatusInfo.STATUS_UNRESOLVED
-                                || status == TeamStatusInfo.STATUS_CONFLICT_ADD
-                                || status == TeamStatusInfo.STATUS_CONFLICT_LMRD) {
-                            deleteConflicts.add(statusInfo.getFile());
-                        }
-                        if (status == TeamStatusInfo.STATUS_CONFLICT_LDRM) {
-                            otherConflicts.add(statusInfo.getFile());
-                        }
-                        if (status == TeamStatusInfo.STATUS_NEEDSMERGE) {
-                            needsMerge.add(statusInfo.getFile());
-                        }
+                } else if (!isPkgFile) {
+                    if (status == TeamStatusInfo.STATUS_HASCONFLICTS) {
+                        mergeConflicts.add(statusInfo.getFile());
+                    }
+                    if (status == TeamStatusInfo.STATUS_UNRESOLVED
+                            || status == TeamStatusInfo.STATUS_CONFLICT_ADD
+                            || status == TeamStatusInfo.STATUS_CONFLICT_LMRD) {
+                        deleteConflicts.add(statusInfo.getFile());
+                    }
+                    if (status == TeamStatusInfo.STATUS_CONFLICT_LDRM) {
+                        otherConflicts.add(statusInfo.getFile());
+                    }
+                    if (status == TeamStatusInfo.STATUS_NEEDSMERGE) {
+                        needsMerge.add(statusInfo.getFile());
                     }
                 }
             }
-            
-            setLayoutChanged (! changedLayoutFiles.isEmpty());
+
+            setLayoutChanged(!changedLayoutFiles.isEmpty());
         }
     }
 }

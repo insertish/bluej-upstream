@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2011,2012,2014  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2011,2012,2014,2016  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -25,7 +25,8 @@ import java.awt.Color;
 import java.awt.EventQueue;
 import java.awt.GradientPaint;
 import java.awt.Paint;
-import java.awt.event.ActionEvent;
+import java.awt.SecondaryLoop;
+import java.awt.Toolkit;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
@@ -35,23 +36,35 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.nio.charset.Charset;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
 import java.util.ListIterator;
 import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
 
-import javax.swing.AbstractAction;
-import javax.swing.Action;
-import javax.swing.JMenuItem;
-import javax.swing.JPopupMenu;
+import javax.swing.SwingUtilities;
 
+import bluej.pkgmgr.target.DependentTarget.State;
+import javafx.application.Platform;
+import javafx.collections.ObservableList;
+import javafx.event.ActionEvent;
+import javafx.scene.control.MenuItem;
+import javafx.scene.control.SeparatorMenuItem;
+
+import bluej.compiler.CompileReason;
+import bluej.compiler.CompileType;
+import bluej.pkgmgr.Project;
+import bluej.utility.javafx.dialog.InputDialog;
 import org.junit.Test;
 
 import bluej.Config;
 import bluej.collect.DataCollector;
 import bluej.debugger.DebuggerObject;
 import bluej.debugmgr.objectbench.ObjectWrapper;
-import bluej.editor.Editor;
+import bluej.editor.TextEditor;
 import bluej.parser.SourceLocation;
 import bluej.parser.SourceSpan;
 import bluej.parser.UnitTestAnalyzer;
@@ -60,13 +73,14 @@ import bluej.pkgmgr.PkgMgrFrame;
 import bluej.pkgmgr.TestRunnerThread;
 import bluej.pkgmgr.target.ClassTarget;
 import bluej.pkgmgr.target.Target;
-import bluej.prefmgr.PrefMgr;
 import bluej.testmgr.TestDisplayFrame;
 import bluej.testmgr.record.ExistingFixtureInvokerRecord;
 import bluej.utility.Debug;
 import bluej.utility.DialogManager;
 import bluej.utility.JavaNames;
 import bluej.utility.JavaUtils;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 
 /**
  * A role object for Junit unit tests.
@@ -86,7 +100,7 @@ public class UnitTestClassRole extends ClassRole
     private static final String fixtureToBench = Config.getString("pkgmgr.test.popup.fixtureToBench");
     
     /** Whether this is a Junit 4 test class. If false, it's a Junit 3 test class. */
-    private boolean isJunit4;
+    private final boolean isJunit4;
     
     /**
      * Create the unit test class role.
@@ -97,6 +111,7 @@ public class UnitTestClassRole extends ClassRole
     }
 
     @Override
+    @OnThread(Tag.Any)
     public String getRoleName()
     {
         if (isJunit4) {
@@ -108,6 +123,7 @@ public class UnitTestClassRole extends ClassRole
     }
 
     @Override
+    @OnThread(Tag.Any)
     public String getStereotypeLabel()
     {
         return "unit test";
@@ -135,6 +151,7 @@ public class UnitTestClassRole extends ClassRole
     }
 
     @SuppressWarnings("unchecked")
+    @OnThread(Tag.Any)
     private boolean isJUnitTestMethod(Method m)
     {
         if (isJunit4) {
@@ -178,11 +195,12 @@ public class UnitTestClassRole extends ClassRole
      * @return the generated JPopupMenu
      */
     @Override
-    public boolean createRoleMenu(JPopupMenu menu, ClassTarget ct, Class<?> cl, int state)
+    @OnThread(Tag.FXPlatform)
+    public boolean createRoleMenu(ObservableList<MenuItem> menu, ClassTarget ct, Class<?> cl, State state)
     {
         boolean enableTestAll = false;
 
-        if (state == ClassTarget.S_NORMAL && cl != null && ! ct.isAbstract()) {
+        if (state == State.COMPILED && cl != null && ! ct.isAbstract()) {
             Method[] allMethods = cl.getMethods();
 
             for (int i=0; i < allMethods.length; i++) {
@@ -197,9 +215,16 @@ public class UnitTestClassRole extends ClassRole
 
         // add run all tests option
         addMenuItem(menu, new TestAction(testAll, ct.getPackage().getEditor(),ct), enableTestAll);
-        menu.addSeparator();
+        menu.add(new SeparatorMenuItem());
 
         return false;
+    }
+
+    @OnThread(Tag.FXPlatform)
+    private static void addMenuItem(ObservableList<MenuItem> menu, TargetAbstractAction testAction, boolean enableTestAll)
+    {
+        menu.add(testAction);
+        testAction.setDisable(!enableTestAll);
     }
 
     /**
@@ -209,7 +234,8 @@ public class UnitTestClassRole extends ClassRole
      * @param cl Class object associated with this class target
      */
     @Override
-    public boolean createClassConstructorMenu(JPopupMenu menu, ClassTarget ct, Class<?> cl)
+    @OnThread(Tag.FXPlatform)
+    public boolean createClassConstructorMenu(ObservableList<MenuItem> menu, ClassTarget ct, Class<?> cl)
     {
         boolean hasEntries = false;
 
@@ -230,35 +256,31 @@ public class UnitTestClassRole extends ClassRole
                 catch (ClassNotFoundException cnfe) {
                     rtype = m.getReturnType().getName();
                 }
-                Action testAction = new TestAction(rtype + " " + m.getName() + "()",
+                TargetAbstractAction testAction = new TestAction(rtype + " " + m.getName() + "()",
                         ct.getPackage().getEditor(), ct, m.getName());
                 
-                JMenuItem item = new JMenuItem();
-                item.setAction(testAction);
-                item.setFont(PrefMgr.getPopupMenuFont());
-                menu.add(item);
+                menu.add(testAction);
                 hasEntries = true;
             }
             if (!hasEntries) {
-                JMenuItem item = new JMenuItem(Config.getString("pkgmgr.test.popup.noTests"));
-                item.setFont(PrefMgr.getPopupMenuFont());
-                item.setEnabled(false);
+                MenuItem item = new MenuItem(Config.getString("pkgmgr.test.popup.noTests"));
+                item.setDisable(true);
                 menu.add(item);
             }
         }
         else {
-            JMenuItem item = new JMenuItem(Config.getString("pkgmgr.test.popup.abstract"));
-            item.setFont(PrefMgr.getPopupMenuFont());
-            item.setEnabled(false);
+            MenuItem item = new MenuItem(Config.getString("pkgmgr.test.popup.abstract"));
+            item.setDisable(true);
             menu.add(item);
         }
         return true;
     }
 
     @Override
-    public boolean createClassStaticMenu(JPopupMenu menu, ClassTarget ct, Class<?> cl)
+    @OnThread(Tag.FXPlatform)
+    public boolean createClassStaticMenu(ObservableList<MenuItem> menu, ClassTarget ct, boolean hasSource, Class<?> cl)
     {
-        boolean enable = !ct.getPackage().getProject().inTestMode() && ct.hasSourceCode() && ! ct.isAbstract();
+        boolean enable = !ct.getPackage().getProject().inTestMode() && hasSource && ! ct.isAbstract();
             
         addMenuItem(menu, new MakeTestCaseAction(createTest,
                                                     ct.getPackage().getEditor(), ct), enable);
@@ -271,11 +293,19 @@ public class UnitTestClassRole extends ClassRole
     }
 
     @Override
+    @OnThread(Tag.Any)
+    public boolean canConvertToStride()
+    {
+        return false; // annotations needed for JUnit are not supported
+    }
+
+    @Override
     public void run(final PkgMgrFrame pmf, final ClassTarget ct, final String param)
     {
         if (param != null) {
             // Only running a single test
-            TestDisplayFrame.getTestDisplay().startTest(pmf.getProject(), 1);
+            Project proj = pmf.getProject();
+            Platform.runLater(() -> TestDisplayFrame.getTestDisplay().startTest(proj, 1));
         }
         
         new TestRunnerThread(pmf, ct, param).start();
@@ -288,31 +318,21 @@ public class UnitTestClassRole extends ClassRole
      * @param pmf   The package manager frame
      * @param ct    The class target
      * @param trt   The test runner thread
+     * @return The list of test methods in the class, or null if we could not find out
      */
-    public void doRunTest(PkgMgrFrame pmf, ClassTarget ct, TestRunnerThread trt)
+    public List<String> startRunTest(PkgMgrFrame pmf, ClassTarget ct, TestRunnerThread trt)
     {
         Class<?> cl = pmf.getPackage().loadClass(ct.getQualifiedName());
         
         if (cl == null)
-            return;
+            return null;
         
-        // Test the whole class
-        Method[] allMethods = cl.getMethods();
-        
-        ArrayList<String> testMethods = new ArrayList<String>();
-        
-        int testCount = 0;
-        
-        for (int i=0; i < allMethods.length; i++) {
-            if (isJUnitTestMethod(allMethods[i])) {
-                testCount++;
-                testMethods.add(allMethods[i].getName());
-            }
-        }
-        
-        String [] testMethodsArr = (String []) testMethods.toArray(new String[testCount]);
-        trt.setMethods(testMethodsArr);
-        TestDisplayFrame.getTestDisplay().startTest(pmf.getProject(), testCount);
+        // Test the whole class:
+        List<String> testMethods = Arrays.stream(cl.getMethods()).filter(this::isJUnitTestMethod).map(Method::getName).collect(Collectors.toList());
+
+        Project proj = pmf.getProject();
+        Platform.runLater(() -> TestDisplayFrame.getTestDisplay().startTest(proj, testMethods.size()));
+        return testMethods;
     }
     
     /**
@@ -353,60 +373,64 @@ public class UnitTestClassRole extends ClassRole
      * @param pmf  the PkgMgrFrame this is all occurring in
      * @param ct   the ClassTarget of the unit test class
      */
+    @OnThread(Tag.FXPlatform)
     public void doMakeTestCase(final PkgMgrFrame pmf, final ClassTarget ct)
     {
         // prompt for a new test name
-        String newTestName = DialogManager.askString(pmf, "unittest-new-test-method");
-
-        if (newTestName == null) {
+        String newTestName = new TestNameDialog("unittest-new-test-method", "").showAndWait().orElse(null);
+        if (newTestName == null)
             return;
-        }
 
-        if (newTestName.length() == 0) {
-            pmf.setStatus(Config.getString("pkgmgr.test.noTestName"));
-            return;
-        }
-
-        // Junit 3 test methods must start with the word "test"
-        if(!isJunit4 && !newTestName.startsWith("test")) {
-            newTestName = "test" + Character.toTitleCase(newTestName.charAt(0)) + newTestName.substring(1);
-        }
-
-        // and they must be a valid Java identifier
-        if (!JavaNames.isIdentifier(newTestName)) {
-            pmf.setStatus(Config.getString("pkgmgr.test.invalidTestName"));
-            return;
-        }
-
-        // find out if the method already exists in the unit test src
-        try {
-            Charset charset = pmf.getProject().getProjectCharset();
-            UnitTestAnalyzer uta = analyzeUnitTest(ct, charset);
-
-            SourceSpan existingSpan = uta.getMethodBlockSpan(newTestName);
-
-            if (existingSpan != null) {
-                if (DialogManager.askQuestion(null, "unittest-method-present") == 1) {
-                    return;
+        SwingUtilities.invokeLater(() -> {
+            // find out if the method already exists in the unit test src
+            try {
+                Charset charset = pmf.getProject().getProjectCharset();
+                UnitTestAnalyzer uta = analyzeUnitTest(ct, charset);
+    
+                SourceSpan existingSpan = uta.getMethodBlockSpan(newTestName);
+    
+                if (existingSpan != null)
+                {
+                    Platform.runLater(() -> {
+                        if (DialogManager.askQuestionFX(pmf.getFXWindow(), "unittest-method-present") == 1)
+                        {
+                            // Don't do anything
+                        }
+                        else
+                        {
+                            SwingUtilities.invokeLater(() -> finishTestCase(pmf, ct, newTestName));
+                        }
+                    });
+                }
+                else
+                {
+                    finishTestCase(pmf, ct, newTestName);
                 }
             }
-        }
-        catch (IOException ioe) { 
-            DialogManager.showErrorWithText(null, "unittest-io-error", ioe.getLocalizedMessage());
-            Debug.reportError("Error reading unit test source", ioe);
-        }
+            catch (IOException ioe) { 
+                Platform.runLater(() -> {
+                    DialogManager.showErrorWithTextFX(pmf.getFXWindow(), "unittest-io-error", ioe.getLocalizedMessage());
+                    Debug.reportError("Error reading unit test source", ioe);
+                    SwingUtilities.invokeLater(() -> finishTestCase(pmf, ct, newTestName));
+                });
+            }
+        });
+    }
 
+    @OnThread(Tag.Swing)
+    private void finishTestCase(PkgMgrFrame pmf, ClassTarget ct, String newTestName)
+    {
         pmf.testRecordingStarted(Config.getString("pkgmgr.test.recording") + " "
                 + ct.getBaseName() + "." + newTestName + "()");
 
         pmf.getProject().removeClassLoader();
 
         runTestSetup(pmf, ct, false);
-        
+
         pmf.getObjectBench().resetRecordingInteractions();
         pmf.setTestInfo(newTestName, ct);
     }
-    
+
     /**
      * Analyze a unit test file.
      * @param ct  The classtarget representing the unit test class to analyze
@@ -466,7 +490,7 @@ public class UnitTestClassRole extends ClassRole
                             DebuggerObject objVal = mapent.getValue();
                             
                             if (! objVal.isNullObject()) {
-                                String actualName = pmf.putObjectOnBench(mapent.getKey(), objVal, objVal.getGenType(), null);
+                                String actualName = pmf.putObjectOnBench(mapent.getKey(), objVal, objVal.getGenType(), null, Optional.empty());
                                 recordObjects.add(new DataCollector.NamedTyped(actualName, objVal.getClassName()));
                             }
                         }
@@ -504,7 +528,7 @@ public class UnitTestClassRole extends ClassRole
      */
     public void doEndMakeTestCase(PkgMgrFrame pmf, ClassTarget ct, String name)
     {
-        Editor ed = ct.getEditor();
+        TextEditor ed = ct.getEditor().assumeText();
         String ts = getIndentString();
         try {
             Charset charset = pmf.getProject().getProjectCharset();
@@ -551,7 +575,7 @@ public class UnitTestClassRole extends ClassRole
      */
     public void doFixtureToBench(PkgMgrFrame pmf, ClassTarget ct)
     {
-        Editor ed = ct.getEditor();
+        TextEditor ed = ct.getEditor().assumeText();
 
         // our first step is to save all the existing code that creates the
         // fixture into a special invoker record
@@ -604,7 +628,7 @@ public class UnitTestClassRole extends ClassRole
             return;
         }
                 
-        Editor ed = ct.getEditor();
+        TextEditor ed = ct.getEditor().assumeText();
         try {
             Charset charset = pmf.getProject().getProjectCharset();
             UnitTestAnalyzer uta = analyzeUnitTest(ct, charset);
@@ -614,9 +638,17 @@ public class UnitTestClassRole extends ClassRole
             
             // if we already have fields, ask if we are sure we want to get rid of them
             if (variables != null && variables.size() > 0) {
-                if (DialogManager.askQuestion(null, "unittest-fixture-present") == 1) {
+                AtomicBoolean shouldContinue = new AtomicBoolean();
+                SecondaryLoop loop = Toolkit.getDefaultToolkit().getSystemEventQueue().createSecondaryLoop();
+                Platform.runLater(() -> {
+                    boolean cont = DialogManager.askQuestionFX(null, "unittest-fixture-present") != 1;
+                    shouldContinue.set(cont);
+                    loop.exit();
+                });
+                loop.enter();
+
+                if (!shouldContinue.get())
                     return;
-                }
             }
 
             // if we have fields, we need to nuke them
@@ -694,7 +726,7 @@ public class UnitTestClassRole extends ClassRole
                     "generic-file-save-error", ioe.getLocalizedMessage());
         }
         
-        pmf.getPackage().compileQuiet(ct);
+        pmf.getPackage().compileQuiet(ct, CompileReason.MODIFIED, CompileType.INTERNAL_COMPILE);
         
         pmf.getProject().removeClassLoader();
         pmf.getProject().newRemoteClassLoaderLeavingBreakpoints();
@@ -703,7 +735,8 @@ public class UnitTestClassRole extends ClassRole
     /**
      * A base class for all our actions that run on targets.
      */
-    private abstract class TargetAbstractAction extends AbstractAction
+    @OnThread(Tag.FXPlatform)
+    private abstract class TargetAbstractAction extends MenuItem
     {
         protected Target t;
         protected PackageEditor ped;
@@ -713,7 +746,11 @@ public class UnitTestClassRole extends ClassRole
             super(name);
             this.ped = ped;
             this.t = t;
+            setOnAction(e -> SwingUtilities.invokeLater(() -> actionPerformed(e)));
         }
+
+        @OnThread(Tag.Swing)
+        public abstract void actionPerformed(javafx.event.ActionEvent actionEvent);
     }
 
     /**
@@ -722,6 +759,7 @@ public class UnitTestClassRole extends ClassRole
      * test class is run; otherwise it refers to a test method that should be run
      * individually.
      */
+    @OnThread(Tag.FXPlatform)
     private class TestAction extends TargetAbstractAction
     {
         private String testName;
@@ -738,12 +776,15 @@ public class UnitTestClassRole extends ClassRole
             this.testName = testName;
         }
 
+        @Override
+        @OnThread(Tag.Swing)
         public void actionPerformed(ActionEvent e)
         {
             ped.raiseRunTargetEvent(t, testName);
         }
     }
 
+    @OnThread(Tag.FXPlatform)
     private class MakeTestCaseAction extends TargetAbstractAction
     {
         public MakeTestCaseAction(String name, PackageEditor ped, Target t)
@@ -751,12 +792,15 @@ public class UnitTestClassRole extends ClassRole
             super(name, ped, t);
         }
 
+        @Override
+        @OnThread(Tag.Swing)
         public void actionPerformed(ActionEvent e)
         {
             ped.raiseMakeTestCaseEvent(t);
         }
     }
 
+    @OnThread(Tag.FXPlatform)
     private class BenchToFixtureAction extends TargetAbstractAction
     {
         public BenchToFixtureAction(String name, PackageEditor ped, Target t)
@@ -764,12 +808,15 @@ public class UnitTestClassRole extends ClassRole
             super(name, ped, t);
         }
 
+        @Override
+        @OnThread(Tag.Swing)
         public void actionPerformed(ActionEvent e)
         {
             ped.raiseBenchToFixtureEvent(t);
         }
     }
 
+    @OnThread(Tag.FXPlatform)
     private class FixtureToBenchAction extends TargetAbstractAction
     {
         public FixtureToBenchAction(String name, PackageEditor ped, Target t)
@@ -777,10 +824,53 @@ public class UnitTestClassRole extends ClassRole
             super(name, ped, t);
         }
 
+        @Override
+        @OnThread(Tag.Swing)
         public void actionPerformed(ActionEvent e)
         {
             ped.raiseFixtureToBenchEvent(t);
         }
     }
 
+    @OnThread(Tag.FXPlatform)
+    private class TestNameDialog extends InputDialog<String>
+    {
+        public TestNameDialog(String dialogLabel, String prompt)
+        {
+            super(dialogLabel, prompt, "test-name-dialog");
+        }
+
+        @Override
+        protected String convert(String newTestName)
+        {
+            // Junit 3 test methods must start with the word "test"
+            if(!isJunit4 && !newTestName.startsWith("test"))
+            {
+                return "test" + Character.toTitleCase(newTestName.charAt(0)) + newTestName.substring(1);
+            }
+            else
+                return newTestName;
+        }
+
+        @Override
+        protected boolean validate(String oldInput, String newTestName)
+        {
+            if (newTestName.length() == 0) {
+                setErrorText(Config.getString("pkgmgr.test.noTestName"));
+                setOKEnabled(false);
+            }
+            // Must be a valid Java identifier:
+            else if (!JavaNames.isIdentifier(convert(newTestName)))
+            {
+                setErrorText(Config.getString("pkgmgr.test.invalidTestName"));
+                setOKEnabled(false);
+            }
+            else
+            {
+                setErrorText("");
+                setOKEnabled(true);
+            }
+            return true; //always allow
+        }
+    }
 }

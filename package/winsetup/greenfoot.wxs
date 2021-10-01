@@ -1,12 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Wix xmlns='http://schemas.microsoft.com/wix/2006/wi'>
 
-<!--  To change the version for a new release:
-        Change Version in the Product item here
-        Change Version in SOFTWAREVERSION property, below -->
-
-<Product Name='Greenfoot' Id='8c838b70-3a71-41e8-91a6-4adcf2e483d0' UpgradeCode='3ec7b829-9e53-4132-b2bf-fb7d4c08aebc'
-    Language='1033' Codepage='1252' Version='2.4.0' Manufacturer='Greenfoot Team'>
+<!-- This next line is matched by a regex in the build file, so it is important that it be kept as-is.
+     If you get a build failure here with a message about ${greenfoot-3.1.0} or similar not being a legal
+      guid value, then it is because you failed to make a new GUID for this version: see the
+      update-version-number task in ant for details on what to do. -->
+<Product Version='3.1.0' Id='205fc5eb-e05a-4044-a27f-dce3878dbda4'
+    Name='Greenfoot' UpgradeCode='3ec7b829-9e53-4132-b2bf-fb7d4c08aebc'
+    Language='1033' Codepage='1252' Manufacturer='Greenfoot Team'>
     
     <Package Id='*' Keywords='Installer' Description="Greenfoot Installer"
       Manufacturer='Greenfoot'
@@ -14,11 +15,15 @@
     
     <!-- Embeds all the files to install inside the MSI -->
     <Media Id='1' Cabinet='Greenfoot.cab' EmbedCab='yes' />
-    
+
+	<Property Id="REINSTALLMODE" Value="amus" />
+    <!-- Be fairly permissive, don't want to get in the way of the user: -->
+    <MajorUpgrade AllowDowngrades="yes" />
+
     <Property Id="ALLUSERS" Secure="yes" />
     
     <Property Id="SOFTWARE" Value="Greenfoot"/>
-    <Property Id="SOFTWAREVERSION" Value="2.4.0"/>
+    <Property Id="SOFTWAREVERSION" Value="3.1.0"/>
     <Property Id="SOFTWAREPROJECTEXT" Value="greenfoot"/>
     <Property Id="SOFTWAREARCHIVEEXT" Value="gfar"/>
     <!-- Define all the necessary GUIDs here, to make sure they are different from BlueJ -->

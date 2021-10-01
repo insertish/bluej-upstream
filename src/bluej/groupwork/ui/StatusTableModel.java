@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2016  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -36,13 +36,13 @@ import bluej.pkgmgr.Project;
  * 
  * 
  * @author Bruce Quig
- * @cvs $Id: StatusTableModel.java 6215 2009-03-30 13:28:25Z polle $
  */
 public class StatusTableModel extends AbstractTableModel
 {
-    static final String resourceLabel = Config.getString("team.status.resource");
-    static final String statusLabel = Config.getString("team.status.status");
-    static final String versionLabel = Config.getString("team.status.version");
+    final String resourceLabel = Config.getString("team.status.resource");
+    String statusLabel = Config.getString("team.status.status");
+    final String remoteStatusLabel = Config.getString("team.status.remoteStatus");
+    final String versionLabel = Config.getString("team.status.version");
  
     private Project project;
     private List<TeamStatusInfo> resources;
@@ -57,6 +57,11 @@ public class StatusTableModel extends AbstractTableModel
         for(int i = 0; i < initialRows; i++) {
             resources.add(new TeamStatusInfo());
         }
+        if (project.getTeamSettingsController().isDVCS()){
+            statusLabel = Config.getString("team.status.status");
+        } else {
+            statusLabel = Config.getString("team.status");
+        }
     }
     
     /**
@@ -67,12 +72,30 @@ public class StatusTableModel extends AbstractTableModel
      */
     public String getColumnName(int col)
     {
-        if (col == 0)
-            return resourceLabel;
-         else if (col == 1)
-            return versionLabel;
-        else if (col == 2)
-            return statusLabel;
+        if (project.getTeamSettingsController().isDVCS()) {
+            switch (col) {
+                case 0:
+                    return resourceLabel;
+                case 1:
+                    return statusLabel;
+                case 2:
+                    return remoteStatusLabel;
+                default:
+                    break;
+            }
+        } else {
+            switch (col) {
+                case 0:
+                    return resourceLabel;
+                case 1:
+                    return versionLabel;
+                case 2:
+                    return statusLabel;
+                default:
+                    break;
+            }
+        }
+        
 
         throw new IllegalArgumentException("bad column number in StatusTableModel::getColumnName()");
     }
@@ -107,13 +130,29 @@ public class StatusTableModel extends AbstractTableModel
     public Object getValueAt(int row, int col)
     {
         TeamStatusInfo info = (TeamStatusInfo) resources.get(row);
-        
-        if (col == 0)
-            return ResourceDescriptor.getResource(project, info, false);
-        else if (col == 1)
-            return info.getLocalVersion(); 
-        else if (col == 2)
-            return new Integer(info.getStatus());
+        if (project.getTeamSettingsController().isDVCS()) {
+            switch (col) {
+                case 0:
+                    return ResourceDescriptor.getResource(project, info, false);
+                case 1:
+                    return info.getStatus();
+                case 2:
+                    return info.getRemoteStatus();
+                default:
+                    break;
+            }
+        } else {
+            switch (col) {
+                case 0:
+                    return ResourceDescriptor.getResource(project, info, false);
+                case 1:
+                    return info.getLocalVersion();
+                case 2:
+                    return info.getStatus();
+                default:
+                    break;
+            }
+        }
 
         return null;
     }

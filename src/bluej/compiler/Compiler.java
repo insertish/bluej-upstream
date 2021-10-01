@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2010,2011,2012  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2010,2011,2012,2016  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -37,7 +37,6 @@ import java.util.List;
 abstract class Compiler
 {
     public static final String COMPILER_OPTIONS = "bluej.compiler.options";
-    public static final String JAVAME_COMPILER_OPTIONS = "bluej.javame.compiler.options";
     
     private File destDir;
     private File[] classPath;
@@ -126,6 +125,6 @@ abstract class Compiler
      * @return  true if the compilation was successful
      */
     public abstract boolean compile(File[] sources, CompileObserver observer,
-            boolean internal, List<String> options, Charset fileCharset);
+            boolean internal, List<String> options, Charset fileCharset, CompileType type);
 
 }

@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2016  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -22,6 +22,8 @@
 package bluej.pkgmgr.actions;
 
 import bluej.Config;
+import bluej.compiler.CompileReason;
+import bluej.compiler.CompileType;
 import bluej.pkgmgr.PkgMgrFrame;
 
 /**
@@ -29,19 +31,25 @@ import bluej.pkgmgr.PkgMgrFrame;
  * be compiled.
  * 
  * @author Davin McCall
- * @version $Id: CompileAction.java 6215 2009-03-30 13:28:25Z polle $
  */
 final public class CompileAction extends PkgMgrAction
 {
-    public CompileAction()
+    public CompileAction(PkgMgrFrame pmf)
     {
-        super("menu.tools.compile");
+        super(pmf, "menu.tools.compile");
         putValue(SHORT_DESCRIPTION, Config.getString("tooltip.compile"));
     }
     
     public void actionPerformed(PkgMgrFrame pmf)
     {
         pmf.menuCall();
-        pmf.getPackage().compile();
+        
+        if (! pmf.getPackage().isDebuggerIdle()) {
+            // The debugger is NOT idle, show a message about it.
+            pmf.getPackage().showMessage("compile-while-executing");
+        }
+        else {
+            pmf.getPackage().compile(CompileReason.USER, CompileType.EXPLICIT_USER_COMPILE);
+        }
     }
 }

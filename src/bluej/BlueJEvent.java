@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2014,2016  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -25,6 +25,9 @@ package bluej;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+
+import threadchecker.OnThread;
+import threadchecker.Tag;
 
 /**
   * Class to handle (throw and deliver) BlueJ events. Event are defined
@@ -75,6 +78,7 @@ public class BlueJEvent
     
     // other variables
 
+    @OnThread(Tag.Any)
     private static List<BlueJEventListener> listeners =
         Collections.synchronizedList(new ArrayList<BlueJEventListener>());
 
@@ -82,6 +86,7 @@ public class BlueJEvent
      * Raise a BlueJ event with an argument. All registered listeners
      * will be informed of this event.
      */
+    @OnThread(Tag.Swing)
     public static void raiseEvent(int eventId, Object arg)
     {
         Object[] listenersCopy = listeners.toArray();
@@ -95,6 +100,7 @@ public class BlueJEvent
      * Add a listener object. The object must implement the
      * BlueJEventListener interface.
      */
+    @OnThread(Tag.Any)
     public static void addListener(BlueJEventListener listener)
     {
         listeners.add(listener);
@@ -103,6 +109,7 @@ public class BlueJEvent
     /**
      * Remove a listener object from the known listener set.
      */
+    @OnThread(Tag.Any)
     public static void removeListener(BlueJEventListener listener)
     {
         listeners.remove(listener);

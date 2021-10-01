@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2011,2012  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2011,2012,2016  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -35,17 +35,15 @@ public interface CompileObserver
     /**
      * A compilation job has started.
      */
-    void startCompile(File[] sources);
+    void startCompile(CompileInputFile[] sources, CompileReason reason, CompileType type);
     
     /**
      * An error or warning message occurred during compilation
-     * 
-     * Returns whether or not the error was shown to the user (for data collection purposes)
      */
-    boolean compilerMessage(Diagnostic diagnostic);
+    void compilerMessage(Diagnostic diagnostic, CompileType type);
     
     /**
      * A Compilation job finished.
      */
-    void endCompile(File[] sources, boolean succesful);
+    void endCompile(CompileInputFile[] sources, boolean succesful, CompileType type);
 }

@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2014,2016  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -26,6 +26,8 @@ import java.awt.event.ActionEvent;
 import javax.swing.AbstractAction;
 import javax.swing.Icon;
 
+import threadchecker.OnThread;
+import threadchecker.Tag;
 import bluej.Config;
 import bluej.groupwork.TeamUtils;
 import bluej.groupwork.TeamworkCommandResult;
@@ -37,20 +39,19 @@ import bluej.pkgmgr.actions.PkgMgrAction;
  * An abstract class for team actions. 
  * 
  * @author fisker
- * @version $Id: TeamAction.java 6215 2009-03-30 13:28:25Z polle $
  */
 public abstract class TeamAction extends AbstractAction
 {
-    private PkgMgrFrame pkgMgrFrame;
+    private final PkgMgrFrame pkgMgrFrame;
 
     /**
      * Constructor for a team action.
      * 
      * @param name  The key for the action name (team.xxx.yyy)
      */
-    public TeamAction(String name)
+    public TeamAction(PkgMgrFrame pmf, String name)
     {
-        this(Config.getString(name), false);
+        this(pmf, Config.getString(name), false);
     }
     
     /**
@@ -60,35 +61,25 @@ public abstract class TeamAction extends AbstractAction
      * @param name   The key for action text
      * @param showsDialog  True if an ellipsis should be appended
      */
-    public TeamAction(String name, boolean showsDialog)
+    public TeamAction(PkgMgrFrame pmf, String name, boolean showsDialog)
     {
         super(showsDialog ? Config.getString(name) + "..." : Config.getString(name));
+        this.pkgMgrFrame = pmf;
         if (!Config.isMacOS()){
-        	// Mnemonic keys are against the apple gui guidelines.
-        	putValue(MNEMONIC_KEY, new Integer(Config.getMnemonicKey(name)));
+            // Mnemonic keys are against the apple gui guidelines.
+            putValue(MNEMONIC_KEY, new Integer(Config.getMnemonicKey(name)));
         }
         if (Config.hasAcceleratorKey(name)){
             putValue(ACCELERATOR_KEY, Config.getAcceleratorKey(name));
         }
     }
 
-    /**
-     * Constructor for a team action
-     * 
-     * @param name  The key for the action name
-     * @param icon  The icon for the action
-     */
-    public TeamAction(String name, Icon icon)
-    {
-        super(name, icon);
-    }
-
     /* (non-Javadoc)
      * @see java.awt.event.ActionListener#actionPerformed(java.awt.event.ActionEvent)
      */
+    @OnThread(Tag.Swing)
     public void actionPerformed(ActionEvent e)
     {
-        pkgMgrFrame = PkgMgrAction.frameFromEvent(e);
         actionPerformed(pkgMgrFrame);
     }
     
@@ -97,6 +88,7 @@ public abstract class TeamAction extends AbstractAction
      * 
      * @param pmf The PkgMgrFrame in which the action occurred.
      */
+    @OnThread(Tag.Swing)
     public abstract void actionPerformed(PkgMgrFrame pmf);
     
     /**
@@ -105,9 +97,10 @@ public abstract class TeamAction extends AbstractAction
      * 
      * @param basicServerResponse  The response to handle
      */
+    @OnThread(Tag.FXPlatform)
     protected void handleServerResponse(TeamworkCommandResult result)
     {
-        TeamUtils.handleServerResponse(result, pkgMgrFrame);
+        TeamUtils.handleServerResponseFX(result, pkgMgrFrame.getFXWindow());
     }
 
     /**
@@ -134,5 +127,17 @@ public abstract class TeamAction extends AbstractAction
     protected void clearStatus()
     {
         pkgMgrFrame.clearStatus();
+    }
+    
+    /**
+     * changes the name of the action.
+     * @param name 
+     */
+    @OnThread(Tag.Swing)
+    public void setName(String name)
+    {
+        if (name != null){
+            putValue("Name", name);
+        }
     }
 }

@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2010  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2015,2016  Michael Kolling and John Rosenberg 
 
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -47,13 +47,20 @@ import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
 import javax.swing.KeyStroke;
 import javax.swing.ListSelectionModel;
+import javax.swing.SwingUtilities;
 import javax.swing.event.ListSelectionEvent;
 import javax.swing.event.ListSelectionListener;
+
+import javafx.application.Platform;
+import javafx.stage.Window;
 
 import bluej.Config;
 import bluej.prefmgr.PrefPanelListener;
 import bluej.utility.Debug;
 import bluej.utility.DialogManager;
+import bluej.utility.javafx.FXPlatformSupplier;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 
 /**
  * KeyBindingsPanel panel for the key bindings in preferences
@@ -71,9 +78,10 @@ public class KeyBindingsPanel extends JPanel implements ActionListener, ListSele
     static final String keyLabel = Config.getString("editor.functions.keys");
     static final String addKeyLabel = Config.getString("editor.functions.addkey");
     static final String delKeyLabel = Config.getString("editor.functions.delkey");
-
+    
     // -------- INSTANCE VARIABLES --------
 
+    private final FXPlatformSupplier<Window> parent;
     private FocusManager focusMgr;
     private JButton defaultsButton;
     private JButton addKeyButton;
@@ -211,14 +219,17 @@ public class KeyBindingsPanel extends JPanel implements ActionListener, ListSele
         return mainPanel;
     }
 
+    @OnThread(Tag.FXPlatform)
     public void beginEditing() {
        
     }
 
+    @OnThread(Tag.FXPlatform)
     public void commitEditing() {
-       handleClose();
+       SwingUtilities.invokeLater(() -> handleClose());
     }
 
+    @OnThread(Tag.FXPlatform)
     public void revertEditing() {
         
     }
@@ -229,11 +240,11 @@ public class KeyBindingsPanel extends JPanel implements ActionListener, ListSele
      * @param categories
      * @param categoryIndex
      */
-    public void setActionValues(Action[] actiontable, 
-            String[] categories, int[] categoryIndex){
-        this.categories=categories;
+    public void setActionValues(Action[] actiontable, String[] categories, int[] categoryIndex)
+    {
+        this.categories = categories;
         functions = actiontable;
-        this.categoryIndex=categoryIndex;
+        this.categoryIndex = categoryIndex;
     }
 
     /**
@@ -254,8 +265,7 @@ public class KeyBindingsPanel extends JPanel implements ActionListener, ListSele
 
     class KeyCatcher extends FocusManager {
 
-        public void processKeyEvent(Component focusedComponent,
-                KeyEvent e) 
+        public void processKeyEvent(Component focusedComponent, KeyEvent e) 
         { 
             if(e.getID() != KeyEvent.KEY_PRESSED)
                 return;
@@ -323,11 +333,16 @@ public class KeyBindingsPanel extends JPanel implements ActionListener, ListSele
      */
     private void handleDefaults()
     {
-        int answer = DialogManager.askQuestion(this, "default-keys");
-        if(answer == 0) {
-            actions.setDefaultKeyBindings();
-            handleFuncListSelect();
-        }
+        Platform.runLater(() -> {
+            int answer = DialogManager.askQuestionFX(parent.get(), "default-keys");
+            if (answer == 0)
+            {
+                SwingUtilities.invokeLater(() -> {
+                    actions.setDefaultKeyBindings();
+                    handleFuncListSelect();
+                });
+            }
+        });
     }
 
     /**
@@ -366,7 +381,7 @@ public class KeyBindingsPanel extends JPanel implements ActionListener, ListSele
     {
         removeKeyListener();
         if(!actions.save())
-            DialogManager.showError(this, "cannot-save-keys");
+            Platform.runLater(() -> DialogManager.showErrorFX(parent.get(), "cannot-save-keys"));
         setVisible(false);
     }
     /**
@@ -466,9 +481,10 @@ public class KeyBindingsPanel extends JPanel implements ActionListener, ListSele
     }
 
 
-    public KeyBindingsPanel() {
+    public KeyBindingsPanel(FXPlatformSupplier<Window> parent) {
         super();
-        actions = MoeActions.getActions(new JEditorPane());
+        this.parent = parent;
+        actions = MoeActions.getActions(null, new JEditorPane());
         setActionValues(actions.getActionTable(), actions.getCategories(), actions.getCategoryIndex());
     }
 

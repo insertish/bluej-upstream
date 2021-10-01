@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2011,2012,2013,2014,2015  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2011,2012,2013,2014,2015,2016,2017  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -30,6 +30,8 @@ import java.awt.Rectangle;
 import java.awt.Toolkit;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
+import java.io.BufferedInputStream;
+import java.io.DataInputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
@@ -37,7 +39,9 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStreamWriter;
 import java.io.PrintStream;
+import java.net.MalformedURLException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
@@ -45,11 +49,22 @@ import java.util.MissingResourceException;
 import java.util.Properties;
 import java.util.Scanner;
 
+import javafx.collections.ObservableList;
+import javafx.scene.Parent;
+import javafx.scene.Scene;
+import javafx.scene.control.DialogPane;
+import javafx.scene.input.KeyCharacterCombination;
+import javafx.scene.input.KeyCode;
+import javafx.scene.input.KeyCodeCombination;
+import javafx.scene.input.KeyCombination;
+import javafx.stage.Stage;
+import javafx.stage.Window;
+
 import javax.swing.ImageIcon;
 import javax.swing.KeyStroke;
 import javax.swing.UIManager;
-import javax.swing.UnsupportedLookAndFeelException;
 import javax.swing.UIManager.LookAndFeelInfo;
+import javax.swing.UnsupportedLookAndFeelException;
 import javax.swing.border.BevelBorder;
 import javax.swing.border.Border;
 import javax.swing.border.CompoundBorder;
@@ -57,8 +72,15 @@ import javax.swing.border.EmptyBorder;
 import javax.swing.border.LineBorder;
 import javax.swing.plaf.metal.MetalLookAndFeel;
 
+import bluej.stride.generic.InteractionManager;
+import bluej.utility.javafx.JavaFXUtil;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 import bluej.utility.Debug;
 import bluej.utility.Utility;
+import java.awt.GraphicsDevice;
+import java.awt.GraphicsEnvironment;
+import java.lang.reflect.Field;
 
 /**
  * Class to handle application configuration for BlueJ.
@@ -85,94 +107,65 @@ import bluej.utility.Utility;
 public final class Config
 {
     public static final String nl = System.getProperty("line.separator");
-
-    public static Properties moeSystemProps;  // moe (editor) properties
-    public static Properties moeUserProps;    // moe (editor) properties
-
-    public static String compilertype = "javac";  // current compiler (javac, jikes)
-    public static String language;      // message language (english, ...)
-
-    public static Rectangle screenBounds; // maximum dimensions of screen
-
     public static final String osname = System.getProperty("os.name", "");
     public static final String DEFAULT_LANGUAGE = "english";
     public static final String BLUEJ_OPENPACKAGE = "bluej.openPackage";
     public static final String bluejDebugLogName = "bluej-debuglog.txt";
     public static final String greenfootDebugLogName = "greenfoot-debuglog.txt";
-    public static String debugLogName = bluejDebugLogName;
-    
-    private static Boolean isRaspberryPi = null;
-
     public static final Color ENV_COLOUR = new Color(152,32,32);
-
-
-    // a border for components with keyboard focus
-    public static final Border focusBorder = new CompoundBorder(new LineBorder(Color.BLACK),
-            new BevelBorder(BevelBorder.LOWERED,
-                    new Color(195, 195, 195),
-                    new Color(240, 240, 240),
-                    new Color(195, 195, 195),
-                    new Color(124, 124, 124)));
-
-    // a border for components without keyboard focus
-    public static final Border normalBorder = new CompoundBorder(new EmptyBorder(1,1,1,1),
-            new BevelBorder(BevelBorder.LOWERED,
-                    new Color(195, 195, 195),
-                    new Color(240, 240, 240),
-                    new Color(124, 124, 124),
-                    new Color(195, 195, 195)));
+    private static final int SHORTCUT_MASK =
+        Toolkit.getDefaultToolkit().getMenuShortcutKeyMask();
+    // Bit ugly having it here, but it's needed by MiscPrefPanel (which may just be in BlueJ)
+    // and by Greenfoot
+    public static final KeyStroke GREENFOOT_SET_PLAYER_NAME_SHORTCUT =
+        KeyStroke.getKeyStroke(KeyEvent.VK_P, SHORTCUT_MASK | InputEvent.SHIFT_DOWN_MASK);
+    /** name of the icons file for the VM on Mac */
+    private static final String BLUEJ_DEBUG_DOCK_ICON = "vm.icns";
+    private static final String GREENFOOT_DEBUG_DOCK_ICON = "greenfootvm.icns";
+    /** name of the VM in the dock on Mac */
+    private static final String BLUEJ_DEBUG_DOCK_NAME = "BlueJ Virtual Machine";
+    private static final String GREENFOOT_DEBUG_DOCK_NAME = "Greenfoot";
+    public static Properties moeSystemProps;  // moe (editor) properties
+    public static Properties moeUserProps;    // moe (editor) properties
 
 
     // bluej configuration properties hierarchy
     // (command overrides user which overrides system)
-    
+    public static String language;      // message language (english, ...)
+    public static Rectangle screenBounds; // maximum dimensions of screen
+    public static String debugLogName = bluejDebugLogName;
+    public static List<String> fontOptions = new ArrayList<>();
+    private static Boolean isRaspberryPi = null;
+    // a border for components with keyboard focus
+    private static Border focusBorder;
+    // a border for components without keyboard focus
+    private static Border normalBorder;
     private static Properties systemProps;      // bluej.defs
     private static Properties userProps;        // <user home>/bluej.properties
     private static Properties greenfootProps;   // greenfoot.defs
     private static Properties commandProps;     // specified on the command line
-
     private static Properties initialCommandLineProps; // The properties
                                                        // specified on the
                                                        // command line
     private static Properties langProps;        // international labels
     private static Properties langVarProps;     // language label variables (APPNAME)
-
     private static BlueJPropStringSource propSource; // source for properties
-
     private static File bluejLibDir;
     private static File userPrefDir;
     /** The greenfoot subdirectory of the "lib"-directory*/ 
     private static File greenfootLibDir;
-    
     private static boolean usingMacOSScreenMenubar;
-
     private static boolean initialised = false;
     private static boolean isGreenfoot = false;
-    
-    /** name of the icons file for the VM on Mac */
-    private static final String BLUEJ_DEBUG_DOCK_ICON = "vm.icns";
-    private static final String GREENFOOT_DEBUG_DOCK_ICON = "greenfootvm.icns";
-    
-    /** name of the VM in the dock on Mac */
-    private static final String BLUEJ_DEBUG_DOCK_NAME = "BlueJ Virtual Machine";
-    private static final String GREENFOOT_DEBUG_DOCK_NAME = "Greenfoot";
-    
-    protected static final int SHORTCUT_MASK =
-        Toolkit.getDefaultToolkit().getMenuShortcutKeyMask();
-    
-    // Bit ugly having it here, but it's needed by MiscPrefPanel (which may just be in BlueJ)
-    // and by Greenfoot
-    public static final KeyStroke GREENFOOT_SET_PLAYER_NAME_SHORTCUT =
-        KeyStroke.getKeyStroke(KeyEvent.VK_P, SHORTCUT_MASK | InputEvent.SHIFT_DOWN_MASK);
-    
     private static Color selectionColour;
     private static Color selectionColour2;
     private static Color highlightColour;
     private static Color highlightColour2;
-    private static List<String> debugVMArgs = new ArrayList<String>();
-    
+    private static List<String> debugVMArgs = new ArrayList<>();
     /** whether this is the debug vm or not. */
     private static boolean isDebugVm = true; // Default to true, will be corrected on main VM
+    public static final String EDITOR_COUNT_JAVA = "session.numeditors.java";
+    public static final String EDITOR_COUNT_STRIDE = "session.numeditors.stride";
 
     /**
      * Initialisation of BlueJ configuration. Must be called at startup.
@@ -264,7 +257,7 @@ public final class Config
         // The value of the BlueJ property overrides the system setting
         System.setProperty("apple.laf.useScreenMenuBar", macOSscreenMenuBar);      
 
-        usingMacOSScreenMenubar = (isMacOS() && macOSscreenMenuBar.equals("true"));
+        usingMacOSScreenMenubar = isMacOS() && macOSscreenMenuBar.equals("true");
         
         boolean themed = Config.getPropBoolean("bluej.useTheme");
         if(themed) {    
@@ -282,7 +275,7 @@ public final class Config
         // put it in command_props so it won't be saved to a file
         commandProps.setProperty("bluej.version", Boot.BLUEJ_VERSION);
     }
-    
+
     /**
      * Determine the configured language, or detect the language from the locale.
      * Fall back to the DEFAULT_LANGUAGE if language cannot be determined.
@@ -333,7 +326,7 @@ public final class Config
         
         langProps = loadLanguageLabels(language);
     }
-
+    
     /**
      * Initialise the user home (try and create directories if necessary).
      * <p>
@@ -382,7 +375,7 @@ public final class Config
             userPrefDir = new File(userHome, prefDirName);
         }
     }
-    
+
     /**
      * Alternative to "initialise", to be used in the debugee-VM by
      * applications which require it (ie. greenfoot).
@@ -413,7 +406,7 @@ public final class Config
         };
         userProps = new Properties(systemProps) {
             @Override
-            public Object setProperty(String key, String val)
+            public synchronized Object setProperty(String key, String val)
             {
                 String rval = getProperty(key);
                 Config.propSource.setUserProperty(key, val);
@@ -434,7 +427,7 @@ public final class Config
         };
         initialise(bluejLibDir, tempCommandLineProps, bootingGreenfoot, false);
     }
-
+    
     /**
      * Get the properties that were given on the command line and used 
      * to initialise bluej.Config.
@@ -545,13 +538,39 @@ public final class Config
         return Config.isRaspberryPi;
     }
 
+    private static boolean osVersionNumberAtLeast(int... target)
+    {
+        return versionAtLeast(System.getProperty("os.version"), target);
+    }
+
+    private static boolean javaVersionNumberAtLeast(int... target)
+    {
+        return versionAtLeast(System.getProperty("java.specification.version"), target);
+    }
+
+    private static boolean versionAtLeast(String version, int[] target)
+    {
+        String[] versionChunks = version.split("\\.");
+        for (int i = 0; i < target.length; i++)
+        {
+            if (versionChunks.length <= i)
+                return false; // Play safe
+            if (target[i] < Integer.parseInt(versionChunks[i]))
+                return true;
+            if (target[i] > Integer.parseInt(versionChunks[i]))
+                return false;
+        }
+        // Must be equal
+        return true;
+    }
+
     /**
      * Tell us whether we are running on MacOS 10.5 (Leopard) or later
      */
     public static boolean isMacOSLeopard()
     {
         return osname.startsWith("Mac") &&
-                System.getProperty("os.version").compareTo("10.5") >= 0;
+                osVersionNumberAtLeast(10, 5);
     }
     
     /**
@@ -560,7 +579,7 @@ public final class Config
     public static boolean isMacOSSnowLeopard()
     {
         return osname.startsWith("Mac") &&
-                System.getProperty("os.version").compareTo("10.6") >= 0;
+            osVersionNumberAtLeast(10, 6);
     }
     
     /**
@@ -577,7 +596,7 @@ public final class Config
     public static boolean isModernWinOS()
     {
         return isWinOS()
-                && System.getProperty("os.version").compareTo("6.0") >= 0;
+                && osVersionNumberAtLeast(6, 0);
     }
     
     /**
@@ -595,29 +614,13 @@ public final class Config
     {
         return osname.startsWith("Solaris");
     }
-    
-    /**
-     * Tell us whether we are running on a Java VM that supports 1.5 features.
-     */
-    public static boolean isJava15()
-    {
-        return System.getProperty("java.specification.version").compareTo("1.5") >= 0;
-    }
-    
-    /**
-     * Tell us whether we are running on a Java VM that supports Java 6 features.
-     */
-    public static boolean isJava16()
-    {
-        return System.getProperty("java.specification.version").compareTo("1.6") >= 0;
-    }
-    
+
     /**
      * Tell us whether we are running on a Java VM that supports Java 7 features.
      */
     public static boolean isJava17()
     {
-        return System.getProperty("java.specification.version").compareTo("1.7") >= 0;
+        return javaVersionNumberAtLeast(1, 7);
     }
     
     /**
@@ -626,18 +629,6 @@ public final class Config
     public static boolean isOpenJDK()
     {
         return System.getProperty("java.runtime.name").startsWith("OpenJDK");
-    }
-    
-    /**
-     * Tell use whether java 1.5 features are to be used. This allows
-     * suppressing 1.5 features when running on a 1.5 VM (for instance to
-     * suppress the "unchecked" warnings which occur when compiling legacy
-     * code). 
-     */
-    public static boolean usingJava15()
-    {
-        // for now, always use 1.5 features where available
-        return isJava15();
     }
     
     /**
@@ -681,7 +672,7 @@ public final class Config
     {
         return usingMacOSScreenMenubar;
     }
-    
+
     /**
      * Get the screen size information
      */
@@ -690,7 +681,7 @@ public final class Config
         Dimension d = Toolkit.getDefaultToolkit().getScreenSize();
         return new Rectangle(d);
     }
-
+    
     /**
      * Check whether we want to see debug information. If not, redirect it to
      * a file.
@@ -738,15 +729,81 @@ public final class Config
         // - creating the debug log failed
         Debug.setDebugStream(new OutputStreamWriter(System.out));
     }
-    
+
     /**
      * Called on system exit. Do whatever there is to do before exiting.
      */
     public static void handleExit()
     {
-        final String name = getApplicationName().toLowerCase();
-        saveProperties(name, "properties.heading." + name, userProps);     
+        saveAppProperties();
         saveProperties("moe", "properties.heading.moe", moeUserProps);    
+    }
+
+    private static void saveAppProperties()
+    {
+        final String name = getApplicationName().toLowerCase();
+        saveProperties(name, "properties.heading." + name, userProps);
+    }
+
+    /**
+     * Increases the count of editors opened by one for the given source type,
+     * and saves the user properties file.
+     */
+    public static void recordEditorOpen(SourceType sourceType)
+    {
+        // Only record this for Greenfoot, at the moment:
+        if (!Config.isGreenfoot())
+            return;
+        
+        switch (sourceType)
+        {
+            case Java:
+            {
+                int javaEditors = getPropInteger(EDITOR_COUNT_JAVA, 0, userProps);
+                javaEditors += 1;
+                userProps.setProperty(EDITOR_COUNT_JAVA, Integer.toString(javaEditors));
+                saveAppProperties();
+            }
+            break;
+            case Stride:
+            {
+                int strideEditors = getPropInteger(EDITOR_COUNT_STRIDE, 0, userProps);
+                strideEditors += 1;
+                userProps.setProperty(EDITOR_COUNT_STRIDE, Integer.toString(strideEditors));
+                saveAppProperties();
+            }
+            break;
+            default: break;
+        }
+    }
+
+    /**
+     * Gets the editors count as stored in the properties file.  You should usually
+     * use this to get the count from the previous session, then call resetEditorsCount.
+     * 
+     * @return The number of editors that have been opened for that source type
+     *         since the last call to resetEditorsCount.  Returns -1 if the property
+     *         is not found
+     */
+    public static int getEditorCount(SourceType sourceType)
+    {
+        switch (sourceType)
+        {
+            case Java: return getPropInteger(EDITOR_COUNT_JAVA, -1, userProps);
+            case Stride: return getPropInteger(EDITOR_COUNT_STRIDE, -1, userProps);
+            default: return -1;
+        }
+    }
+
+    /**
+     * Resets the editor count (as processed by getEditorCount/recordEditorOpen)
+     * in the properties file.  Also saves the properties file.
+     */
+    public static void resetEditorsCount()
+    {
+        userProps.setProperty(EDITOR_COUNT_JAVA, "0");
+        userProps.setProperty(EDITOR_COUNT_STRIDE, "0");
+        saveAppProperties();
     }
 
     /**
@@ -765,13 +822,13 @@ public final class Config
         try {
             defs.load(new FileInputStream(propsFile));
         }
-        catch(Exception e) {
+        catch(IOException e) {
             Debug.reportError("Unable to load definitions file: " + propsFile);
         }
 
         return defs;
     }
-    
+
     /**
      * Load the label property file for the currently defined language.
      * Install the default language (English) as the default properties
@@ -781,6 +838,17 @@ public final class Config
     {
         // add the defaults (English)
         Properties labels = loadDefs(DEFAULT_LANGUAGE + File.separator + "labels", System.getProperties());
+
+        // Load frame labels
+        String frameLabels = DEFAULT_LANGUAGE + File.separator + "frame-labels";
+        File frameLabelFile = new File(bluejLibDir, frameLabels);
+        try{
+            labels.load(new FileInputStream(frameLabelFile));
+        }
+        catch(Exception e){
+            Debug.reportError("Unable to load greenfoot labels file: " + frameLabelFile);
+        }
+
         // if greenfoot, add specific additional labels
         if(isGreenfoot())
         {
@@ -790,7 +858,7 @@ public final class Config
             try{
                 labels.load(new FileInputStream(greenfootLabelFile));
             }
-            catch(Exception e){
+            catch(IOException e){
                 Debug.reportError("Unable to load greenfoot labels file: " + greenfootLabelFile);
             }
         }
@@ -804,6 +872,17 @@ public final class Config
             catch(Exception e){
                 Debug.reportError("Unable to load definitions file: " + languageFile);
             }
+
+            // Load frame labels
+            String languageFrameLabels = language + File.separator + "frame-labels";
+            File languageFrameLabelFile = new File(bluejLibDir, languageFrameLabels);
+            try{
+                labels.load(new FileInputStream(languageFrameLabelFile));
+            }
+            catch(Exception e){
+                Debug.reportError("Unable to load frame labels file: " + languageFrameLabelFile);
+            }
+
             if(isGreenfoot()) {
                 File greenfootLabels = new File(bluejLibDir, language + File.separator + "greenfoot/greenfoot-labels");
                 try{
@@ -847,7 +926,7 @@ public final class Config
             Debug.reportError("could not save properties file " + propsFile);
         }
     }
-
+    
     /**
      * Find and return the moe help definitions
      */
@@ -855,7 +934,27 @@ public final class Config
     {
         return loadDefs(language + File.separator + "moe.help", System.getProperties());
     }
-    
+
+    /**
+     * Get a string list from the language dependent definitions file
+     * (eg. "english/labels").  If you pass "mydialog.error" then we look
+     * for "mydialog.error1", then "mydialog.error2".  Every consecutive
+     * found String is added to the list until we can't find one, at which
+     * point we stop.
+     */
+    public static List<String> getStringList(String stem)
+    {
+        List<String> r = new ArrayList<>();
+        for (int i = 1; ;i++)
+        {
+            String s = getString(stem + Integer.toString(i), null);
+            if (s != null)
+                r.add(s);
+            else
+                return r;
+        }
+    }
+
     /**
      * Get a string from the language dependent definitions file
      * (eg. "english/labels").
@@ -864,34 +963,56 @@ public final class Config
     {
         return getString(strname, strname);
     }
-
+    
     /**
      * Get a string from the language dependent definitions file
      * (eg. "english/labels"). If not found, return default.
      */
     public static String getString(String strname, String def)
     {
+        return getString(strname, def, null);
+    }
+
+    /**
+     * Get a string from the language dependent definitions file
+     * (eg. "english/labels"), replacing local variables.
+     * If not found, return default.
+     */
+    public static String getString(String strname, String def, Properties variables)
+    {
         if (langVarProps == null) {
             langVarProps = new Properties();
             langVarProps.put("APPNAME", getApplicationName());
         }
-        
+
         int index;
-        String str = langProps.getProperty(strname, def);
-        // remove all underscores
-        while( (index = str.indexOf('_')) != -1){
-            str = str.substring(0, index) + str.substring(index+1);
+        // langProps can be null during testing:
+        String str = langProps == null ? def : langProps.getProperty(strname, def);
+        if (str != null)
+        {
+            // remove all underscores
+            while ((index = str.indexOf('_')) != -1)
+            {
+                str = str.substring(0, index) + str.substring(index + 1);
+            }
+            if ((index = str.indexOf('@')) != -1)
+            {
+                //remove everything from @
+                str = str.substring(0, index);
+            }
+
+            if (variables == null) {
+                variables = langVarProps;
+            }
+            else {
+                variables.putAll(langVarProps);
+            }
+
+            str = PropParser.parsePropString(str, variables);
         }
-        if ((index = str.indexOf('@')) != -1){ 
-            //remove everything from @
-            str = str.substring(0, index);
-        }
-        
-        str = PropParser.parsePropString(str, langVarProps);
-        
+
         return str;
     }
-    
     
     /**
      * Get the mnemonic key for a particular label by looking for an underscore
@@ -913,7 +1034,6 @@ public final class Config
         }
         return mnemonic;
     }
-    
     
     /**
      * Check whether a particular label has an accelerator key defined.
@@ -950,7 +1070,28 @@ public final class Config
         KeyStroke k1= KeyStroke.getKeyStroke(keyString);
         return KeyStroke.getKeyStroke(k1.getKeyCode(), modifiers);
     }
-    
+
+    @OnThread(Tag.FX)
+    public static KeyCombination getAcceleratorKeyFX(String strname)
+    {
+        int index;
+        List<KeyCombination.Modifier> modifiers = new ArrayList<>();
+        modifiers.add(KeyCombination.SHORTCUT_DOWN);
+        String str = langProps.getProperty(strname, strname);
+        String keyString;
+        index = str.indexOf('@');
+        index++;
+        if(str.charAt(index) == '^') { //then the modifiers is CTRL + SHIFT
+            index++;
+            modifiers.add(KeyCombination.SHIFT_DOWN);
+        }
+        keyString = str.substring(index).toUpperCase();
+        if(keyString.length() == 1) {
+            return new KeyCharacterCombination(keyString, modifiers.toArray(new KeyCombination.Modifier[0]));
+        }
+        return new KeyCodeCombination(KeyCode.getKeyCode(keyString), modifiers.toArray(new KeyCombination.Modifier[0]));
+    }
+
     /**
      * Get a system-dependent string from the BlueJ properties
      * System-dependent strings are properties that can
@@ -1011,7 +1152,7 @@ public final class Config
         }
         return rval;
     }
-
+    
     /**
      * Get a non-language-dependent string from the BlueJ properties
      * ("bluej.defs" or "bluej.properties") with a default value. Variable
@@ -1044,7 +1185,7 @@ public final class Config
         }
         return null;
     }
-    
+
     /**
      * Get a non-language-dependent string from the BlueJ properties
      * "bluej.defs" with a default value. No variable substitution is
@@ -1071,6 +1212,18 @@ public final class Config
         return value;
     }
 
+    private static int getPropInteger(String intname, int def, Properties props)
+    {
+        int value;
+        try {
+            value = Integer.parseInt(getPropString(intname, String.valueOf(def), props));
+        }
+        catch(NumberFormatException nfe) {
+            return def;
+        }
+        return value;
+    }
+    
     /**
      * Get a boolean value from the BlueJ properties. The default value is false.
      */
@@ -1104,7 +1257,7 @@ public final class Config
     private static boolean parseBoolean(String s) {
         return ((s != null) && s.equalsIgnoreCase("true"));
     }
-    
+
     /**
      * remove a property value from the BlueJ properties.
      */
@@ -1126,11 +1279,12 @@ public final class Config
 
         return null;
     }
-
+    
     /**
      * Find and return the icon for an image, using the definitions in the 
      * properties files to find the actual image.
      */
+    @OnThread(Tag.Swing)
     public static ImageIcon getImageAsIcon(String propname)
     {
         try {
@@ -1142,38 +1296,51 @@ public final class Config
         return null;
     }
     
-    /**
-     * Return an icon for an image file name, without going through bluej.defs.
-     * The parameter specifies the final image name, not a property.
-     */
-    public static ImageIcon getFixedImageAsIcon(String filename)
+    @OnThread(Tag.FX)
+    public static javafx.scene.image.Image getImageAsFXImage(String propname)
     {
-        File image = new File(bluejLibDir, "images" + File.separator + filename);
-        try {
-            return new ImageIcon(image.toURI().toURL());
-        }
-        catch (java.net.MalformedURLException mue) { }
-        catch (NullPointerException npe) { }
-        return null;
-    }
-
-    /**
-     * Find and return the icon for an image, without using the properties
-     * (the name provided is the actual file name in ../lib/images).
-     */
-    public static ImageIcon getHardImageAsIcon(String filename)
-    {
-        try {
-            File imgFile = new File(bluejLibDir, "images" + File.separator + filename);
-            java.net.URL u = imgFile.toURI().toURL();
-
-            return new ImageIcon(u);
+        try
+        {
+            java.net.URL u = getImageFile(propname).toURI().toURL();
+            return new javafx.scene.image.Image(u.toString());
         }
         catch (java.net.MalformedURLException mue) { }
         catch (NullPointerException npe) { }
         return null;
     }
     
+    /**
+     * Return an icon for an image file name, without going through bluej.defs.
+     * The parameter specifies the final image name, not a property.
+     */
+    @OnThread(Tag.Swing)
+    public static ImageIcon getFixedImageAsIcon(String filename)
+    {
+        if (filename == null)
+            throw new IllegalArgumentException("Cannot load null image");
+        
+        File image = new File(bluejLibDir, "images" + File.separator + filename);
+        try {
+            return new ImageIcon(image.toURI().toURL());
+        }
+        catch (java.net.MalformedURLException mue) { }
+        return null;
+    }
+    
+    @OnThread(Tag.FX)
+    public static javafx.scene.image.Image getFixedImageAsFXImage(String filename)
+    {
+        if (filename == null)
+            throw new IllegalArgumentException("Cannot load null image");
+        
+        File image = new File(bluejLibDir, "images" + File.separator + filename);
+        try {
+            return new javafx.scene.image.Image(image.toURI().toURL().toString());
+        }
+        catch (java.net.MalformedURLException mue) { }
+        return null;
+    }
+
     /**
      * Find and return an image. The image will have to be tracked. 
      */
@@ -1263,7 +1430,11 @@ public final class Config
      */
     public static File getTemplateDir()
     {
-        return getLanguageFile("templates");
+        String path = commandProps.getProperty("bluej.templatePath" , "");
+        if(path.length() == 0) {
+            return getLanguageFile("templates");
+        }
+        return new File(path);
     }
 
     /**
@@ -1280,11 +1451,7 @@ public final class Config
      */
     public static File getClassTemplateDir()
     {
-        String path = commandProps.getProperty("bluej.templatePath" , "");
-        if(path.length() == 0) {
-            return getLanguageFile("templates/newclass");
-        }
-        return new File(path);
+        return new File(getTemplateDir().getPath() + "/newclass");
     }
 
     /**
@@ -1295,7 +1462,7 @@ public final class Config
     {
         return new File(getClassTemplateDir(), base + ".tmpl");
     }
-
+    
     /**
      * Return the file with language specific text. 
      * For example,
@@ -1306,7 +1473,7 @@ public final class Config
     {
         return new File(bluejLibDir, language + File.separator + base);
     }
-    
+
     /**
      * return the default language version of a language resource file
      */
@@ -1332,7 +1499,7 @@ public final class Config
     {
         return userPrefDir;
     }
-
+    
     /**
      * Return a color value from the bluej properties.
      */
@@ -1352,7 +1519,7 @@ public final class Config
                 return new Color(r, g, b);
             }
         }
-        catch(Exception e) {
+        catch(NumberFormatException e) {
             Debug.reportError("Could not get colour for " + itemname);
         }
 
@@ -1384,13 +1551,13 @@ public final class Config
                 return new Color(r, g, b);
             }
         }
-        catch(Exception e) {
+        catch(NumberFormatException e) {
             Debug.reportError("Could not get colour for " + itemname);
         }
 
         return null;
     }
-    
+
     /**
      * Return a color value for selections.
      */
@@ -1434,7 +1601,7 @@ public final class Config
         }
         return highlightColour2;
     }
-
+    
     /**
      * Get a font from a specified property, using the given default font name and
      * the given size. Font name can end with "-bold" to indicate bold style.
@@ -1454,40 +1621,33 @@ public final class Config
         
         return new Font(fontName, style, size);
     }
-    
+
     /**
      * Store a point in the config files. The config properties
      * are formed by adding ".x" and ".y" to the itemPrefix.
      */
-    public static void putLocation(String itemPrefix, Point p)
+    private static void putLocation(String itemPrefix, int x, int y)
     {
-        putPropInteger(itemPrefix + ".x", p.x);
-        putPropInteger(itemPrefix + ".y", p.y);
+        putPropInteger(itemPrefix + ".x", x);
+        putPropInteger(itemPrefix + ".y", y);
     }
 
     /**
      * Return a point, read from the config files. The config properties
      * are formed by adding ".x" and ".y" to the itemPrefix.
      */
-    public static Point getLocation(String itemPrefix)
+    private static Point getLocation(String itemPrefix)
     {
-        try {
-            int x = getPropInteger(itemPrefix + ".x", 16);
-            int y = getPropInteger(itemPrefix + ".y", 16);
+        int x = getPropInteger(itemPrefix + ".x", 16);
+        int y = getPropInteger(itemPrefix + ".y", 16);
 
-            if (x > (screenBounds.width - 16))
-                x = screenBounds.width - 16;
+        if (x > (screenBounds.width - 16))
+            x = screenBounds.width - 16;
 
-            if (y > (screenBounds.height - 16))
-                y = screenBounds.height - 16;
+        if (y > (screenBounds.height - 16))
+            y = screenBounds.height - 16;
 
-            return new Point(x,y);
-        }
-        catch(Exception e) {
-            Debug.reportError("Could not get screen location for " + itemPrefix);
-        }
-
-        return new Point(16,16);
+        return new Point(x,y);
     }
 
     /**
@@ -1506,7 +1666,7 @@ public final class Config
         }
         userProps.setProperty(intname, Integer.toString(value));
     }
-
+    
     /**
      * Set a non-language dependant string for the BlueJ properties.
      * If the supplied value is null, the property is removed.
@@ -1543,7 +1703,7 @@ public final class Config
     {
         return bluejLibDir;
     }
-    
+
     /**
      * Returns the greenfoot directory in blueJLibDir
      */
@@ -1551,7 +1711,7 @@ public final class Config
     {
         return greenfootLibDir;
     }
-
+    
     /**
      * Returns the blueJLibDir
      */
@@ -1614,9 +1774,9 @@ public final class Config
             
             if (! laf.equals("bluejdefault")) {
                 LookAndFeelInfo [] lafi = UIManager.getInstalledLookAndFeels();
-                for (int i = 0; i < lafi.length; i++) {
-                    if (lafi[i].getName().equals(laf)) {
-                        UIManager.setLookAndFeel(lafi[i].getClassName());
+                for (LookAndFeelInfo aLafi : lafi) {
+                    if (aLafi.getName().equals(laf)) {
+                        UIManager.setLookAndFeel(aLafi.getClassName());
                         return;
                     }
                 }
@@ -1693,5 +1853,229 @@ public final class Config
     public static final boolean isGreenfoot()
     {
         return isGreenfoot;
+    }
+
+    /**
+     * Determine whether a file is a ZIP File.
+     */
+    public static boolean isZipFile(File file)
+    {
+        try {
+            if(file.isDirectory()) {
+                return false;
+            }
+            if(!file.canRead()) {
+                throw new IOException();
+            }
+            if(file.length() < 4) {
+                return false;
+            }
+            DataInputStream in = new DataInputStream(new BufferedInputStream(new FileInputStream(file)));
+            int magicNumber = in.readInt();
+            in.close();
+            return magicNumber == 0x504b0304;
+        }
+        catch (IOException exc) {
+            Debug.reportError("Could not read file: " + file.getAbsolutePath(), exc);
+        }
+        return false;
+    }
+
+    @OnThread(Tag.FX)
+    public static void addEditorStylesheets(Scene scene)
+    {
+        String[] stylesheetStems = new String[] {
+                "frame-style",
+                "editor-banners",
+                "editor-catalogue",
+                "editor-error-bar",
+                "editor-error-fix",
+                "editor-expression",
+                "editor-help",
+                "editor-menu",
+                "editor-selection",
+                "editor-slot-choice",
+                "editor-suggestions",
+                "editor-tabs"};
+        
+        for (String stem : stylesheetStems)
+        {
+            addStylesheet(scene.getStylesheets(), stem);
+        }
+    }
+
+    @OnThread(Tag.FX)
+    public static void addInspectorStylesheets(Scene scene)
+    {
+        addStylesheet(scene.getStylesheets(), "inspectors");
+    }
+
+    @OnThread(Tag.FX)
+    public static void addPopupStylesheets(Parent root)
+    {
+        addStylesheet(root.getStylesheets(), "popup");
+    }
+
+    @OnThread(Tag.FX)
+    public static void addTestsStylesheets(Scene scene)
+    {
+        addStylesheet(scene.getStylesheets(), "tests");
+    }
+
+    @OnThread(Tag.FX)
+    public static void addPMFStylesheets(Scene scene)
+    {
+        addStylesheet(scene.getStylesheets(), "pkgmgrframe");
+    }
+
+    @OnThread(Tag.FX)
+    private static void addStylesheet(ObservableList<String> sheetList, String stem)
+    {
+        try
+        {
+            sheetList.add(new File(bluejLibDir + "/stylesheets", stem + ".css").toURI().toURL().toString());
+        } catch (MalformedURLException e)
+        {
+            Debug.reportError(e);
+        }
+    }
+
+    @OnThread(Tag.FX)
+    public static void addDialogStylesheets(DialogPane dialogPane)
+    {
+        try
+        {
+            dialogPane.getStylesheets().add(new File (bluejLibDir + "/stylesheets", "dialogs.css").toURI().toURL().toString());
+        }
+        catch (MalformedURLException e)
+        {
+            Debug.reportError(e);
+        }
+    }
+
+    @OnThread(Tag.Swing)
+    public static Border getFocusBorder()
+    {
+        if (focusBorder == null)
+        {
+            focusBorder = new CompoundBorder(new LineBorder(Color.BLACK),
+                    new BevelBorder(BevelBorder.LOWERED,
+                            new Color(195, 195, 195),
+                            new Color(240, 240, 240),
+                            new Color(195, 195, 195),
+                            new Color(124, 124, 124)));
+        }
+        return focusBorder;
+    }
+
+    @OnThread(Tag.Swing)
+    public static Border getNormalBorder()
+    {
+        if (normalBorder == null)
+        {
+            normalBorder = new CompoundBorder(new EmptyBorder(1,1,1,1),
+                    new BevelBorder(BevelBorder.LOWERED,
+                            new Color(195, 195, 195),
+                            new Color(240, 240, 240),
+                            new Color(124, 124, 124),
+                            new Color(195, 195, 195)));
+        }
+        return normalBorder;
+    }
+
+    public static boolean isRetinaDisplay()
+    {
+     if (isMacOS()) {
+           // From http://bulenkov.com/2013/06/23/retina-support-in-oracle-jdk-1-7/
+           GraphicsEnvironment env = GraphicsEnvironment.getLocalGraphicsEnvironment();
+           final GraphicsDevice device = env.getDefaultScreenDevice();
+
+           try {
+               Field field = device.getClass().getDeclaredField("scale");
+               if (field != null) {
+                   field.setAccessible(true);
+                   Object scale = field.get(device);
+
+                   if (scale instanceof Integer && ((Integer)scale) == 2) {
+                       return true;
+                   }
+               }
+           } catch (Exception ignore) {}
+       }
+       return false;
+    }
+
+    public static void loadFXFonts()
+    {
+        if (!fontOptions.isEmpty())
+            return;
+        
+        //fontOptions = Arrays.asList("Droid Sans", "Montserrat", "Noto Sans", "Roboto", "Open Sans", "Source Sans", "Ubuntu");
+        //List<String> fontStems = Arrays.asList("NotoSans-Regular", "NotoSans-Bold", "NotoSans-Italic", "NotoSans-BoldItalic");
+        for (File file : new File(bluejLibDir + "/fonts").listFiles())
+        {
+            if (file.getName().toLowerCase().endsWith(".ttf")) {
+                try
+                {
+                    //Debug.message("Loading font: " + file);
+                    FileInputStream fis = new FileInputStream(file);
+                    final javafx.scene.text.Font font = javafx.scene.text.Font.loadFont(fis, 10);
+                    fis.close();
+                    if (font == null) {
+                        Debug.reportError("Unknown problem loading TTF JavaFX font: " + file.getAbsolutePath());
+                    }
+                    if (font != null && !fontOptions.contains(font.getFamily()))
+                    {
+                        fontOptions.add(font.getFamily());
+                        Collections.sort(fontOptions);
+                    }
+                }
+                catch (IOException e)
+                {
+                    Debug.reportError("Error loading font: " + file.getAbsolutePath(), e);
+                }
+            }
+        }
+    }
+
+    @OnThread(Tag.FXPlatform)
+    public static void rememberPosition(Window window, String locationPrefix)
+    {
+        JavaFXUtil.addChangeListener(window.xProperty(), x -> putLocation(locationPrefix, (int)window.getX(), (int)window.getY()));
+        JavaFXUtil.addChangeListener(window.yProperty(), y -> putLocation(locationPrefix, (int)window.getX(), (int)window.getY()));
+
+        Point location = getLocation(locationPrefix);
+        window.setX(location.x);
+        window.setY(location.y);
+    }
+
+    public static KeyCode getKeyCodeForYesNo(InteractionManager.ShortcutKey keyPurpose)
+    {
+        switch (keyPurpose)
+        {
+            case YES_ANYWHERE: return KeyCode.F2;
+            case NO_ANYWHERE: return KeyCode.F3;
+        }
+        return null;
+    }
+
+    public static boolean isGreenfootStartupProject(File projectDir)
+    {
+        return getGreenfootStartupProjectPath().equals(projectDir.getAbsolutePath());
+    }
+
+    public static String getGreenfootStartupProjectPath()
+    {
+        return new File(getBlueJLibDir(), "greenfoot/startupProject").getAbsolutePath();
+    }
+
+    /**
+     * This is almost equivalent to the SourceType in bluej.extensions, but we 
+     * don't want Config to depend on that class so we re-create the same idea here.
+     */
+    public enum SourceType
+    {
+        Java,
+        Stride
     }
 }

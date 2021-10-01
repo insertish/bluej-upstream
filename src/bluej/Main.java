@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2011,2012,2013,2014,2015  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2011,2012,2013,2014,2015,2016,2017  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -21,31 +21,43 @@
  */
 package bluej;
 
-import java.awt.EventQueue;
-import java.io.File;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.net.URLEncoder;
-import java.util.Properties;
-import java.util.UUID;
-import java.io.IOException;
-
-import com.apple.eawt.Application;
-import com.apple.eawt.AppEvent;
-import com.apple.eawt.QuitResponse;
-
 import bluej.collect.DataCollector;
 import bluej.extensions.event.ApplicationEvent;
 import bluej.extmgr.ExtensionsManager;
+import bluej.extmgr.ExtensionWrapper;
 import bluej.pkgmgr.Package;
 import bluej.pkgmgr.PkgMgrFrame;
 import bluej.pkgmgr.Project;
-import bluej.pkgmgr.actions.HelpAboutAction;
-import bluej.pkgmgr.actions.PreferencesAction;
-import bluej.pkgmgr.actions.QuitAction;
+import bluej.pkgmgr.target.ClassTarget;
+import bluej.pkgmgr.target.Target;
 import bluej.utility.Debug;
 import bluej.utility.DialogManager;
+import bluej.utility.javafx.FXPlatformRunnable;
+import bluej.utility.javafx.JavaFXUtil;
+
+import com.apple.eawt.AppEvent;
+import com.apple.eawt.Application;
+import com.apple.eawt.QuitResponse;
+import de.codecentric.centerdevice.dialogs.about.AboutStageBuilder;
+import de.codecentric.centerdevice.MenuToolkit;
+
+import java.io.File;
+import java.io.IOException;
+import java.io.UnsupportedEncodingException;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.net.URLEncoder;
 import java.util.List;
+import java.util.Properties;
+import java.util.UUID;
+import javafx.application.Platform;
+import javafx.fxml.FXMLLoader;
+import javafx.scene.control.Menu;
+import javafx.scene.control.MenuItem;
+import javax.swing.SwingUtilities;
+
+import threadchecker.OnThread;
+import threadchecker.Tag;
 
 /**
  * BlueJ starts here. The Boot class, which is responsible for dealing with
@@ -71,13 +83,27 @@ public class Main
     private static QuitResponse macEventResponse = null;  // used to respond to external quit events on MacOS
 
     /**
+     * Only used on Mac.  For some reason, executing the AppleJavaExtensions open
+     * file handler (that is set from Boot.main) on initial load (e.g. because
+     * the user double-clicked a project.greenfoot file) means that later on,
+     * the context class loader is null on the JavaFX thread.
+     * Honestly, I [NB] have no idea what the hell is going on there.
+     * But the work-around is apparent: store the context class loader early on,
+     * then if it is null later, restore it.  (There's no problem if the file
+     * handler is not executed; the context class loader is the same early on as
+     * later on the FX thread).
+     */
+    private static ClassLoader storedContextClassLoader;
+
+    /**
      * Entry point to starting up the system. Initialise the system and start
      * the first package manager frame.
      */
+    @OnThread(Tag.Any)
     public Main()
     {
         Boot boot = Boot.getInstance();
-        final String[] args = boot.getArgs();
+        final String[] args = Boot.cmdLineArgs;
         Properties commandLineProps = boot.getCommandLineProperties();
         File bluejLibDir = Boot.getBluejLibDir();
 
@@ -98,15 +124,14 @@ public class Main
             System.setProperty("java.rmi.server.useCodebaseOnly", "false");
         }
         
-        DataCollector.bluejOpened(getOperatingSystem(), getJavaVersion(), getBlueJVersion(), getInterfaceLanguage(), ExtensionsManager.getInstance().getLoadedExtensions(null));
-
         // process command line arguments, start BlueJ!
-        EventQueue.invokeLater(new Runnable() {
-            @Override
-            public void run()
-            {
-                processArgs(args);
-            }
+        SwingUtilities.invokeLater(() -> {
+            List<ExtensionWrapper> loadedExtensions = ExtensionsManager.getInstance().getLoadedExtensions(null);
+            Platform.runLater(() -> {
+
+                DataCollector.bluejOpened(getOperatingSystem(), getJavaVersion(), getBlueJVersion(), getInterfaceLanguage(), loadedExtensions);
+                SwingUtilities.invokeLater(() -> processArgs(args));
+            });
         });
         
         // Send usage data back to bluej.org
@@ -124,6 +149,7 @@ public class Main
      * command line when starting BlueJ. Any parameters starting with '-' are
      * ignored for now.
      */
+    @OnThread(Tag.Swing)
     private static void processArgs(String[] args)
     {
         launched = true;
@@ -132,19 +158,23 @@ public class Main
 
         // Open any projects specified on the command line
         if (args.length > 0) {
-            for (int i = 0; i < args.length; i++) {
-                if (!args[i].startsWith("-")) {
-                    if(PkgMgrFrame.doOpen(new File(args[i]), null)) {
-                        oneOpened = true;                        
+            for (String arg : args) {
+                // To avoid a wrong FileNotFound Exception when running from IntelliJ
+                if (!arg.startsWith("-") && !arg.contains("intellij")  ) {
+                    if (PkgMgrFrame.doOpen(new File(arg), null)) {
+                        oneOpened = true;
                     }
                 }
             }
         }
-        
+
         // Open a project if requested by the OS (Mac OS)
         if (initialProjects != null) {
             for (File initialProject : initialProjects) {
-                oneOpened |= (PkgMgrFrame.doOpen(initialProject, null));
+                // To avoid a wrong FileNotFound Exception when running from IntelliJ
+                if (!initialProject.getName().contains("intellij")) {
+                    oneOpened |= (PkgMgrFrame.doOpen(initialProject, null));
+                }
             }
         }
 
@@ -160,9 +190,9 @@ public class Main
                     if (exists != null) {
                         Project openProj;
                         // checking all is well (project exists)
-                        if ((openProj = Project.openProject(exists, null)) != null) {
+                        if ((openProj = Project.openProject(exists)) != null) {
                             Package pkg = openProj.getPackage(openProj.getInitialPackageName());
-                            PkgMgrFrame.createFrame(pkg);
+                            PkgMgrFrame.createFrame(pkg, null);
                             oneOpened = true;
                         }
                     }
@@ -179,6 +209,26 @@ public class Main
                 openEmptyFrame();
             }
         }
+        else
+        {
+            // Follow open-class arg if there is one:
+            String targetName = Config.getPropString("bluej.class.open", null);
+            if (targetName != null && !targetName.equals(""))
+            {
+                boolean foundTarget = false;
+                for (Project proj : Project.getProjects())
+                {
+                    Target tgt = proj.getTarget(targetName);
+                    if (tgt != null && tgt instanceof ClassTarget)
+                    {
+                        ((ClassTarget)tgt).open();
+                        foundTarget = true;
+                    }
+                }
+                if (!foundTarget)
+                    Debug.message("Did not find target class in opened project: \"" + targetName + "\"");
+            }
+        }
 
         if (!Config.isGreenfoot())
         {
@@ -193,54 +243,28 @@ public class Main
      */ 
     private static void prepareMacOSApp()
     {
+        storedContextClassLoader = Thread.currentThread().getContextClassLoader();
+        initialProjects = Boot.getMacInitialProjects();
         Application macApp = Application.getApplication();
 
-        if (macApp != null) {
-
-            macApp.setAboutHandler(new com.apple.eawt.AboutHandler() {
-                @Override
-                public void handleAbout(AppEvent.AboutEvent e)
-                {
-                    HelpAboutAction.getInstance().actionPerformed(PkgMgrFrame.getMostRecent());
-                }
-            });
-
-            macApp.setPreferencesHandler(new com.apple.eawt.PreferencesHandler() {
-                @Override
-                public void handlePreferences(AppEvent.PreferencesEvent e)
-                {
-                    PreferencesAction.getInstance().actionPerformed(PkgMgrFrame.getMostRecent());
-                }
-            });
-
-            macApp.setQuitHandler(new com.apple.eawt.QuitHandler() {
-                @Override
-                public void handleQuitRequestWith(AppEvent.QuitEvent e, QuitResponse response)
-                {
-                    macEventResponse = response;
-                    QuitAction.getInstance().actionPerformed(PkgMgrFrame.getMostRecent());
-                    // response.confirmQuit() does not need to be called, since System.exit(0) is called explcitly
-                    // response.cancelQuit() is called to cancel (in wantToQuit())
-                }
-            });
-
-            macApp.setOpenFileHandler(new com.apple.eawt.OpenFilesHandler() {
-                @Override
-                public void openFiles(AppEvent.OpenFilesEvent e)
-                {
-                    if (launched) {
-                        List<File> files = e.getFiles();
-                        for(File file : files) {
-                            PkgMgrFrame.doOpen(file, null);
-                        }
-                    }
-                    else {
-                        initialProjects = e.getFiles();
-                    }
-                }
-            });
+        // We are using the NSMenuFX library to fix Mac Application menu
+        // only when it is a FX menu. This is now only needed for BlueJ,
+        // as Greenffot still on Swing. When Greenfoot menu is moved to FX,
+        // both should use the workaround in prepareMacOSMenuFX().
+        // But when the JDK APIs (i.e. handleAbout() etc) are fixed,
+        // both should go back to the way as in prepareMacOSMenuSwing().
+        if (!Config.isGreenfoot()) {
+            if (macApp != null) {
+                prepareMacOSMenuFX();
+            }
         }
-        
+        else {
+            prepareMacOSMenuSwing(macApp);
+        }
+
+        // This is not included in the above condition to avoid future bugs,
+        // as this is not related to the application menu and will not be affected
+        // when the above condition will.
         if (Config.isGreenfoot())
         {
             Debug.message("Disabling App Nap");
@@ -256,22 +280,120 @@ public class Main
     }
 
     /**
+     * Prepare Mac Application FX menu using the NSMenuFX library.
+     * This is needed for due to a bug in the JDK APIs, not responding to
+     * handleAbout() etc, when the menu is on FX.
+     */
+    private static void prepareMacOSMenuFX()
+    {
+        Platform.runLater(() -> {
+            // Sets the JavaFX fxml Default Class Loader to avoid a fxml LoadException.
+            // This used to be fired only in the release not while running from the repository.
+            FXMLLoader.setDefaultClassLoader(AboutStageBuilder.class.getClassLoader());
+            // Get the toolkit
+            MenuToolkit menuToolkit = MenuToolkit.toolkit();
+            // Create the default Application menu
+            Menu defaultApplicationMenu = menuToolkit.createDefaultApplicationMenu(Config.getApplicationName());
+            // Update the existing Application menu
+            menuToolkit.setApplicationMenu(defaultApplicationMenu);
+
+            // About
+            defaultApplicationMenu.getItems().get(0).setOnAction(event ->
+                    SwingUtilities.invokeLater(() -> PkgMgrFrame.handleAbout()));
+
+            // Preferences
+            // It has been added without a separator due to a bug in the library used
+            MenuItem preferences = new MenuItem(Config.getString("menu.tools.preferences"));
+            preferences.setAccelerator(Config.getAcceleratorKeyFX("menu.tools.preferences"));
+            preferences.setOnAction(event -> SwingUtilities.invokeLater(() -> PkgMgrFrame.handlePreferences()));
+            defaultApplicationMenu.getItems().add(1, preferences);
+
+            // Quit
+            defaultApplicationMenu.getItems().get(defaultApplicationMenu.getItems().size()-1).
+                    setOnAction(event -> SwingUtilities.invokeLater(() -> PkgMgrFrame.handleQuit()));
+        });
+    }
+
+    /**
+     * Prepare Mac Application Swing menu using the com.apple.eawt APIs.
+     */
+    private static void prepareMacOSMenuSwing(Application macApp)
+    {
+        if (macApp != null) {
+            macApp.setAboutHandler(new com.apple.eawt.AboutHandler() {
+                @Override
+                public void handleAbout(AppEvent.AboutEvent e)
+                {
+                    PkgMgrFrame.handleAbout();
+                }
+            });
+
+            macApp.setPreferencesHandler(new com.apple.eawt.PreferencesHandler() {
+                @Override
+                public void handlePreferences(AppEvent.PreferencesEvent e)
+                {
+                    PkgMgrFrame.handlePreferences();
+                }
+            });
+
+            macApp.setQuitHandler(new com.apple.eawt.QuitHandler() {
+                @Override
+                public void handleQuitRequestWith(AppEvent.QuitEvent e, QuitResponse response)
+                {
+                    macEventResponse = response;
+                    PkgMgrFrame.handleQuit();
+                    // response.confirmQuit() does not need to be called, since System.exit(0) is called explcitly
+                    // response.cancelQuit() is called to cancel (in wantToQuit())
+                }
+            });
+
+            macApp.setOpenFileHandler(new com.apple.eawt.OpenFilesHandler() {
+                @Override
+                public void openFiles(AppEvent.OpenFilesEvent e)
+                {
+                    if (launched) {
+                        List<File> files = e.getFiles();
+                        for (File file : files) {
+                            PkgMgrFrame.doOpen(file, null);
+                        }
+                    }
+                    else {
+                        initialProjects = e.getFiles();
+                    }
+                }
+            });
+        }
+
+        Boot.getInstance().setQuitHandler(() -> SwingUtilities.invokeLater(() -> PkgMgrFrame.handleQuit()));
+    }
+
+    /**
      * Quit menu item was chosen.
      */
+    @OnThread(Tag.Swing)
     public static void wantToQuit()
     {
-        int answer = 0;
-        if (Project.getOpenProjectCount() > 1)
-            answer = DialogManager.askQuestion(PkgMgrFrame.getMostRecent(), "quit-all");
-        if (answer == 0) {
-            doQuit();
-        }
-        else {
-            if(macEventResponse != null) {
-                macEventResponse.cancelQuit();
-                macEventResponse = null;
+        int projectCount = Project.getOpenProjectCount();
+        PkgMgrFrame recentPMF = PkgMgrFrame.getMostRecent();
+        Platform.runLater(() ->
+        {
+            int answer = projectCount <= 1 ? 0 : DialogManager.askQuestionFX(recentPMF.getFXWindow(), "quit-all");
+            if (answer == 0)
+            {
+                doQuit();
             }
-        }
+            else
+            {
+                SwingUtilities.invokeLater(() ->
+                {
+                    if (macEventResponse != null)
+                    {
+                        macEventResponse.cancelQuit();
+                        macEventResponse = null;
+                    }
+                });
+            }
+        });
     }
 
 
@@ -280,6 +402,7 @@ public class Main
      * the events is relevant - Extensions should be unloaded after package
      * close
      */
+    @OnThread(Tag.FXPlatform)
     public static void doQuit()
     {
         PkgMgrFrame[] pkgFrames = PkgMgrFrame.getAllFrames();
@@ -287,18 +410,36 @@ public class Main
         // handle open packages so they are re-opened on startup
         handleOrphanPackages(pkgFrames);
 
-        // We replicate some of the behaviour of doClose() here
-        // rather than call it to avoid a nasty recursion
-        for (int i = pkgFrames.length - 1; i >= 0; i--) {
-            PkgMgrFrame aFrame = pkgFrames[i];
-            aFrame.doSave();
-            aFrame.closePackage();
-            PkgMgrFrame.closeFrame(aFrame);
-        }
+        JavaFXUtil.runNowOrLater(new FXPlatformRunnable()
+        {
+            int i = pkgFrames.length - 1;
 
-        ExtensionsManager extMgr = ExtensionsManager.getInstance();
-        extMgr.unloadExtensions();
-        bluej.Main.exit();
+            @Override
+            public @OnThread(Tag.FXPlatform) void run()
+            {
+                // We replicate some of the behaviour of doClose() here
+                // rather than call it to avoid a nasty recursion
+                if (i >= 0) {
+                    PkgMgrFrame aFrame = pkgFrames[i--];
+                    aFrame.doSave();
+                    SwingUtilities.invokeLater(() -> {
+                        aFrame.closePackage();
+                        Platform.runLater(() -> {
+                            PkgMgrFrame.closeFrame(aFrame);
+                            run();
+                        });
+                    });
+                }
+                else
+                {
+                    SwingUtilities.invokeLater(() -> {
+                        ExtensionsManager extMgr = ExtensionsManager.getInstance();
+                        extMgr.unloadExtensions();
+                        bluej.Main.exit();
+                    });
+                }
+            }
+        });
     }
 
     /**
@@ -307,6 +448,7 @@ public class Main
      *
      * @param openFrames
      */
+    @OnThread(Tag.FXPlatform)
     private static void handleOrphanPackages(PkgMgrFrame[] openFrames)
     {
         // if there was a previous list, delete it
@@ -357,10 +499,14 @@ public class Main
     /**
      * Open a single empty bluej window.
      */
+    @OnThread(Tag.Swing)
     private static void openEmptyFrame()
     {
         PkgMgrFrame frame = PkgMgrFrame.createFrame();
-        frame.setLocation(FIRST_X_LOCATION, FIRST_Y_LOCATION);
+        Platform.runLater(() -> {
+            frame.getFXWindow().setX(FIRST_X_LOCATION);
+            frame.getFXWindow().setY(FIRST_Y_LOCATION);
+        });
         frame.setVisible(true);
     }
     
@@ -388,6 +534,27 @@ public class Main
         String language = getInterfaceLanguage();
         String javaVersion = getJavaVersion();
         String systemID = getOperatingSystem();
+
+        String editorStats = "";
+        if (Config.isGreenfoot())
+        {
+            int javaEditors = Config.getEditorCount(Config.SourceType.Java);
+            int strideEditors = Config.getEditorCount(Config.SourceType.Stride);
+            try
+            {
+                if (javaEditors != -1 && strideEditors != -1)
+                {
+                    editorStats = "&javaeditors=" + URLEncoder.encode(Integer.toString(javaEditors), "UTF-8")
+                        + "&strideeditors=" + URLEncoder.encode(Integer.toString(strideEditors), "UTF-8");
+                }
+            }
+            catch (UnsupportedEncodingException ex)
+            {
+                Debug.reportError(ex);
+            }
+            
+            Config.resetEditorsCount();
+        }
         
         // User uid. Use the one already stored in the Property if it exists,
         // otherwise generate one and store it for next time.
@@ -406,7 +573,8 @@ public class Main
                 "&osname=" + URLEncoder.encode(systemID, "UTF-8") +
                 "&appversion=" + URLEncoder.encode(appVersion, "UTF-8") +
                 "&javaversion=" + URLEncoder.encode(javaVersion, "UTF-8") +
-                "&language=" + URLEncoder.encode(language, "UTF-8")
+                "&language=" + URLEncoder.encode(language, "UTF-8") +
+                editorStats // May be blank string, e.g. in BlueJ
             );
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
             conn.connect();
@@ -448,6 +616,7 @@ public class Main
      * The open frame count should be zero by this point as PkgMgrFrame is
      * responsible for cleaning itself up before getting here.
      */
+    @OnThread(Tag.Swing)
     private static void exit()
     {
         if (PkgMgrFrame.frameCount() > 0) {
@@ -459,6 +628,15 @@ public class Main
         // save configuration properties
         Config.handleExit();
         // exit with success status
-        System.exit(0);
+
+        // We wrap this in a Platform.runLater/Swing.invokeLater to make sure it
+        // runs after any pending FX actions or Swing actions:
+        Platform.runLater(() -> SwingUtilities.invokeLater(() -> System.exit(0)));
+    }
+
+    // See comment on the field.
+    public static ClassLoader getStoredContextClassLoader()
+    {
+        return storedContextClassLoader;
     }
 }

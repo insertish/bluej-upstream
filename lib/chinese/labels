@@ -9,9 +9,6 @@ compileException=\u7f16\u8bd1\u65f6\u4ea7\u751f\u4f8b\u5916
 compiler.thread.title=BlueJ \u7f16\u8bd1\u5668\u7ebf\u7a0b
 compiler.invalidcompiler=bluej.compiler.type \u6ca1\u6709\u8bbe\u7f6e\u4e3a\u6b63\u786e\u7684\u7f16\u8bd1\u5668\u7c7b\u578b
 compiler.nocompiler=\u7f16\u8bd1\u5668\u65e0\u6cd5\u8fd0\u884c
-compiler.warningDialog.title=\u7f16\u8bd1\u5668\u8b66\u544a
-compiler.warningDialog.label=\u6700\u540e\u4e00\u6b21\u7f16\u8bd1\u7684\u8b66\u544a 
-compiler.warningDialog.noWarnings=\u6ca1\u6709\u8b66\u544a
 
 debugger.null=null
 
@@ -560,7 +557,7 @@ menu.group.configuration=\u914d\u7f6e
 menu.help=\u5e2e\u52a9
 menu.help.about=\u5173\u4e8eBlueJ
 menu.help.extensions=\u5b89\u88c5\u6269\u5c55
-menu.help.versionCheck=\u68c0\u67e5\u7248\u672c...@V
+menu.help.versionCheck=\u68c0\u67e5\u7248\u672c...
 menu.help.copyright=\u7248\u6743
 menu.help.website=BlueJ Web\u7ad9\u70b9
 menu.help.tutorial=BlueJ\u6559\u7a0b

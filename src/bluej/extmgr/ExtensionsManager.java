@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2012,2013  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2012,2013,2016  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -24,8 +24,7 @@ package bluej.extmgr;
 import java.awt.Graphics2D;
 import java.io.File;
 import java.util.*;
-
-import javax.swing.JFrame;
+import java.util.List;
 
 import bluej.*;
 import bluej.debugmgr.ExecutionEvent;
@@ -34,9 +33,13 @@ import bluej.extensions.event.*;
 import bluej.extensions.painter.ExtensionClassTargetPainter;
 import bluej.pkgmgr.*;
 import bluej.pkgmgr.Package;
-import bluej.pkgmgr.graphPainter.ClassTargetPainter.Layer;
+import bluej.pkgmgr.Layer;
 import bluej.utility.Debug;
+import bluej.utility.javafx.FXPlatformSupplier;
+
 import javax.swing.*;
+import javafx.application.Platform;
+import javafx.stage.Window;
 
 /**
  * Manages extensions and provides the main interface to them. A
@@ -219,13 +222,14 @@ public class ExtensionsManager
      * here to be sure that the help dialog is called when extension manager is
      * valid.
      */
-    public void showHelp(JFrame parentFrame)
+    public void showHelp(FXPlatformSupplier<Window> parentFrame)
     {
         List<ExtensionWrapper> extensionsList = new ArrayList<ExtensionWrapper>();
         synchronized (extensions) {
             extensionsList.addAll(extensions);
         }
-        new HelpDialog(extensionsList, parentFrame);
+        ExtensionsDialog dialog = new ExtensionsDialog(extensionsList, parentFrame);
+        Platform.runLater(dialog::showAndWait);
     }
 
     /**

@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2011,2012,2013,2014,2015  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2011,2012,2013,2014,2015,2016  Michael Kolling and John Rosenberg
 
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -25,10 +25,12 @@ import java.io.File;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.charset.Charset;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import javax.tools.Diagnostic;
 import javax.tools.DiagnosticListener;
@@ -47,6 +49,8 @@ import bluej.Config;
  */
 public class CompilerAPICompiler extends Compiler
 {
+    private static AtomicInteger nextDiagnosticIdentifier = new AtomicInteger(1);
+
     public CompilerAPICompiler()
     {
         setDebug(true);
@@ -69,7 +73,7 @@ public class CompilerAPICompiler extends Compiler
      */
     @Override
     public boolean compile(final File[] sources, final CompileObserver observer,
-            final boolean internal, List<String> userOptions, Charset fileCharset) 
+            final boolean internal, List<String> userOptions, Charset fileCharset, CompileType type) 
     {
         boolean result = true;
         JavaCompiler jc = ToolProvider.getSystemJavaCompiler();
@@ -78,7 +82,7 @@ public class CompilerAPICompiler extends Compiler
         if (jc == null) {
             // We'd expect that this should never happen, but it's been reported once.
             observer.compilerMessage(new bluej.compiler.Diagnostic(bluej.compiler.Diagnostic.ERROR,
-                    "The compiler does not appear to be available."));
+                    "The compiler does not appear to be available."), type);
             return false;
         }
         
@@ -122,9 +126,19 @@ public class CompilerAPICompiler extends Compiler
                     if (diag.getEndPosition() == Diagnostic.NOPOS) {
                         endCol = beginCol;
                     }
-                    bjDiagnostic = new bluej.compiler.Diagnostic(diagType,
+                    // It turns out that sometimes (not sure if bug or feature) java can
+                    // give back a diagnostic with a line number of -1.  In the case I've seen
+                    // (see GREENFOOT-596), it givens an error with -1 "'void' type not allowed here"
+                    // then gives a second error with actual line number and more helpful message
+                    // "bad operand types for binary operator '+'".  So I think we can just ignore
+                    // the -1 error instead of trying to display it:
+                    
+                    if (diag.getLineNumber() == -1)
+                        bjDiagnostic = null;
+                    else
+                        bjDiagnostic = new bluej.compiler.Diagnostic(diagType,
                             message, src, diag.getLineNumber(), beginCol,
-                            diag.getLineNumber(), endCol);
+                            diag.getLineNumber(), endCol, getNewErrorIdentifer());
                 }
                 else if (diag.getKind() == Diagnostic.Kind.WARNING) {
                     if (message.startsWith("bootstrap class path not set in conjunction with -source ")) {
@@ -146,7 +160,7 @@ public class CompilerAPICompiler extends Compiler
                     long endCol = diag.getEndPosition() - diag.getPosition() + beginCol;
                     bjDiagnostic = new bluej.compiler.Diagnostic(diagType,
                             message, src, diag.getLineNumber(), beginCol,
-                            diag.getLineNumber(), endCol);
+                            diag.getLineNumber(), endCol, getNewErrorIdentifer());
                 }
                 else {
                     diagType = bluej.compiler.Diagnostic.NOTE;
@@ -162,7 +176,8 @@ public class CompilerAPICompiler extends Compiler
                     }
                 }
                 
-                observer.compilerMessage(bjDiagnostic);
+                if (bjDiagnostic != null)
+                    observer.compilerMessage(bjDiagnostic, type);
             }
         };
         
@@ -179,7 +194,19 @@ public class CompilerAPICompiler extends Compiler
             // always the same
             sjfm.setLocation(StandardLocation.SOURCE_PATH, outputList);
             sjfm.setLocation(StandardLocation.CLASS_PATH, pathList);
-            sjfm.setLocation(StandardLocation.CLASS_OUTPUT, outputList);
+            File tempDir = null;
+            if (type.keepClasses())
+            {
+                sjfm.setLocation(StandardLocation.CLASS_OUTPUT, outputList);
+            }
+            else
+            {
+                // We could make a new file manager that memory-mapped the output files
+                // and discarded them... but creating a temporary dir is much more
+                // straightforward:
+                tempDir = Files.createTempDirectory("bluej").toFile();
+                sjfm.setLocation(StandardLocation.CLASS_OUTPUT, Arrays.asList(tempDir));
+            }
             
             //get the source files for compilation  
             Iterable<? extends JavaFileObject> compilationUnits1 =
@@ -201,7 +228,9 @@ public class CompilerAPICompiler extends Compiler
             
             //compile
             result = jc.getTask(null, sjfm, diagListener, optionsList, null, compilationUnits1).call();
-            sjfm.close();            
+            sjfm.close();
+            if (tempDir != null)
+                tempDir.delete();
         }
         catch(IOException e)
         {
@@ -275,5 +304,10 @@ public class CompilerAPICompiler extends Compiler
             }
         }
         return message;
+    }
+
+    public static int getNewErrorIdentifer()
+    {
+        return nextDiagnosticIdentifier.getAndIncrement();
     }
 }

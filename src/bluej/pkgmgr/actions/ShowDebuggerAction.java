@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2016  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -30,17 +30,12 @@ import bluej.pkgmgr.PkgMgrFrame;
  * so that it can be tied to a check-box.
  * 
  * @author Davin McCall
- * @version $Id: ShowDebuggerAction.java 6215 2009-03-30 13:28:25Z polle $
+ * @version $Id: ShowDebuggerAction.java 16754 2016-10-14 14:44:41Z nccb $
  */
-final public class ShowDebuggerAction extends PkgMgrAction
+public class ShowDebuggerAction extends PkgMgrToggleAction
 {
-    public ShowDebuggerAction()
+    public ShowDebuggerAction(PkgMgrFrame pmf)
     {
-        super("menu.view.showExecControls");
-    }
-            
-    public ButtonModel getToggleModel(PkgMgrFrame pmf)
-    {
-        return new bluej.debugmgr.ExecControlButtonModel(pmf);
+        super(pmf, "menu.view.showExecControls", new bluej.debugmgr.ExecControlButtonModel(pmf));
     }
 }

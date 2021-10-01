@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2011,2012,2013,2014,2015  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2011,2012,2013,2014,2015,2016,2017  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -39,6 +39,9 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 
+import bluej.utility.DialogManager;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 import bluej.Boot;
 import bluej.Config;
 import bluej.debugger.Debugger;
@@ -90,8 +93,7 @@ import com.sun.jdi.request.BreakpointRequest;
 import com.sun.jdi.request.ClassPrepareRequest;
 import com.sun.jdi.request.EventRequest;
 import com.sun.jdi.request.EventRequestManager;
-import java.awt.EventQueue;
-import javax.swing.JOptionPane;
+import javafx.application.Platform;
 
 /**
  * A class implementing the execution and debugging primitives needed by BlueJ.
@@ -243,19 +245,23 @@ class VMReference
                 } else {
                     //fail. Don't start with sudo, warn the user and  
                     //set start with sudo to false
-                    EventQueue.invokeLater(new Runnable() {
-                        @Override
-                        public void run() {
-                            JOptionPane.showMessageDialog(null,Config.getString("raspberrypi.error.sudo")
-                                    ,Config.getString("raspberrypi.error.sudo.title")                                  
-                                    ,JOptionPane.WARNING_MESSAGE);
-                        }
-                    });
+                    Platform.runLater(() ->
+                        DialogManager.showTextFX(null, Config.getString("raspberrypi.error.sudo"))
+                    );
                     PrefMgr.setFlag(PrefMgr.START_WITH_SUDO, false);
                 }
             }
             
         }
+        /* // Uncomment this if you want to get a command window showing
+           // for the debug VM on Windows.  Useful to let you hit Ctrl+Break and see thread dump
+           // in case of deadlock
+        paramList.add("cmd.exe");
+        paramList.add("/C");
+        paramList.add("start");
+        paramList.add("cmd.exe");
+        paramList.add("/K");
+        */
         paramList.add(Config.getJDKExecutablePath(null, "java"));
         
         //check if any vm args are specified in Config, at the moment these
@@ -1722,7 +1728,59 @@ class VMReference
         }
         catch(InterruptedException ie) {}
     }
-    
+
+    public DebuggerResult launchFXApp(String className)
+    {
+        ObjectReference obj = null;
+        exitStatus = Debugger.NORMAL_EXIT;
+        try {
+            obj = launchFXAppHelper(className);
+        }
+        catch (VMDisconnectedException e) {
+            exitStatus = Debugger.TERMINATED;
+            // return null; // debugger state change handled elsewhere
+            return new DebuggerResult(Debugger.TERMINATED);
+        }
+        catch (Exception e) {
+            // remote invocation failed
+            Debug.reportError("Launch FX app failed: " + e);
+            e.printStackTrace();
+            exitStatus = Debugger.EXCEPTION;
+            lastException = new ExceptionDescription("Internal BlueJ error: unexpected exception in remote VM\n" + e);
+        }
+        if (obj == null) {
+            return new DebuggerResult(lastException);
+        }
+        else {
+            return new DebuggerResult(JdiObject.getDebuggerObject(obj));
+        }
+    }
+
+    private ObjectReference launchFXAppHelper(String className)
+    {
+        // Calls to this method are serialized via serverThreadLock in JdiDebugger
+        serverThreadStartWait();
+
+        // Store the class and method to call
+        setStaticFieldObject(serverClass, ExecServer.CLASS_TO_RUN_NAME, className);
+        setStaticFieldValue(serverClass, ExecServer.EXEC_ACTION_NAME, machine.mirrorOf(ExecServer.LAUNCH_FX_APP));
+
+        // Resume the thread, wait for it to finish and the new thread to start
+        serverThreadStarted = false;
+        resumeServerThread();
+        serverThreadStartWait();
+
+        // Get return value and check for exceptions
+        Value rval = getStaticFieldObject(serverClass, ExecServer.METHOD_RETURN_NAME);
+        if (rval == null) {
+            ObjectReference exception = getStaticFieldObject(serverClass, ExecServer.EXCEPTION_NAME);
+            if (exception != null) {
+                exceptionEvent(new InvocationException(exception));
+            }
+        }
+        return (ObjectReference) rval;
+    }
+
     /**
      * Invoke the default constructor for the given class and return a reference
      * to the generated instance.
@@ -1732,7 +1790,7 @@ class VMReference
         // Calls to this method are serialized via serverThreadLock in JdiDebugger
         
         serverThreadStartWait();
-        
+
         // Store the class and method to call
         setStaticFieldObject(serverClass, ExecServer.CLASS_TO_RUN_NAME, className);
         setStaticFieldValue(serverClass, ExecServer.EXEC_ACTION_NAME, machine.mirrorOf(ExecServer.INSTANTIATE_CLASS));
@@ -2161,6 +2219,7 @@ class VMReference
             setPriority(Thread.MIN_PRIORITY);
         }
 
+        @OnThread(Tag.Any)
         public void close()
         {
             keepRunning = false;

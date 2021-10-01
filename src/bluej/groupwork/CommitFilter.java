@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2016  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -29,17 +29,25 @@ import bluej.pkgmgr.BlueJPackageFile;
  * modified, remotely modified, locally deleted and remotely removed.
  *
  * @author bquig
- * @version $Id: CommitFilter.java 6215 2009-03-30 13:28:25Z polle $
  */
 public class CommitFilter
 {
     /**
      * Filter to identify which files in a repository will be altered at 
      * the next commit.
+     * @param statusInfo the statusInfo to be filtered
+     * @param local if the commit is between working copy and local tree or 
+     *              between local tree and remote tree.
+     * @return 
      */
-    public boolean accept(TeamStatusInfo statusInfo)
+    public boolean accept(TeamStatusInfo statusInfo, boolean local)
     {
-        int stat = statusInfo.getStatus();
+        int stat;
+        if (local){
+            stat = statusInfo.getStatus();
+        } else {
+            stat = statusInfo.getRemoteStatus();
+        }
         
         if (stat == TeamStatusInfo.STATUS_DELETED) {
             return true;
@@ -50,6 +58,13 @@ public class CommitFilter
         if (stat == TeamStatusInfo.STATUS_NEEDSCOMMIT) {
             return true;
         }
+        if (!local && stat == TeamStatusInfo.STATUS_NEEDSCHECKOUT){
+            return true;
+        }
+        if (!local && stat == TeamStatusInfo.STATUS_NEEDS_PUSH) {
+            return true;
+        }
+        
         
         if (BlueJPackageFile.isPackageFileName(statusInfo.getFile().getName())) {
             boolean conflict = (stat == TeamStatusInfo.STATUS_CONFLICT_ADD);
@@ -58,7 +73,7 @@ public class CommitFilter
             conflict |= (stat == TeamStatusInfo.STATUS_UNRESOLVED);
             if (conflict) {
                 return true;
-            }
+            } 
         }
 
         return false;

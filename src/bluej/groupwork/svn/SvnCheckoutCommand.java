@@ -73,7 +73,7 @@ public class SvnCheckoutCommand extends SvnCommand
                 return new TeamworkCommandError(ce.getMessage(), ce.getLocalizedMessage());
             }
         }
-       
+
         return new TeamworkCommandAborted();
     }
 }

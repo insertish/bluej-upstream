@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2010,2012  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2010,2012,2014,2016  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -26,14 +26,28 @@ import java.awt.event.ActionEvent;
 import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Set;
 
 import javax.swing.AbstractAction;
 import javax.swing.SwingUtilities;
 
+import javafx.application.Platform;
+
+import threadchecker.OnThread;
+import threadchecker.Tag;
 import bluej.Config;
 import bluej.collect.DataCollector;
-import bluej.groupwork.*;
+import bluej.groupwork.StatusHandle;
+import bluej.groupwork.TeamUtils;
+import bluej.groupwork.TeamworkCommand;
+import bluej.groupwork.TeamworkCommandResult;
+import bluej.groupwork.UpdateListener;
+import bluej.groupwork.UpdateResults;
 import bluej.groupwork.ui.ConflictsDialog;
 import bluej.groupwork.ui.UpdateFilesFrame;
 import bluej.pkgmgr.BlueJPackageFile;
@@ -156,9 +170,7 @@ public class UpdateAction extends AbstractAction
          */
         public void fileAdded(final File f)
         {
-            SwingUtilities.invokeLater(new Runnable() {
-                public void run()
-                {
+            SwingUtilities.invokeLater(() -> {
                     project.prepareCreateDir(f.getParentFile());
                     
                     String fileName = f.getName();
@@ -205,11 +217,10 @@ public class UpdateAction extends AbstractAction
                         if (ct == null) {
                             ct = pkg.addClass(name);
                             pkg.positionNewTarget(ct);
-                            DataCollector.addClass(pkg, f);
+                            DataCollector.addClass(pkg, ct);
                         }
                         ct.reload();
                     }
-                }
             });
         }
         
@@ -218,9 +229,7 @@ public class UpdateAction extends AbstractAction
          */
         public void fileRemoved(final File f)
         {
-            SwingUtilities.invokeLater(new Runnable() {
-               public void run()
-                {
+            SwingUtilities.invokeLater(() -> {
                    String fileName = f.getName();
                    if (! fileName.endsWith(".java") &&
                            ! fileName.endsWith(".class") &&
@@ -255,13 +264,12 @@ public class UpdateAction extends AbstractAction
                        
                        ClassTarget ct = (ClassTarget) t;
                        if (ct.hasSourceCode() && ! fileName.endsWith(".java")) {
-                           ct.setInvalidState();
+                           ct.markModified();
                        }
                        else {
                            ct.remove();
                        }
                    }
-                } 
             });
         }
         
@@ -270,9 +278,7 @@ public class UpdateAction extends AbstractAction
          */
         public void fileUpdated(final File f)
         {
-            SwingUtilities.invokeLater(new Runnable() {
-                public void run()
-                {
+            SwingUtilities.invokeLater(() -> {
                     String fileName = f.getName();
                     if (! fileName.endsWith(".java") &&
                             ! fileName.endsWith(".class") &&
@@ -304,6 +310,17 @@ public class UpdateAction extends AbstractAction
                         int n = fileName.lastIndexOf(".");
                         String name = fileName.substring(0, n);
                         Target t = pkg.getTarget(name);
+                        
+                                               
+                       if (t == null && f.exists()) {
+                           //create new target.
+                           ClassTarget ct = pkg.addClass(name);
+                           pkg.positionNewTarget(ct);
+                           DataCollector.addClass(pkg, ct);
+                           ct.reload();
+                           return;
+                       }
+                       
                         if (! (t instanceof ClassTarget)) {
                             return;
                         }
@@ -311,7 +328,6 @@ public class UpdateAction extends AbstractAction
                         ClassTarget ct = (ClassTarget) t;
                         ct.reload();
                     }
-                }
             });
         }
         
@@ -320,13 +336,10 @@ public class UpdateAction extends AbstractAction
          */
         public void dirRemoved(final File f)
         {
-            SwingUtilities.invokeLater(new Runnable() {
-                public void run()
-                {
+            SwingUtilities.invokeLater(() -> {
                     String path = makeRelativePath(project.getProjectDir(), f);
                     String pkgName = path.replace(File.separatorChar, '.');
                     removedPackages.add(pkgName);
-                }
             });
         }
         
@@ -344,35 +357,33 @@ public class UpdateAction extends AbstractAction
                 return;
             }
 
-            try {
-                EventQueue.invokeAndWait(new Runnable() {
-                    public void run()
-                    {
-                        /** A list of files to replace with repository version */
-                        Set<File> filesToOverride = new HashSet<File>();
+                Platform.runLater(() -> {
+                    /** A list of files to replace with repository version */
+                    Set<File> filesToOverride = new HashSet<File>();
 
-                        // Binary conflicts
-                        for (Iterator<File> i = updateServerResponse.getBinaryConflicts().iterator();
-                                i.hasNext(); ) {
-                            File f = i.next();
+                    // Binary conflicts
+                    for (Iterator<File> i = updateServerResponse.getBinaryConflicts().iterator();
+                            i.hasNext(); ) {
+                        File f = i.next();
 
-                            if (BlueJPackageFile.isPackageFileName(f.getName())) {
-                                filesToOverride.add(f);
+                        if (BlueJPackageFile.isPackageFileName(f.getName())) {
+                            filesToOverride.add(f);
+                        }
+                        else {
+                            // TODO make the displayed file path relative to project
+                            int answer = DialogManager.askQuestionFX(null,
+                                    "team-binary-conflict", new String[] {f.getName()});
+                            if (answer == 0) {
+                                // keep local version
                             }
                             else {
-                                // TODO make the displayed file path relative to project
-                                int answer = DialogManager.askQuestion(PkgMgrFrame.getMostRecent(),
-                                        "team-binary-conflict", new String[] {f.getName()});
-                                if (answer == 0) {
-                                    // keep local version
-                                }
-                                else {
-                                    // use repository version
-                                    filesToOverride.add(f);
-                                }
+                                // use repository version
+                                filesToOverride.add(f);
                             }
                         }
-
+                    }
+                    SwingUtilities.invokeLater(() ->
+                    {
                         updateServerResponse.overrideFiles(filesToOverride);
 
                         List<String> blueJconflicts = new LinkedList<String>();
@@ -380,7 +391,8 @@ public class UpdateAction extends AbstractAction
                         List<Target> targets = new LinkedList<Target>();
 
                         for (Iterator<File> i = updateServerResponse.getConflicts().iterator();
-                                i.hasNext();) {
+                             i.hasNext(); )
+                        {
                             File file = i.next();
 
                             // Calculate the file base name
@@ -388,20 +400,25 @@ public class UpdateAction extends AbstractAction
 
                             // bluej package file may come up as a conflict, but it won't cause a problem,
                             // so it can be ignored.
-                            if (! BlueJPackageFile.isPackageFileName(baseName)) {
+                            if (!BlueJPackageFile.isPackageFileName(baseName))
+                            {
                                 Target target = null;
 
-                                if (baseName.endsWith(".java") || baseName.endsWith(".class")) {
+                                if (baseName.endsWith(".java") || baseName.endsWith(".class"))
+                                {
                                     String pkg = project.getPackageForFile(file);
-                                    if (pkg != null) {
+                                    if (pkg != null)
+                                    {
                                         String targetId = filenameToTargetIdentifier(baseName);
                                         targetId = JavaNames.combineNames(pkg, targetId);
                                         target = project.getTarget(targetId);
                                     }
                                 }
-                                else if (baseName.equals("README.TXT")) {
+                                else if (baseName.equals("README.TXT"))
+                                {
                                     String pkg = project.getPackageForFile(file);
-                                    if (pkg != null) {
+                                    if (pkg != null)
+                                    {
                                         String targetId = ReadmeTarget.README_ID;
                                         targetId = JavaNames.combineNames(pkg, targetId);
                                         target = project.getTarget(targetId);
@@ -409,33 +426,30 @@ public class UpdateAction extends AbstractAction
                                 }
 
                                 String fileName = makeRelativePath(project.getProjectDir(), file);
-                                
-                                if (target == null) {
+
+                                if (target == null)
+                                {
                                     nonBlueJConflicts.add(fileName);
-                                } else {
+                                }
+                                else
+                                {
                                     blueJconflicts.add(fileName);
                                     targets.add(target);
                                 }
                             }
                         }
 
-                        if (! blueJconflicts.isEmpty() || ! nonBlueJConflicts.isEmpty()) {
+                        if (!blueJconflicts.isEmpty() || !nonBlueJConflicts.isEmpty())
+                        {
                             project.clearAllSelections();
                             project.selectTargetsInGraphs(targets);
 
                             ConflictsDialog conflictsDialog = new ConflictsDialog(project,
-                                    blueJconflicts, nonBlueJConflicts);
+                                blueJconflicts, nonBlueJConflicts);
                             conflictsDialog.setVisible(true);
                         }
-                    }
+                    });
                 });
-            }
-            catch (InvocationTargetException ite) {
-                throw new Error(ite);
-            }
-            catch (InterruptedException ie) {
-                // Probably indicates an application exit; just ignore it.
-            }
         }
         
         public void abort()
@@ -458,7 +472,7 @@ public class UpdateAction extends AbstractAction
             }
             else {
                 PkgMgrFrame.displayMessage(project, "");
-                TeamUtils.handleServerResponse(result, updateFrame);
+                Platform.runLater(() -> TeamUtils.handleServerResponseFX(result, updateFrame.asWindow()));
             }
             
             if (! aborted) {
@@ -472,6 +486,7 @@ public class UpdateAction extends AbstractAction
          * If packages were removed by the update, remove them from the
          * parent package graph.
          */
+        @OnThread(Tag.Swing)
         private void handleRemovedPkgs()
         {
             for (Iterator<String> i = removedPackages.iterator(); i.hasNext(); ) {
@@ -487,7 +502,7 @@ public class UpdateAction extends AbstractAction
                         pkg.closeAllEditors();
                         PkgMgrFrame frame = PkgMgrFrame.findFrame(pkg);
                         if (frame != null) {
-                            frame.doClose(true, false);
+                            Platform.runLater(() -> frame.doClose(true, false));
                         }
                         project.removePackage(packageName);
                     }

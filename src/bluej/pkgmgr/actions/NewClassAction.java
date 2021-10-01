@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2016  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -30,19 +30,18 @@ import bluej.pkgmgr.PkgMgrFrame;
  * applet, etc)
  * 
  * @author Davin McCall
- * @version $Id: NewClassAction.java 6215 2009-03-30 13:28:25Z polle $
  */
 final public class NewClassAction extends PkgMgrAction
 {
-    public NewClassAction()
+    public NewClassAction(PkgMgrFrame pmf)
     {
-        super("menu.edit.newClass");
+        super(pmf, "menu.edit.newClass");
         putValue(SHORT_DESCRIPTION, Config.getString("tooltip.newClass"));
     }
     
     public void actionPerformed(PkgMgrFrame pmf)
     {
         pmf.menuCall();
-        pmf.doCreateNewClass();
+        pmf.doCreateNewClass(-1, -1);
     }
 }

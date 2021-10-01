@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2013  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2013,2014,2015,2016,2017  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -23,39 +23,53 @@ package bluej.pkgmgr.target;
 
 import java.awt.Color;
 import java.awt.Rectangle;
-import java.awt.event.ActionEvent;
-import java.awt.event.MouseEvent;
 import java.io.File;
 import java.io.IOException;
+import java.util.List;
 import java.util.Properties;
 
-import javax.swing.AbstractAction;
-import javax.swing.Action;
-import javax.swing.JMenuItem;
-import javax.swing.JPopupMenu;
+import javax.swing.SwingUtilities;
+
+import javafx.application.Platform;
+import javafx.scene.control.ContextMenu;
+import javafx.scene.control.MenuItem;
+import javafx.scene.image.Image;
+import javafx.scene.image.ImageView;
 
 import bluej.Config;
+import bluej.collect.DiagnosticWithShown;
+import bluej.collect.StrideEditReason;
+import bluej.compiler.CompileReason;
+import bluej.compiler.CompileType;
 import bluej.editor.Editor;
 import bluej.editor.EditorManager;
-import bluej.graph.GraphEditor;
+import bluej.extensions.SourceType;
 import bluej.pkgmgr.Package;
-import bluej.pkgmgr.graphPainter.ReadmeTargetPainter;
-import bluej.prefmgr.PrefMgr;
+import bluej.pkgmgr.PackageEditor;
 import bluej.utility.Debug;
+import bluej.utility.javafx.JavaFXUtil;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 
 /**
  * A parent package
  *
  * @author  Andrew Patterson
  */
-public class ReadmeTarget extends EditableTarget
+public class ReadmeTarget extends NonCodeEditableTarget
 {
-    private static final int WIDTH = ReadmeTargetPainter.getMaxImageWidth();
-    private static final int HEIGHT = ReadmeTargetPainter.getMaxImageHeight();
-    private static String openStr = Config.getString("pkgmgr.packagemenu.open");
+    private static final String openStr = Config.getString("pkgmgr.packagemenu.open");
     private static final Color envOpColour = Config.ENV_COLOUR;
     
     public static final String README_ID = "@README";
+
+    // Images
+    @OnThread(Tag.FXPlatform)
+    private static Image readmeImage;
+    @OnThread(Tag.FXPlatform)
+    private static Image selectedReadmeImage;
+    @OnThread(Tag.FXPlatform)
+    private ImageView imageView;
 
     public ReadmeTarget(Package pkg)
     {
@@ -63,34 +77,28 @@ public class ReadmeTarget extends EditableTarget
         // a valid java name
         super(pkg, README_ID);
         
-        setPos(10, 10);
-        setSize(WIDTH, HEIGHT);
+        Platform.runLater(() -> {
+            if (readmeImage == null)
+                readmeImage = Config.getImageAsFXImage("image.readme");
+            if (selectedReadmeImage == null)
+                selectedReadmeImage= Config.getImageAsFXImage("image.readme-selected");
+
+            setPos(10, 10);
+            setSize((int)readmeImage.getWidth(), (int)readmeImage.getHeight());
+            JavaFXUtil.addStyleClass(pane, "readme-target");
+            pane.setTop(null);
+            imageView = new ImageView();
+            imageView.setImage(readmeImage);
+            pane.setCenter(imageView);
+        });
+
+
     }
 
     @Override
     public void load(Properties props, String prefix) throws NumberFormatException
     {
-        if(props.getProperty(prefix + ".editor.x") != null) {
-            editorBounds = new Rectangle(Integer.parseInt(props.getProperty(prefix + ".editor.x")),
-                    Integer.parseInt(props.getProperty(prefix + ".editor.y")), 
-                    Integer.parseInt(props.getProperty(prefix + ".editor.width")),
-                    Integer.parseInt(props.getProperty(prefix + ".editor.height")));
-        }        
     }
-
-    @Override
-    public void save(Properties props, String prefix)
-    {   
-        if (editor != null) {
-            editorBounds = editor.getBounds();            
-        } 
-        if(editorBounds!=null) {
-            props.put(prefix + ".editor.x", String.valueOf((int) editorBounds.getX()));
-            props.put(prefix + ".editor.y", String.valueOf((int) editorBounds.getY()));
-            props.put(prefix + ".editor.width", String.valueOf((int) editorBounds.getWidth()));
-            props.put(prefix + ".editor.height", String.valueOf((int) editorBounds.getHeight()));
-        }
-    }    
 
     /*
      * @return the name of the (text) file this target corresponds to.
@@ -102,6 +110,7 @@ public class ReadmeTarget extends EditableTarget
     }
 
     @Override
+    @OnThread(Tag.FX)
     public boolean isResizable()
     {
         return false;
@@ -115,6 +124,7 @@ public class ReadmeTarget extends EditableTarget
      * BlueJ version with an older BlueJ version.
      */
     @Override
+    @OnThread(Tag.Any)
     public boolean isSaveable()
     {
         return false;
@@ -127,7 +137,7 @@ public class ReadmeTarget extends EditableTarget
             editor = EditorManager.getEditorManager().openText(
                                                  getSourceFile().getPath(),
                                                  getPackage().getProject().getProjectCharset(),
-                                                 Package.readmeName, editorBounds);
+                                                 Package.readmeName, getPackage().getProject()::getDefaultFXTabbedEditor);
         }
         return editor;
     }
@@ -157,80 +167,46 @@ public class ReadmeTarget extends EditableTarget
      * Creates a new PkgFrame when a package is drilled down on.
      */
     @Override
-    public void doubleClick(MouseEvent evt)
+    @OnThread(Tag.FXPlatform)
+    public void doubleClick()
     {
-        openEditor();
+        SwingUtilities.invokeLater(() -> openEditor());
     }
 
     /*
      * Post the context menu for this target.
      */
     @Override
-    public void popupMenu(int x, int y, GraphEditor editor)
+    @OnThread(Tag.FXPlatform)
+    public void popupMenu(int x, int y, PackageEditor editor)
     {
-        JPopupMenu menu = createMenu(null);
+        ContextMenu menu = createMenu();
         if (menu != null) {
-            // editor.add(menu);
-            menu.show(editor, x, y);
+            showingMenu(menu);
+            menu.show(getNode(), x, y);
         }
     }
     
-    /**
-     * Construct a popup menu which displays all our parent packages.
-     */
-    private JPopupMenu createMenu(Class<?> cl)
+    @OnThread(Tag.FXPlatform)
+    private ContextMenu createMenu()
     {
-        JPopupMenu menu = new JPopupMenu();
-        JMenuItem item;
-           
-        Action openAction = new OpenAction(openStr);
-
-        item = menu.add(openAction);
-        item.setFont(PrefMgr.getPopupMenuFont());
-        item.setForeground(envOpColour);
-        return menu;
+        MenuItem open = new MenuItem(openStr);
+        open.setOnAction(e -> SwingUtilities.invokeLater(() -> openEditor()));
+        JavaFXUtil.addStyleClass(open, "class-action-inbuilt");
+        return new ContextMenu(open);
     }
 
-    private class OpenAction extends AbstractAction
-    {
-        public OpenAction(String menu)
-        {
-            super(menu);
-        }
-
-        public void actionPerformed(ActionEvent e)
-        {
-            openEditor();
-        }
-    }
-    
     @Override
     public void remove()
     {
         // The user is not permitted to remove the readmefile
     }
-    
+        
     @Override
-    public void generateDoc()
+    public @OnThread(Tag.FXPlatform) void setSelected(boolean selected)
     {
-        // meaningless
-    }
+        super.setSelected(selected);
+        imageView.setImage(selected ? selectedReadmeImage : readmeImage);
 
-    @Override
-    public String getProperty(String key) 
-    {
-        return null;
-    }
-
-    @Override
-    public void setProperty(String key, String value) { }
-    
-    @Override
-    public void recordEdit(String curSource, boolean includeOneLineEdits) { }
-
-    @Override
-    public String getTooltipText()
-    {
-        return "README";
     }
 }

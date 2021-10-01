@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2011,2012,2013,2014  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2011,2012,2013,2014,2016  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -21,17 +21,23 @@
  */
 package bluej.debugmgr.objectbench;
 
-import java.awt.*;
-import java.awt.event.*;
+import javax.swing.*;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
-
-import javax.accessibility.Accessible;
-import javax.swing.JPanel;
-import javax.swing.JScrollPane;
+import java.util.Optional;
+import javafx.animation.FadeTransition;
+import javafx.collections.FXCollections;
+import javafx.collections.ListChangeListener;
+import javafx.collections.ObservableList;
+import javafx.geometry.Point2D;
+import javafx.scene.input.KeyEvent;
+import javafx.scene.layout.StackPane;
+import javafx.scene.layout.TilePane;
+import javafx.scene.text.Text;
+import javafx.util.Duration;
 
 import bluej.Config;
 import bluej.collect.DataCollector;
@@ -40,6 +46,9 @@ import bluej.debugmgr.ValueCollection;
 import bluej.pkgmgr.PkgMgrFrame;
 import bluej.testmgr.record.InvokerRecord;
 import bluej.utility.JavaNames;
+import bluej.utility.javafx.JavaFXUtil;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 
 /**
  * The class responsible for the panel that displays objects
@@ -48,28 +57,39 @@ import bluej.utility.JavaNames;
  * @author  Michael Cahill
  * @author  Andrew Patterson
  */
-public class ObjectBench extends JPanel implements Accessible, ValueCollection,
-    FocusListener, KeyListener, MouseListener, ObjectBenchInterface
+@OnThread(Tag.FXPlatform)
+public class ObjectBench extends javafx.scene.control.ScrollPane implements ValueCollection,
+    ObjectBenchInterface, PkgMgrFrame.PkgMgrPane
 {
-    private static final Color TRANSPARENT = new Color(0f, 0f, 0f, 0.0f);
-
-    private JScrollPane scroll;
+    @OnThread(Tag.Any)
+    private final List<ObjectBenchListener> listenerList = new ArrayList<>();
     private ObjectBenchPanel obp;
-    private List<ObjectWrapper> objects;
+    /**
+     * This list maintains the correct internal state of the object bench.  Whenever you
+     * modify this list, you must manually mirror the change into obp.getChildren()
+     * using correct threading rules.
+     */
+    @OnThread(Tag.Any)
+    private final List<ObjectWrapper> objects = new ArrayList<>();
+    /**
+     * This can be read from any thread, but should only be altered on FXPlatform thread.
+     */
+    @OnThread(value = Tag.Any, requireSynchronized = true)
     private ObjectWrapper selectedObject;
-    private PkgMgrFrame pkgMgrFrame;
+    private final PkgMgrFrame pkgMgrFrame;
     
     // All invocations done since our last reset.
+    @OnThread(Tag.Swing)
     private List<InvokerRecord> invokerRecords;
    
     /**
      * Construct an object bench which is used to hold
      * a bunch of object reference Components.
      */
+    @OnThread(Tag.FXPlatform)
     public ObjectBench(PkgMgrFrame pkgMgrFrame)
     {
         super();
-        objects = new ArrayList<ObjectWrapper>();
         createComponent();
         this.pkgMgrFrame = pkgMgrFrame;
         updateAccessibleName();
@@ -79,18 +99,26 @@ public class ObjectBench extends JPanel implements Accessible, ValueCollection,
      * Updates the accessible name for screen readers, based on the number
      * of objects currently on the bench
      */
+    @OnThread(Tag.FXPlatform)
     private void updateAccessibleName()
     {
         String name = Config.getString("pkgmgr.objBench.title");
         final int n = getObjectCount();
         name += ": " + n + " " + Config.getString(n == 1 ? "pkgmgr.objBench.suffix.singular" : "pkgmgr.objBench.suffix.plural");
-        getAccessibleContext().setAccessibleName(name);
+        //getAccessibleContext().setAccessibleName(name);
     }
 
     /**
      * Add an object (in the form of an ObjectWrapper) to this bench.
      */
+    @OnThread(Tag.Any)
     public void addObject(ObjectWrapper wrapper)
+    {
+        addObject(wrapper, Optional.empty());
+    }
+
+    @OnThread(Tag.Any)
+    public void addObject(ObjectWrapper wrapper, Optional<Point2D> animateFromScene)
     {
         // check whether name is already taken
 
@@ -107,29 +135,44 @@ public class ObjectBench extends JPanel implements Accessible, ValueCollection,
         }
         wrapper.setName(newname);
 
+        synchronized (ObjectBench.this)
+        {
+            objects.add(wrapper);
+        }
+
         // wrapper.addFocusListener(this); -- not needed
-        obp.add(wrapper);
-        objects.add(wrapper);
-        obp.revalidate();
-        obp.repaint();
-        updateAccessibleName();
+        JavaFXUtil.runNowOrLater(() -> {
+            // Keep it invisible until positioned:
+            wrapper.setVisible(false);
+            // Allows us to know when it has been positioned:
+            wrapper.setLayoutY(-1);
+            obp.getChildren().add(wrapper);
+            wrapper.animateIn(animateFromScene);
+            updateAccessibleName();
+        });
+        
     }
 
     
     /**
      * Return all the wrappers stored in this object bench in an array
      */
-    public List<ObjectWrapper> getObjects()
+    @OnThread(Tag.Any)
+    public synchronized List<ObjectWrapper> getObjects()
     {
-        return Collections.unmodifiableList(objects);
+        // We take a copy because we want to avoid unsafe thread accesses
+        // on the returned list:
+        return Collections.unmodifiableList(new ArrayList<>(objects));
     }
 
     /**
      * Return an iterator through all the objects on the bench (to meet
      * the ValueCollection interface)
      */
+    @OnThread(Tag.Any)
     public Iterator<ObjectWrapper> getValueIterator()
     {
+        // Iterates on the copy that getObjects provides, so thread-safe:
         return getObjects().iterator();
     }
     
@@ -140,7 +183,8 @@ public class ObjectBench extends JPanel implements Accessible, ValueCollection,
      * @param name  The name to check for.
      * @return  The named object wrapper, or null if not found.
      */
-    public ObjectWrapper getObject(String name)
+    @OnThread(Tag.Any)
+    public synchronized ObjectWrapper getObject(String name)
     {
         for(Iterator<ObjectWrapper> i = objects.iterator(); i.hasNext(); ) {
             ObjectWrapper wrapper = i.next();
@@ -150,6 +194,7 @@ public class ObjectBench extends JPanel implements Accessible, ValueCollection,
         return null;
     }
     
+    @OnThread(Tag.Any)
     public NamedValue getNamedValue(String name)
     {
         return getObject(name);
@@ -160,6 +205,7 @@ public class ObjectBench extends JPanel implements Accessible, ValueCollection,
      *
      * @param name  The name to check for.
      */
+    @OnThread(Tag.Any)
     public boolean hasObject(String name)
     {
         return getObject(name) != null;
@@ -170,7 +216,8 @@ public class ObjectBench extends JPanel implements Accessible, ValueCollection,
      * Count of object bench copmponents that are object wrappers
      * @return number of ObjectWrappers on the bench
      */
-    public int getObjectCount()
+    @OnThread(Tag.Any)
+    public synchronized int getObjectCount()
     {
         return objects.size();
     }
@@ -179,7 +226,7 @@ public class ObjectBench extends JPanel implements Accessible, ValueCollection,
     /**
      * Remove all objects from the object bench.
      */
-    public void removeAllObjects(String scopeId)
+    public synchronized void removeAllObjects(String scopeId)
     {
         setSelectedObject (null);
 
@@ -187,12 +234,10 @@ public class ObjectBench extends JPanel implements Accessible, ValueCollection,
             ObjectWrapper wrapper = i.next();
             wrapper.prepareRemove();
             wrapper.getPackage().getDebugger().removeObject(scopeId, wrapper.getName());
-            obp.remove(wrapper);
         }
         objects.clear();
-        resetRecordingInteractions();
-        obp.revalidate();
-        obp.repaint();
+        JavaFXUtil.runNowOrLater(() -> obp.getChildren().clear());
+        SwingUtilities.invokeLater(() -> resetRecordingInteractions());
         updateAccessibleName();
     }
 
@@ -202,21 +247,19 @@ public class ObjectBench extends JPanel implements Accessible, ValueCollection,
      * is also removed from the scope of the package (so it is not accessible
      * as a parameter anymore) and the bench is redrawn.
      */
-    public void removeObject(ObjectWrapper wrapper, String scopeId)
+    public synchronized void removeObject(ObjectWrapper wrapper, String scopeId)
     {
         if(wrapper == selectedObject) {
             setSelectedObject(null);
         }
      
-        DataCollector.removeObject(wrapper.getPackage(), wrapper.getName());
+        SwingUtilities.invokeLater(() -> {DataCollector.removeObject(wrapper.getPackage(), wrapper.getName());});
         
         wrapper.prepareRemove();
         wrapper.getPackage().getDebugger().removeObject(scopeId, wrapper.getName());
-        obp.remove(wrapper);
         objects.remove(wrapper);
+        wrapper.animateOut(() -> obp.getChildren().remove(wrapper));
 
-        obp.revalidate();
-        obp.repaint();
         updateAccessibleName();
     }
 
@@ -237,22 +280,24 @@ public class ObjectBench extends JPanel implements Accessible, ValueCollection,
      * Sets what is the currently selected ObjectWrapper, null can be given to 
      * signal that no wrapper is selected.
      */
-    public void setSelectedObject(ObjectWrapper aWrapper)
+    @OnThread(Tag.FXPlatform)
+    public synchronized void setSelectedObject(ObjectWrapper aWrapper)
     {
         if (selectedObject != null) {
             selectedObject.setSelected(false);
         }
         selectedObject = aWrapper;
         
-        if (selectedObject != null) {
-            selectedObject.requestFocusInWindow();
+        if (selectedObject != null && !selectedObject.isFocused()) {
+            selectedObject.requestFocus();
         }
     }
     
     /**
      * Notify that an object has gained focus. The object becomes the selected object.
      */
-    public void objectGotFocus(ObjectWrapper aWrapper)
+    @OnThread(Tag.FXPlatform)
+    public synchronized void objectGotFocus(ObjectWrapper aWrapper)
     {
         if (selectedObject == aWrapper) {
             return;
@@ -261,7 +306,7 @@ public class ObjectBench extends JPanel implements Accessible, ValueCollection,
         if (selectedObject != null) {
             selectedObject.setSelected(false);
         }
-        
+
         selectedObject = aWrapper;
         selectedObject.setSelected(true);
     }
@@ -270,7 +315,8 @@ public class ObjectBench extends JPanel implements Accessible, ValueCollection,
      * Returns the currently selected object wrapper. 
      * If no wrapper is selected null is returned.
      */
-    public ObjectWrapper getSelectedObject()
+    @OnThread(Tag.Any)
+    public synchronized ObjectWrapper getSelectedObject()
     {
         return selectedObject;
     }
@@ -280,9 +326,13 @@ public class ObjectBench extends JPanel implements Accessible, ValueCollection,
      * Add a listener for object events to this bench.
      * @param l  The listener object.
      */
+    @OnThread(Tag.Any)
     public void addObjectBenchListener(ObjectBenchListener l)
     {
-        listenerList.add(ObjectBenchListener.class, l);
+        synchronized (listenerList)
+        {
+            listenerList.add(l);
+        }
     }
     
 
@@ -290,9 +340,13 @@ public class ObjectBench extends JPanel implements Accessible, ValueCollection,
      * Remove a listener for object events to this bench.
      * @param l  The listener object.
      */
+    @OnThread(Tag.Any)
     public void removeObjectBenchListener(ObjectBenchListener l)
     {
-        listenerList.remove(ObjectBenchListener.class, l);
+        synchronized (listenerList)
+        {
+            listenerList.remove(l);
+        }
     }
     
     
@@ -301,79 +355,29 @@ public class ObjectBench extends JPanel implements Accessible, ValueCollection,
      * notify all listeners that have registered interest for
      * notification on this event type.
      */
+    @OnThread(Tag.Swing)
     public void fireObjectEvent(ObjectWrapper wrapper)
     {
-        // guaranteed to return a non-null array
-        Object[] listeners = listenerList.getListenerList();
-        // process the listeners last to first, notifying
-        // those that are interested in this event
-        for (int i = listeners.length-2; i>=0; i-=2) {
-            // Loop steps by 2 because the list is a list of pairs: [listener class, listener]
-            if (listeners[i] == ObjectBenchListener.class) {
-                ((ObjectBenchListener)listeners[i+1]).objectEvent(
-                        new ObjectBenchEvent(this,
-                                ObjectBenchEvent.OBJECT_SELECTED, wrapper));
+        synchronized (listenerList)
+        {
+            // process the listeners last to first, notifying
+            // those that are interested in this event
+            for (int i = listenerList.size() - 1; i >= 0; i--)
+            {
+                listenerList.get(i).objectEvent(
+                    new ObjectBenchEvent(this,
+                        ObjectBenchEvent.OBJECT_SELECTED, wrapper));
             }
         }
     }
     
-    /**
-     * Do the usual enabling/disabling, while also removing the focus
-     * border when disabling.
-     */
-    public void setEnabled(boolean enable)
-    {
-        super.setEnabled(enable);
-        if(!enable) {
-            showFocusHiLight(false);
-        }
-    }
-    
-    /**
-     * Show or hide the focus highlight (an emphasised border around
-     * the bench).
-     */
-    public void showFocusHiLight(boolean hiLight)
-    {
-        if(hiLight)
-            scroll.setBorder(Config.focusBorder);
-        else
-            scroll.setBorder(Config.normalBorder);
-        repaint();
-    }
-
-    // --- FocusListener interface ---
-    
-    /**
-     * Note that the object bench got keyboard focus.
-     */
-    public void focusGained(FocusEvent e) 
-    {
-        if (isEnabled()) {
-            showFocusHiLight(true);
-        }
-    }
-
-    
-    /**
-     * Note that the object bench lost keyboard focus.
-     */
-    public void focusLost(FocusEvent e) 
-    {
-        if (!e.isTemporary()) {
-            showFocusHiLight(false);
-        }
-    }
-
-    // --- end of FocusListener interface ---
-
     // --- KeyListener interface ---
 
     /**
      * A key was pressed in the object bench.
      * @see java.awt.event.KeyListener#keyPressed(java.awt.event.KeyEvent)
      */
-    public void keyPressed(KeyEvent e) 
+    public synchronized void keyPressed(KeyEvent e) 
     {
         int selectedObjectIndex;
         if(selectedObject == null) {
@@ -382,10 +386,8 @@ public class ObjectBench extends JPanel implements Accessible, ValueCollection,
         else {
             selectedObjectIndex = objects.indexOf(selectedObject);
         }
-        int key = e.getKeyCode();
-        
-        switch (key){
-            case KeyEvent.VK_LEFT:
+        switch (e.getCode()){
+            case LEFT:
                 if (selectedObjectIndex > 0) {
                     selectedObjectIndex--;
                 }
@@ -395,29 +397,29 @@ public class ObjectBench extends JPanel implements Accessible, ValueCollection,
                 setSelectedObjectByIndex(selectedObjectIndex);
                 break;
 
-            case KeyEvent.VK_RIGHT:
+            case RIGHT:
                 if (selectedObjectIndex < objects.size() - 1) {
                     setSelectedObjectByIndex(selectedObjectIndex + 1);
                 }
                 break;
 
-            case KeyEvent.VK_UP:
+            case UP:
                 selectedObjectIndex = selectedObjectIndex - obp.getNumberOfColumns();
                 if (selectedObjectIndex >= 0) {
                     setSelectedObjectByIndex(selectedObjectIndex);
                 }
                 break;
 
-            case KeyEvent.VK_DOWN:
+            case DOWN:
                 selectedObjectIndex = selectedObjectIndex + obp.getNumberOfColumns();
                 if (selectedObjectIndex < objects.size()) {
                     setSelectedObjectByIndex(selectedObjectIndex);
                 }
                 break;
 
-            case KeyEvent.VK_ENTER:
-            case KeyEvent.VK_SPACE:
-            case KeyEvent.VK_CONTEXT_MENU:
+            case ENTER:
+            case SPACE:
+            case CONTEXT_MENU:
                 showPopupMenu();
                 break;
         }
@@ -427,71 +429,16 @@ public class ObjectBench extends JPanel implements Accessible, ValueCollection,
      * Sets the selected object from an index in the objects list.
      * The index MUST be valid.
      */
-    private void setSelectedObjectByIndex(int i)
+    private synchronized void setSelectedObjectByIndex(int i)
     {
-        ((ObjectWrapper) objects.get(i)).requestFocusInWindow();
+        ((ObjectWrapper) objects.get(i)).requestFocus();
     }
-    
-    /**
-     * A key was released in the object bench.
-     * @see java.awt.event.KeyListener#keyReleased(java.awt.event.KeyEvent)
-     */
-    public void keyReleased(KeyEvent e) {}
-
-    
-    /**
-     * A key was typed in the object bench.
-     * @see java.awt.event.KeyListener#keyTyped(java.awt.event.KeyEvent)
-     */
-    public void keyTyped(KeyEvent e) {}
-    
-    // --- end of KeyListener interface ---
-
-    // --- MouseListener interface ---
-
-    /**
-     * The mouse was clicked in the object bench.
-     * @see java.awt.event.MouseListener#mouseClicked(java.awt.event.MouseEvent)
-     */
-    public void mouseClicked(MouseEvent e)
-    {
-        setSelectedObject(null);
-    }
-    
-    /**
-     * The mouse entered the object bench.
-     * @see java.awt.event.MouseListener#mouseEntered(java.awt.event.MouseEvent)
-     */
-    public void mouseEntered(MouseEvent e) {}
-    
-    /**
-     * The mouse left the object bench.
-     * @see java.awt.event.MouseListener#mouseExited(java.awt.event.MouseEvent)
-     */
-    public void mouseExited(MouseEvent e) {}
-
-    /**
-     * The mouse was pressed in the object bench.
-     * @see java.awt.event.MouseListener#mousePressed(java.awt.event.MouseEvent)
-     */
-    public void mousePressed(MouseEvent e) {
-        requestFocus();
-    }
-    
-    /**
-     * The mouse was released in the object bench.
-     * @see java.awt.event.MouseListener#mouseReleased(java.awt.event.MouseEvent)
-     */
-    public void mouseReleased(MouseEvent e) {}
-    
-
-    // --- end of MouseListener interface ---
 
 
     /**
      * Post the object menu for the selected object.
      */
-    private void showPopupMenu() 
+    private synchronized void showPopupMenu() 
     {
         if(selectedObject != null) {
             selectedObject.showMenu();
@@ -503,11 +450,13 @@ public class ObjectBench extends JPanel implements Accessible, ValueCollection,
     /**
      * Reset the recording of invocations.
      */
+    @OnThread(Tag.Swing)
     public void resetRecordingInteractions()
     {
         invokerRecords = new LinkedList<InvokerRecord>();
     }
 
+    @OnThread(Tag.Swing)
     public void addInteraction(InvokerRecord ir)
     {
         if (invokerRecords == null)
@@ -519,6 +468,7 @@ public class ObjectBench extends JPanel implements Accessible, ValueCollection,
     /**
      * Get the recorded interaction fixture declarations as Java code.
      */
+    @OnThread(Tag.Swing)
     public String getFixtureDeclaration(String firstIndent)
     {
         StringBuffer sb = new StringBuffer();
@@ -538,6 +488,7 @@ public class ObjectBench extends JPanel implements Accessible, ValueCollection,
     /**
      * Get the recorded interaction fixture setup as Java code.
      */
+    @OnThread(Tag.Swing)
     public String getFixtureSetup(String secondIndent)
     {
         StringBuffer sb = new StringBuffer();
@@ -557,6 +508,7 @@ public class ObjectBench extends JPanel implements Accessible, ValueCollection,
     /**
      * Get the recorded interactions as Java code.
      */
+    @OnThread(Tag.Swing)
     public String getTestMethod(String secondIndent)
     {
         StringBuffer sb = new StringBuffer();
@@ -574,40 +526,23 @@ public class ObjectBench extends JPanel implements Accessible, ValueCollection,
         return sb.toString();
     }
 
-    
-    /**
-     * Create the object bench as a good looking Swing component.
-     */
-    private void createComponent()
+    @OnThread(Tag.FXPlatform)
+    private synchronized void createComponent()
     {
-        setLayout(new BorderLayout());
-
         // a panel holding the actual object components
         obp = new ObjectBenchPanel();
-        if (!Config.isRaspberryPi()) obp.setBackground(TRANSPARENT);
-        if (!Config.isRaspberryPi()) obp.setOpaque(true);
-        if (!Config.isRaspberryPi()) setOpaque(false);
-        
-        scroll = new JScrollPane(obp);
-        scroll.setBorder(Config.normalBorder);
-        if (!Config.isRaspberryPi()) scroll.setOpaque(false);
-        Dimension sz = obp.getMinimumSize();
-        Insets in = scroll.getInsets();
-        sz.setSize(sz.getWidth()+in.left+in.right, sz.getHeight()+in.top+in.bottom);
-        scroll.setMinimumSize(sz);
-        scroll.setPreferredSize(sz);
-        scroll.getVerticalScrollBar().setUnitIncrement(20);
-        
-        add(scroll, BorderLayout.CENTER);
+        JavaFXUtil.addStyleClass(this, "object-bench");
 
+        setContent(obp);
+        setFitToWidth(true);
+        setMinViewportWidth(ObjectWrapper.WIDTH);
+        setMinViewportHeight(ObjectWrapper.HEIGHT);
+        this.setMinWidth(ObjectWrapper.WIDTH + 35 /* space for scroll bar, foldout control */);
+        this.setMinHeight(ObjectWrapper.HEIGHT);
         // start with a clean slate recording invocations
-        resetRecordingInteractions();
-        //when empty, the objectbench is focusable
-        setFocusable(true);
+        SwingUtilities.invokeLater(() -> {resetRecordingInteractions();});
 
-        addFocusListener(this);
-        addKeyListener(this);
-        obp.addMouseListener(this);
+        setOnKeyPressed(this::keyPressed);
     }
 
     
@@ -617,88 +552,57 @@ public class ObjectBench extends JPanel implements Accessible, ValueCollection,
      * This is the panel that lives inside the object bench's scrollpane
      * and actually holds the object wrapper components.
      */
-    private final class ObjectBenchPanel extends JPanel
+    @OnThread(Tag.FXPlatform)
+    private final class ObjectBenchPanel extends TilePane
     {
         public ObjectBenchPanel()
         {
-            setLayout(new FlowLayout(FlowLayout.LEFT, 0, 0));
-            setMinimumSize(new Dimension(ObjectWrapper.WIDTH, ObjectWrapper.HEIGHT));
+            //this.setPrefWidth(ObjectWrapper.WIDTH);
+            //this.prefHeightProperty().bind()  TODO is this necessary?  HEIGHT * numrows
+            JavaFXUtil.addStyleClass(this, "object-bench-panel");
         }
 
-        /**
-         * Add the component (like any other JPanel) and then set our preferred size
-         * so that all components would be visible.
-         */
-        public Component add(Component comp)
-        {
-            super.add(comp);
-            return comp;
-        }
-
-        /**
-         * Return the preferred size of this component.
-         */
-        public Dimension getPreferredSize()
-        {
-            int rows = getNumberOfRows();
-            return new Dimension(ObjectWrapper.WIDTH, ObjectWrapper.HEIGHT * rows);                
-        }
-        
         /**
          * Return the current number of rows or objects on this bench.
          */
         public int getNumberOfRows()
         {
-            int objects = getComponentCount();
+            int objects = getChildren().size();
             if(objects == 0) {
                 return 1;
             }
             else {
-                int objectsPerRow = getWidth() / ObjectWrapper.WIDTH;
+                int objectsPerRow = (int)getWidth() / ObjectWrapper.WIDTH;
                 return (objects + objectsPerRow - 1) / objectsPerRow;
-            }            
+            }
         }
-        
+
+
         /**
          * Return the current number of rows or objects on this bench.
          */
         public int getNumberOfColumns()
         {
-            return getWidth() / ObjectWrapper.WIDTH;
+            return (int)getWidth() / ObjectWrapper.WIDTH;
         }
 
-        protected void paintComponent(Graphics g)
-        {
-            super.paintComponent(g);
-            
-            if (g instanceof Graphics2D && false == pkgMgrFrame.isEmptyFrame()) {
-                Graphics2D g2d = (Graphics2D)g;
-                
-                int w = getWidth();
-                int h = getHeight();
-                
-                boolean codePadVisible = pkgMgrFrame.isTextEvalVisible();
-                 
-                // Paint a gradient from top to bottom:
-                if (!Config.isRaspberryPi()){
-                    GradientPaint gp;
-                    if (codePadVisible) {
-                        gp = new GradientPaint(
-                                w/4, 0, new Color(209, 203, 179),
-                                w*3/4, h, new Color(235, 230, 200));
-                    } else {
-                        gp = new GradientPaint(
-                            w/4, 0, new Color(235, 230, 200),
-                            w*3/4, h, new Color(209, 203, 179));
-                    }
-       
-                    g2d.setPaint(gp);
-                }else{
-                    g2d.setPaint(new Color(222,217, 190));
-                }
-                g2d.fillRect(0, 0, w+1, h+1);
+    }
 
-            }
-        }
+    @Override
+    @OnThread(Tag.FX)
+    public void requestFocus()
+    {
+        // Override default behaviour (in which clicking on scroll pane
+        // gives it focus).
+        // Don't let the pane request focus.
+    }
+
+    /**
+     * Does one of the objects contained within have focus?
+     */
+    @OnThread(Tag.FXPlatform)
+    public synchronized boolean objectHasFocus()
+    {
+        return objects.stream().anyMatch(w -> w.isFocused());
     }
 }

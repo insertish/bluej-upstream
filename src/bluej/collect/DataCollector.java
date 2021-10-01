@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 2014  Michael Kolling and John Rosenberg 
+ Copyright (C) 2014,2015,2016  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -21,12 +21,25 @@
  */
 package bluej.collect;
 
+import javax.swing.SwingUtilities;
+import java.awt.SecondaryLoop;
+import java.awt.Toolkit;
 import java.io.File;
+import java.util.BitSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
+import javafx.application.Platform;
+
+import bluej.Boot;
+import bluej.compiler.CompileInputFile;
+import bluej.compiler.CompileReason;
+import bluej.extensions.SourceType;
+import bluej.pkgmgr.target.ClassTarget;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 import bluej.Config;
 import bluej.debugger.DebuggerTestResult;
 import bluej.debugger.ExceptionDescription;
@@ -50,7 +63,7 @@ import bluej.pkgmgr.Project;
  * This class mainly acts as a proxy for the DataCollectorImpl class, which implements the actual
  * collection logic.
  */
-public class DataCollector
+public @OnThread(Tag.Swing) class DataCollector
 {
     private static final String PROPERTY_UUID = "blackbox.uuid";
     private static final String PROPERTY_EXPERIMENT = "blackbox.experiment";
@@ -65,19 +78,42 @@ public class DataCollector
      * will never become true after startSession() has been called, althoug
      * it may become false if the user opts out mid-session
      */
+    @OnThread(value = Tag.Any, requireSynchronized = true)
     private static boolean recordingThisSession;
 
     /**
      * Session identifier.  Never changes after startSession() has been called:
      */
-    private static String sessionUuid;
+    @OnThread(value = Tag.Any, requireSynchronized = true) private static String sessionUuid;
     
     /**
      * These three variables can change during the execution:
      */
+    @OnThread(value = Tag.Any, requireSynchronized = true)
     private static String uuid;
+    @OnThread(value = Tag.Any, requireSynchronized = true)
     private static String experimentIdentifier;
+    @OnThread(value = Tag.Any, requireSynchronized = true)
     private static String participantIdentifier;
+
+    /**
+     * Keep track of which error (per-session compile error sequence ids) *messages* we have shown,
+     * and thus already sent an event about.
+     */
+    private static final BitSet shownErrorMessages = new BitSet();
+
+    /**
+     * Keep track of which error (per-session compile error sequence ids) *indicators* we have shown,
+     * and thus already told the server about, either in a compiled event, or a shown_error_indicator event.
+     */
+    private static final BitSet shownErrorIndicators = new BitSet();
+
+    /**
+     * Keep track of which errors (per-session compile error sequence ids) we have told the server
+     * have been created.  Due to threading back and forths, it is possible for us to be told that
+     * error indicators have been shown before we've been told about the compile event that generated them.
+     */
+    private static final BitSet createdErrors = new BitSet();
     
     
     /**
@@ -85,11 +121,13 @@ public class DataCollector
      * are in Greenfoot, and opt-in status.  It doesn't check whether we have stopped
      * sending due to connection problems -- DataSubmitter keeps track of that.
      */
+    @OnThread(Tag.Any)
     private static synchronized boolean dontSend()
     {
-        return Config.isGreenfoot() || !recordingThisSession;
+        return (Config.isGreenfoot() && !Boot.isTrialRecording()) || !recordingThisSession;
     }
 
+    @OnThread(Tag.FXPlatform)
     private static synchronized void startSession()
     {
         // Look for an existing UUID:
@@ -98,10 +136,11 @@ public class DataCollector
         // If there is no UUID in the file, or it's invalid, ask them if they want to opt in or opt out:
         if (!(OPT_OUT.equals(uuid)) && !uuidValidForRecording() )
         {
-            changeOptInOut();
+            changeOptInOut(Boot.isTrialRecording());
         }
-        
-        recordingThisSession = uuidValidForRecording();
+
+        // Temporarily for 4.0.0-preview, do not send to Blackbox:
+        recordingThisSession = false; //uuidValidForRecording();
         
         if (recordingThisSession)
         {
@@ -122,6 +161,7 @@ public class DataCollector
      * will return true, but dontSend() will also return true (because recordingThisSession
      * will be false; it is set once at the very beginning of the session).
      */
+    @OnThread(Tag.Any)
     private static synchronized boolean uuidValidForRecording()
     {
         return uuid != null && !(OPT_OUT.equals(uuid)) && uuid.length() >= 32;
@@ -131,13 +171,21 @@ public class DataCollector
      * Show a dialog to ask the user for their opt-in/opt-out preference,
      * and then update the UUID accordingly
      */
-    public static synchronized void changeOptInOut()
+    @OnThread(Tag.FXPlatform)
+    public static synchronized void changeOptInOut(boolean forceOptIn)
     {
-        DataCollectionDialog dlg = new DataCollectionDialog();
-        dlg.setLocationRelativeTo(null); // Centre on screen
-        dlg.setVisible(true);
-        
-        if (dlg.optedIn())
+        boolean optedIn;
+        if (forceOptIn)
+        {
+            optedIn = true;
+        }
+        else
+        {
+            DataCollectionDialog dlg = new DataCollectionDialog();
+            optedIn = dlg.showAndWait().orElse(false);
+        }
+
+        if (optedIn)
         {
             // Only generate new UUID if didn't have one already:
             if (!uuidValidForRecording())
@@ -164,7 +212,8 @@ public class DataCollector
     /**
      * Get the experiment identifier.
      */
-    public static String getExperimentIdentifier()
+    @OnThread(Tag.Any)
+    public static synchronized String getExperimentIdentifier()
     {
         return experimentIdentifier;
     }
@@ -172,7 +221,8 @@ public class DataCollector
     /**
      * Get the participant identifier.
      */
-    public static String getParticipantIdentifier()
+    @OnThread(Tag.Any)
+    public static synchronized String getParticipantIdentifier()
     {
         return participantIdentifier;
     };
@@ -180,7 +230,8 @@ public class DataCollector
     /**
      * Get the session identifier.
      */
-    public static String getSessionUuid()
+    @OnThread(Tag.Any)
+    public static synchronized String getSessionUuid()
     {
         return sessionUuid;
     }
@@ -189,6 +240,7 @@ public class DataCollector
      * Gets a String to display to the user in the preferences, explaining their
      * current opt-in/recording status
      */
+    @OnThread(Tag.Any)
     public static synchronized String getOptInOutStatus()
     {
         if (recordingThisSession)
@@ -216,13 +268,14 @@ public class DataCollector
         DataCollector.participantIdentifier = participantIdentifier;
         Config.putPropString(PROPERTY_PARTICIPANT, participantIdentifier);
     }
-    
+
+    @OnThread(Tag.FXPlatform)
     public static void bluejOpened(String osVersion, String javaVersion, String bluejVersion, String interfaceLanguage, List<ExtensionWrapper> extensions)
     {
-        if (Config.isGreenfoot()) return;
+        if (Config.isGreenfoot() && !Boot.isTrialRecording()) return;
         startSession();
         if (dontSend()) return;
-        DataCollectorImpl.bluejOpened(osVersion, javaVersion, bluejVersion, interfaceLanguage, extensions);
+        SwingUtilities.invokeLater(() -> DataCollectorImpl.bluejOpened(osVersion, javaVersion, bluejVersion, interfaceLanguage, extensions));
     }
     
     public static void bluejClosed()
@@ -231,10 +284,21 @@ public class DataCollector
         DataCollectorImpl.bluejClosed();
     }
     
-    public static void compiled(Project proj, Package pkg, File[] sources, List<DiagnosticWithShown> diagnostics, boolean success)
+    public static void compiled(Project proj, Package pkg, CompileInputFile[] sources, List<DiagnosticWithShown> diagnostics, boolean success, CompileReason reason, SourceType inputType)
     {
         if (dontSend()) return;
-        DataCollectorImpl.compiled(proj, pkg, sources, diagnostics, success);
+        diagnostics.forEach(dws -> {
+            // If the error was shown to the user, store that in our set.  Conversely,
+            // if we have been told already that the error has been shown to the user,
+            // we want to reflect that in the event
+            if (dws.wasShownToUser())
+                shownErrorIndicators.set(dws.getDiagnostic().getIdentifier());
+            else if (shownErrorIndicators.get(dws.getDiagnostic().getIdentifier()))
+                dws.markShownToUser();
+
+            createdErrors.set(dws.getDiagnostic().getIdentifier());
+        });
+        DataCollectorImpl.compiled(proj, pkg, sources, diagnostics, success, reason, inputType);
     }
 
     public static void debuggerTerminate(Project project)
@@ -346,10 +410,10 @@ public class DataCollector
         DataCollectorImpl.teamShareProject(project, repo);
     }
 
-    public static void addClass(Package pkg, File sourceFile)
+    public static void addClass(Package pkg, ClassTarget ct)
     {
         if (dontSend()) return;
-        DataCollectorImpl.addClass(pkg, sourceFile);
+        DataCollectorImpl.addClass(pkg, ct);
     }
 
     public static void teamUpdateProject(Project project, Repository repo, Set<File> updatedFiles)
@@ -388,10 +452,34 @@ public class DataCollector
         DataCollectorImpl.removeClass(pkg, sourceFile);
     }
 
-    public static void edit(Package pkg, File path, String source, boolean includeOneLineEdits)
+    public static void openClass(Package pkg, File sourceFile)
     {
         if (dontSend()) return;
-        DataCollectorImpl.edit(pkg, path, source, includeOneLineEdits);
+        DataCollectorImpl.openClass(pkg, sourceFile);
+    }
+
+    public static void closeClass(Package pkg, File sourceFile)
+    {
+        if (dontSend()) return;
+        DataCollectorImpl.closeClass(pkg, sourceFile);
+    }
+
+    public static void selectClass(Package pkg, File sourceFile)
+    {
+        if (dontSend()) return;
+        DataCollectorImpl.selectClass(pkg, sourceFile);
+    }
+    
+    public static void convertStrideToJava(Package pkg, File oldSourceFile, File newSourceFile)
+    {
+        if (dontSend()) return;
+        DataCollectorImpl.convertStrideToJava(pkg, oldSourceFile, newSourceFile);
+    }
+
+    public static void edit(Package pkg, File path, String source, boolean includeOneLineEdits, StrideEditReason reason)
+    {
+        if (dontSend()) return;
+        DataCollectorImpl.edit(pkg, path, source, includeOneLineEdits, reason);
     }
 
     public static void packageOpened(Package pkg)
@@ -473,6 +561,67 @@ public class DataCollector
     {
         if (dontSend()) return;
         DataCollectorImpl.inspectorClassShow(pkg, inspector, className);        
+    }
+
+    public static void showErrorIndicator(Package pkg, int errorIdentifier)
+    {
+        if (dontSend()) return;
+        // Already know about this:
+        if (shownErrorIndicators.get(errorIdentifier))
+            return;
+
+        if (createdErrors.get(errorIdentifier))
+        {
+            // Creation has already been sent, so fine to follow it up with a shown event:
+            DataCollectorImpl.showErrorIndicator(pkg, errorIdentifier);
+        }
+        // Otherwise, we haven't sent the creation yet, so do nothing but flag it in the bitset
+        shownErrorIndicators.set(errorIdentifier);
+    }
+
+    public static void showErrorMessage(Package pkg, int errorIdentifier, List<String> quickFixes)
+    {
+        if (dontSend()) return;
+        // Only send an event for each error the first time it is shown:
+        if (shownErrorMessages.get(errorIdentifier))
+            return;
+        shownErrorMessages.set(errorIdentifier);
+        DataCollectorImpl.showErrorMessage(pkg, errorIdentifier, quickFixes);
+    }
+
+    public static void fixExecuted(Package aPackage, int errorIdentifier, int fixIndex)
+    {
+        if (dontSend()) return;
+        DataCollectorImpl.fixExecuted(aPackage, errorIdentifier, fixIndex);
+    }
+
+    public static void recordGreenfootEvent(Project project, GreenfootInterfaceEvent event)
+    {
+        if (dontSend()) return;
+        DataCollectorImpl.greenfootEvent(project, project.getPackage(""), event);
+    }
+
+    public static void codeCompletionStarted(ClassTarget ct, Integer lineNumber, Integer columnNumber, String xpath, Integer subIndex, String stem)
+    {
+        if (dontSend()) return;
+        DataCollectorImpl.codeCompletionStarted(ct.getPackage().getProject(), ct.getPackage(), lineNumber, columnNumber, xpath, subIndex, stem);
+    }
+
+    public static void codeCompletionEnded(ClassTarget ct, Integer lineNumber, Integer columnNumber, String xpath, Integer subIndex, String stem, String replacement)
+    {
+        if (dontSend()) return;
+        DataCollectorImpl.codeCompletionEnded(ct.getPackage().getProject(), ct.getPackage(), lineNumber, columnNumber, xpath, subIndex, stem, replacement);
+    }
+
+    public static void unknownFrameCommandKey(ClassTarget ct, String enclosingFrameXpath, int cursorIndex, char key)
+    {
+        if (dontSend()) return;
+        DataCollectorImpl.unknownFrameCommandKey(ct.getPackage().getProject(), ct.getPackage(), enclosingFrameXpath, cursorIndex, key);
+    }
+
+    public static boolean hasGivenUp()
+    {
+        return DataSubmitter.hasGivenUp();
     }
 
     public static class NamedTyped

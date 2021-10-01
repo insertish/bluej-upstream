@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2011,2012  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2011,2012,2014,2016,2017  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -30,7 +30,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.concurrent.CompletableFuture;
 
+import bluej.BlueJEvent;
+import bluej.BlueJEventListener;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 import bluej.Config;
 import bluej.classmgr.BPClassLoader;
 import bluej.debugger.Debugger;
@@ -552,6 +557,7 @@ public class JdiDebugger extends Debugger
      *            the name of the method
      * @return a DebuggerTestResult object
      */
+    @Override
     public DebuggerTestResult runTestMethod(String className, String methodName)
     {
         ArrayReference arrayRef = null;
@@ -608,6 +614,7 @@ public class JdiDebugger extends Debugger
     /**
      * Dispose all top level windows in the remote machine.
      */
+    @Override
     public void disposeWindows()
     {
         VMReference vmr = getVMNoWait();
@@ -627,6 +634,7 @@ public class JdiDebugger extends Debugger
      * @param classname
      *            the class to start
      */
+    @Override
     public DebuggerResult runClassMain(String className)
         throws ClassNotFoundException
     {
@@ -640,10 +648,44 @@ public class JdiDebugger extends Debugger
             }
         }
     }
+
+    @Override
+    public CompletableFuture<DebuggerResult> launchFXApp(String className)
+    {
+        CompletableFuture<DebuggerResult> result = new CompletableFuture<>();
+        // Can't use lambda as need self-reference:
+        BlueJEventListener listener = new BlueJEventListener()
+        {
+            @Override
+            public void blueJEvent(int eventId, Object arg)
+            {
+                if (eventId == BlueJEvent.CREATE_VM_DONE)
+                {
+                    BlueJEvent.removeListener(this);
+                    VMReference vmr = getVM();
+                    if (vmr != null) {
+                        synchronized (serverThreadLock) {
+                            result.complete(vmr.launchFXApp(className));
+                        }
+                    }
+                    else
+                    {
+                        result.complete(new DebuggerResult(Debugger.TERMINATED));
+                    }
+                }
+            }
+        };
+        BlueJEvent.addListener(listener);
+        // We must reset the VM in case there was already an FX app running:
+        close(true);
+        // Once it is ready, the listener above will run
+        return result;
+    }
     
     /**
      * Construct a class instance using the default constructor.
      */
+    @Override
     public DebuggerResult instantiateClass(String className)
     {
         VMReference vmr = getVM();
@@ -660,6 +702,7 @@ public class JdiDebugger extends Debugger
     /* (non-Javadoc)
      * @see bluej.debugger.Debugger#instantiateClass(java.lang.String, java.lang.String[], bluej.debugger.DebuggerObject[])
      */
+    @Override
     public DebuggerResult instantiateClass(String className, String[] paramTypes, DebuggerObject[] args)
     {
         // If there are no arguments, use the default constructor
@@ -688,6 +731,7 @@ public class JdiDebugger extends Debugger
     /*
      * @see bluej.debugger.Debugger#getClass(java.lang.String, boolean)
      */
+    @Override
     public DebuggerClass getClass(String className, boolean initialize)
         throws ClassNotFoundException
     {
@@ -1118,6 +1162,7 @@ public class JdiDebugger extends Debugger
             }
         }
 
+        @OnThread(Tag.Any)
         private VMReference getVM()
         {
             synchronized (JdiDebugger.this) {
@@ -1139,6 +1184,7 @@ public class JdiDebugger extends Debugger
          * Get the VM reference, without waiting for it to start. If no VM has started,
          * this returns null.
          */
+        @OnThread(Tag.Any)
         private VMReference getVMNoWait()
         {
             synchronized (JdiDebugger.this) {

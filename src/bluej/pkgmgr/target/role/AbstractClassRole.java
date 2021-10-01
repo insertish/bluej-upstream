@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2016  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -24,14 +24,18 @@ package bluej.pkgmgr.target.role;
 import javax.swing.*;
 import java.awt.*;
 
+import javafx.collections.ObservableList;
+import javafx.scene.control.*;
+
 import bluej.Config;
 import bluej.pkgmgr.target.*;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 
 /**
  * A role object to represent the behaviour of abstract classes.
  *
  * @author  Andrew Patterson 
- * @version $Id: AbstractClassRole.java 8123 2010-08-20 04:29:01Z davmac $
  */
 public class AbstractClassRole extends ClassRole
 {
@@ -45,11 +49,13 @@ public class AbstractClassRole extends ClassRole
     {
     }
 
+    @OnThread(Tag.Any)
     public String getRoleName()
     {
         return ABSTRACT_ROLE_NAME;
     }
 
+    @OnThread(Tag.Any)
     public String getStereotypeLabel()
     {
         return "abstract";
@@ -76,8 +82,17 @@ public class AbstractClassRole extends ClassRole
      * @param menu the popup menu to add the class menu items to
      * @param cl Class object associated with this class target
      */
-    public boolean createClassConstructorMenu(JPopupMenu menu, ClassTarget ct, Class<?> cl)
+    @Override
+    @OnThread(Tag.FXPlatform)
+    public boolean createClassConstructorMenu(ObservableList<javafx.scene.control.MenuItem> menu, ClassTarget ct, Class<?> cl)
     {
         return false;
+    }
+
+    @Override
+    @OnThread(Tag.Any)
+    public boolean canConvertToStride()
+    {
+        return true;
     }
 }

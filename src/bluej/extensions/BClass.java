@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2012,2013  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2012,2013,2014,2015,2016  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -23,9 +23,14 @@ package bluej.extensions;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.util.List;
 import java.util.Map;
 import java.util.WeakHashMap;
+import java.util.stream.Collectors;
 
+import bluej.compiler.CompileReason;
+import bluej.compiler.CompileType;
 import bluej.compiler.JobQueue;
 import bluej.extensions.editor.Editor;
 import bluej.extensions.editor.EditorBridge;
@@ -34,11 +39,16 @@ import bluej.pkgmgr.Package;
 import bluej.pkgmgr.Project;
 import bluej.pkgmgr.target.ClassTarget;
 import bluej.pkgmgr.target.Target;
+import bluej.stride.framedjava.ast.Parser;
+import bluej.stride.framedjava.elements.CodeElement;
+import bluej.stride.framedjava.elements.TopLevelCodeElement;
 import bluej.utility.JavaNames;
+import bluej.utility.javafx.JavaFXUtil;
 import bluej.views.ConstructorView;
 import bluej.views.FieldView;
 import bluej.views.MethodView;
 import bluej.views.View;
+import javafx.application.Platform;
 
 /**
  * A wrapper for a class. This is used to represent both classes which have a representation
@@ -122,6 +132,34 @@ public class BClass
         bluejClass.remove();
     }
 
+    /**
+     * Converts a Stride class to Java, by removing the Stride file and retaining the generated Java.
+     *
+     * @throws ProjectNotOpenException
+     * @throws PackageNotFoundException
+     * @throws ClassNotFoundException
+     */
+    public void convertStrideToJava()
+            throws ProjectNotOpenException, PackageNotFoundException, ClassNotFoundException
+    {
+        ClassTarget bluejClass = classId.getClassTarget();
+        if (bluejClass == null) {
+            throw new ClassNotFoundException("Can't find class: " + classId.getClassName());
+        }
+        bluejClass.removeStride();
+    }
+
+    public void convertJavaToStride()
+        throws ProjectNotOpenException, PackageNotFoundException, ClassNotFoundException
+    {
+        ClassTarget bluejClass = classId.getClassTarget();
+        if (bluejClass == null) {
+            throw new ClassNotFoundException("Can't find class: " + classId.getClassName());
+        }
+
+        bluejClass.convertToStride();
+    }
+
 
     /**
      * Returns the Java class being wrapped by this BClass.
@@ -182,12 +220,15 @@ public class BClass
     }
     
     /**
-     * Finds out whether this class has source code available.
+     * Finds out whether this class has source code available, and whether it's Java or Stride
      */
-    boolean hasSourceCode() throws ProjectNotOpenException, PackageNotFoundException
+    public SourceType getSourceType() throws ProjectNotOpenException, PackageNotFoundException
     {
         ClassTarget aTarget = classId.getClassTarget();
-        return aTarget == null || aTarget.hasSourceCode();
+        if (aTarget != null)
+            return aTarget.getSourceType();
+        else
+            return null;
     }
 
 
@@ -255,7 +296,7 @@ public class BClass
         }
 
         // Ask for compilation of this target
-        bluejPkg.compile(aTarget, forceQuiet, null);
+        bluejPkg.compile(aTarget, forceQuiet, null, CompileReason.EXTENSION, CompileType.EXTENSION);
 
         // if requested wait for the compilation to finish.
         if (waitCompileEnd) {
@@ -638,7 +679,7 @@ public class BClass
             }
         }
 
-        return aTarget.getSourceFile();
+        return aTarget.getJavaSourceFile();
     }
 
 

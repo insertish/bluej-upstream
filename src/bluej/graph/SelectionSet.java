@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2013,2014  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2013,2014,2016,2017  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -23,8 +23,17 @@ package bluej.graph;
 
 import java.awt.Point;
 import java.awt.event.MouseEvent;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
+
+import bluej.pkgmgr.target.Target;
+import bluej.utility.javafx.FXPlatformConsumer;
+import bluej.utility.javafx.FXPlatformRunnable;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 
 /**
  * SelectionSet holds a set of selected graph elements. By inserting an
@@ -33,16 +42,21 @@ import java.util.Set;
  * @author fisker
  * @author Michael Kolling
  */
+@OnThread(Tag.FXPlatform)
 public final class SelectionSet
 {
-    private Set<SelectableGraphElement> elements = new HashSet<SelectableGraphElement>();
+    private Set<Target> elements = new HashSet<>();
+    private List<FXPlatformConsumer<Collection<Target>>> listeners = new ArrayList<>();
 
     /**
      * 
      * @param graphEditor
      */
-    public SelectionSet()
-    {}
+    @OnThread(Tag.Any)
+    public SelectionSet(Collection<Target> initial)
+    {
+        elements.addAll(initial);
+    }
 
     /**
      * Add an unselected selectable graphElement to the set and
@@ -50,30 +64,22 @@ public final class SelectionSet
      * 
      * @param element  The element to add
      */
-    public void add(SelectableGraphElement element)
+    public void add(Target element)
     {
         if (!element.isSelected()) {
             element.setSelected(true);
             elements.add(element);
+            notifyListeners();
         }
-    }
-    
-    /**
-     * Add an already selected element to the set; to be used during initialisation only.
-     * 
-     * @param element   The element, which is marked selected, to be tracked in the selection set
-     */
-    public void addExisting(SelectableGraphElement element)
-    {
-        elements.add(element);
     }
     
     /**
      * Add all the elements from another selection set to this one.
      */
-    public void addAll(SelectionSet newSet)
+    public void addAll(Collection<Target> newSet)
     {
-        elements.addAll(newSet.elements);
+        for (Target t : newSet)
+            add(t); // add will notify listeners
     }
 
     /**
@@ -81,11 +87,12 @@ public final class SelectionSet
      * 
      * @param graphElement
      */
-    public void remove(SelectableGraphElement element)
+    public void remove(Target element)
     {
         if (element != null) {
             element.setSelected(false);
             elements.remove(element);
+            notifyListeners();
         }
     }
 
@@ -95,10 +102,11 @@ public final class SelectionSet
      */
     public void clear()
     {
-        for (SelectableGraphElement element : elements) {
+        for (Target element : elements) {
             element.setSelected(false);
         }
         elements.clear();
+        notifyListeners();
     }
 
     /**
@@ -106,51 +114,12 @@ public final class SelectionSet
      * 
      * @param evt  The mouse event that originated this double click.
      */
-    public void doubleClick(MouseEvent evt)
+    public void doubleClick()
     {
-        final MouseEvent event = evt;
-        for (SelectableGraphElement element : elements) {
-            element.doubleClick(event);
+        for (Target element : elements) {
+            element.doubleClick();
         }        
     }
-    
-    /**
-     * Move the selected elements by the specified deltas.
-     */
-    public void move(int deltaX, int deltaY)
-    {
-        for (GraphElement element : elements) {
-            if(element instanceof Moveable) {
-                Moveable target = (Moveable) element;
-                if (target.isMoveable()) {
-                    target.setDragging(true);
-                    Point delta = restrictDelta(deltaX, deltaY);
-                    target.setGhostPosition(delta.x, delta.y);
-                }
-            }
-        }
-    }
-
-    /**
-     * Restrict the delta so that no target moves out of the screen.
-     */
-    private Point restrictDelta(int deltaX, int deltaY)
-    {
-        for (GraphElement element : elements) {
-            if(element instanceof Moveable) {
-                Moveable target = (Moveable) element;
-
-                if(target.getX() + deltaX < 0) {
-                    deltaX = -target.getX();
-                }
-                if(target.getY() + deltaY < 0) {
-                    deltaY = -target.getY();
-                }
-            }
-        }
-        return new Point(deltaX, deltaY);
-    }
-
 
     /**
      * A move gesture (either move or resize) has stopped. Inform all elements
@@ -158,33 +127,6 @@ public final class SelectionSet
      */
     public void moveStopped()
     {
-        for (GraphElement element : elements) {
-            if(element instanceof Moveable) {
-                Moveable moveable = (Moveable) element;
-                moveable.setPositionToGhost();
-            }
-        }        
-    }
-    
-
-    /**
-     * A resize operation has initiated (or continued). Inform al elements
-     * that they should react to the resize.
-     * 
-     * @param deltaX  The current x offset from the start of the resize.
-     * @param deltaY  The current y offset from the start of the resize.
-     */
-    public void resize(int deltaX, int deltaY)
-    {
-        for (GraphElement element : elements) {
-            if(element instanceof Moveable) {
-                Moveable target = (Moveable) element;
-                if (target.isResizable()) {
-                    target.setDragging(true);
-                    target.setGhostSize(deltaX, deltaY);
-                }
-            }
-        }
     }
 
     /**
@@ -202,39 +144,46 @@ public final class SelectionSet
      * 
      * @param element  The single element to hold in the selection. 
      */
-    public void selectOnly(SelectableGraphElement element)
+    public void selectOnly(Target element)
     {
+        // add and clear will notify listeners
         clear();
         add(element);
-        element.singleSelected();
     }
     
     /** 
      * Return a random vertex from this selection.
      * @return  An vertex, or null, if none exists.
      */
-    public Vertex getAnyVertex()
+    public Target getAnyVertex()
     {
-        for (GraphElement element : elements) {
-            if(element instanceof Vertex) {
-                return (Vertex) element;
-            }
+        for (Target element : elements) {
+            return element;
         }
         return null;
     }
 
-    
-    /** 
-     * Return a random vertex from this selection.
-     * @return  An vertex, or null, if none exists.
-     */
-    public Edge getAnyEdge()
+    public List<Target> getSelected()
     {
-        for (GraphElement element : elements) {
-            if(element instanceof Edge) {
-                return (Edge) element;
-            }
+        return new ArrayList<>(elements);
+    }
+
+    private void notifyListeners()
+    {
+        List<Target> curSelection = new ArrayList<>(this.elements);
+        for (FXPlatformConsumer<Collection<Target>> listener : listeners)
+        {
+            listener.accept(curSelection);
         }
-        return null;
+    }
+
+    /**
+     * The listener will be run whenever the selection has been changed.
+     * It may be run partway through some actions so allow for rapid
+     * repeated changes.
+     */
+    public void addListener(FXPlatformConsumer<Collection<Target>> listener)
+    {
+        listeners.add(listener);
     }
 }

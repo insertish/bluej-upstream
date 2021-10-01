@@ -172,7 +172,7 @@ public class SvnCommitAllCommand extends SvnCommand
                 if (file.isDirectory()) {
                     for (File c : file.listFiles()) {
                         deleteDirectory(c);
-                    }
+}
                 }
                 file.delete(); //file or directory, must be ready to be delete here.
             }

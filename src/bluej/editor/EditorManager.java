@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2011  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2011,2014,2015,2016  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -21,12 +21,14 @@
  */
 package bluej.editor;
 
-import java.awt.Rectangle;
 import java.nio.charset.Charset;
+import java.util.function.Supplier;
 
 import bluej.editor.moe.MoeEditorManager;
+import bluej.editor.stride.FXTabbedEditor;
 import bluej.parser.entity.EntityResolver;
 import bluej.pkgmgr.JavadocResolver;
+import bluej.utility.javafx.FXSupplier;
 
 /**
  * Interface between the editor manager and the rest of BlueJ.
@@ -34,7 +36,6 @@ import bluej.pkgmgr.JavadocResolver;
  * @author  Michael Cahill
  * @author  Michael Kolling
  * @author  Bruce Quig
- * @version $Id: EditorManager.java 8887 2011-04-21 03:29:25Z davmac $
  */
 public abstract class EditorManager
 {
@@ -72,12 +73,12 @@ public abstract class EditorManager
     public abstract Editor openClass(String filename, 
         String docFilename,
         Charset charset,
-        String windowTitle, 
+        String windowTitle,
+        FXSupplier<FXTabbedEditor> fxTabbedEditor,
         EditorWatcher watcher, 
-        boolean compiled, 
-        Rectangle bounds,
+        boolean compiled,
         EntityResolver projectResolver,
-        JavadocResolver javadocResolver);
+        JavadocResolver javadocResolver, Runnable callbackOnOpen);
 
 
     /**
@@ -94,7 +95,7 @@ public abstract class EditorManager
      * @returns                 the new editor, or null if there was a problem
      */
     public abstract Editor openText(String filename, Charset charset, String windowTitle,
-                                    Rectangle bounds );
+                                    FXSupplier<FXTabbedEditor> fxTabbedEditor);
 
     /**
      * Indicate to the manager that all resources used by this editor

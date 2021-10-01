@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2011,2012,2013,2014,2015  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2011,2012,2013,2014,2015,2016  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -33,6 +33,8 @@ import javax.swing.text.BadLocationException;
 import javax.swing.text.Element;
 import javax.swing.text.MutableAttributeSet;
 
+import threadchecker.OnThread;
+import threadchecker.Tag;
 import bluej.Config;
 import bluej.parser.entity.EntityResolver;
 import bluej.parser.nodes.NodeStructureListener;
@@ -51,11 +53,15 @@ import bluej.utility.PersistentMarkDocument;
  * @author Bruce Quig
  * @author Jo Wood (Modified to allow user-defined colours, March 2001)
  */
+@OnThread(value = Tag.Swing, ignoreParent = true)
 public class MoeSyntaxDocument extends PersistentMarkDocument
 {
+    @OnThread(value = Tag.Any, requireSynchronized = true)
     private static Color[] colors = null;
-    
+
+    @OnThread(value = Tag.Any, requireSynchronized = true)
     private static Color defaultColour = null;
+    @OnThread(value = Tag.Any, requireSynchronized = true)
     private static Color backgroundColour = null;
     
     /** Maximum amount of document to reparse in one hit (advisory) */
@@ -399,8 +405,10 @@ public class MoeSyntaxDocument extends PersistentMarkDocument
      * @param length the number of characters affected >= 0
      * @param s the attributes
      * @param replace whether to replace existing attributes, or merge them
+     * @return A (Swing-thread) Runnable which will remove all the attributes passed.
+     *         Note: it does just remove them, regardless of whether they were already in there.
      */
-    public void setParagraphAttributes(int offset, AttributeSet s)
+    public Runnable setParagraphAttributes(int offset, AttributeSet s)
     {
         // modified version of method from DefaultStyleDocument
         try {
@@ -410,6 +418,16 @@ public class MoeSyntaxDocument extends PersistentMarkDocument
             MutableAttributeSet attr = 
                     (MutableAttributeSet) paragraph.getAttributes();
             attr.addAttributes(s);
+            return () -> {
+                try {
+                    writeLock();
+                    attr.removeAttributes(s);
+                }
+                finally
+                {
+                    writeUnlock();
+                }
+            };
         } finally {
             writeUnlock();
         }
@@ -418,7 +436,7 @@ public class MoeSyntaxDocument extends PersistentMarkDocument
     /**
      * Get the default colour for MoeSyntaxDocuments.
      */
-    public static Color getDefaultColor()
+    public static synchronized Color getDefaultColor()
     {
         return defaultColour;
     }
@@ -426,7 +444,8 @@ public class MoeSyntaxDocument extends PersistentMarkDocument
     /**
      * Get the background colour for MoeSyntaxDocuments.
      */
-    public static Color getBackgroundColor()
+    @OnThread(Tag.Any)
+    public static synchronized Color getBackgroundColor()
     {
         return backgroundColour;
     }
@@ -435,6 +454,7 @@ public class MoeSyntaxDocument extends PersistentMarkDocument
      * Get an array of colours as specified in the configuration file for different
      * token types. The indexes for each token type are defined in the Token class.
      */
+    @OnThread(Tag.Any)
     public static Color[] getColors()
     {
         return getUserColors();
@@ -449,7 +469,8 @@ public class MoeSyntaxDocument extends PersistentMarkDocument
      * @author This method was added by Jo Wood (jwo@soi.city.ac.uk), 9th March,
      *         2001.
      */
-    private static Color[] getUserColors()
+    @OnThread(Tag.Any)
+    private static synchronized Color[] getUserColors()
     { 
         if(colors == null) {
             // Replace with user-defined colours.
@@ -589,6 +610,7 @@ public class MoeSyntaxDocument extends PersistentMarkDocument
      *                  not parseable as a hexadecimal
      * @return  The value
      */
+    @OnThread(Tag.Any)
     private static int getPropHexInt(String propName, int def)
     {
         String strVal = Config.getPropString(propName, null, Config.moeUserProps);

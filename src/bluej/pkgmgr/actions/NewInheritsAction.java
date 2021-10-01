@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2016  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -34,9 +34,9 @@ import bluej.pkgmgr.PkgMgrFrame;
  */
 final public class NewInheritsAction extends PkgMgrAction
 {
-    public NewInheritsAction()
+    public NewInheritsAction(PkgMgrFrame pmf)
     {
-        super("menu.edit.newInherits");
+        super(pmf, "menu.edit.newInherits");
         putValue(SMALL_ICON, Config.getImageAsIcon("image.build.extends"));
         putValue(SHORT_DESCRIPTION, Config.getString("tooltip.newExtends"));
     }

@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2011,2012,2015  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2011,2012,2014,2015,2016  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -21,6 +21,7 @@
  */
 package bluej.debugmgr;
 
+import javax.swing.SwingUtilities;
 import java.awt.EventQueue;
 import java.io.BufferedWriter;
 import java.io.File;
@@ -29,17 +30,23 @@ import java.io.FilenameFilter;
 import java.io.IOException;
 import java.io.OutputStreamWriter;
 import java.nio.charset.Charset;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
-
-import javax.swing.JFrame;
+import javafx.application.Platform;
+import javafx.stage.Stage;
 
 import bluej.Config;
 import bluej.collect.DataCollector;
+import bluej.compiler.CompileInputFile;
 import bluej.compiler.CompileObserver;
+import bluej.compiler.CompileReason;
+import bluej.compiler.CompileType;
 import bluej.compiler.Diagnostic;
-import bluej.compiler.EventqueueCompileObserver;
+import bluej.compiler.EDTCompileObserver;
+import bluej.compiler.EventqueueCompileObserverAdapter;
 import bluej.compiler.JobQueue;
 import bluej.debugger.Debugger;
 import bluej.debugger.DebuggerObject;
@@ -67,6 +74,8 @@ import bluej.utility.Utility;
 import bluej.views.CallableView;
 import bluej.views.ConstructorView;
 import bluej.views.MethodView;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 
 /**
  * Debugger class that arranges invocation of constructors or methods. This
@@ -76,7 +85,7 @@ import bluej.views.MethodView;
  * @author Michael Kolling
  */
 public class Invoker
-    implements CompileObserver, CallDialogWatcher
+    implements EDTCompileObserver
 {
     public static final int OBJ_NAME_LENGTH = 8;
     public static final String SHELLNAME = "__SHELL";
@@ -96,25 +105,28 @@ public class Invoker
     private static Map<ConstructorView, ConstructorDialog> constructors =
         new HashMap<ConstructorView, ConstructorDialog>();
 
-    private JFrame pmf;
+    @OnThread(Tag.FXPlatform)
+    private Stage parent;
     private Package pkg; //For data collection purposes
     private boolean codepad; //Used to decide whether to do data collection (don't record if for codepad)
     private File pkgPath;
     private String pkgName;
     private String pkgScopeId;
-    private CallHistory callHistory;
+    private final CallHistory callHistory;
     private ResultWatcher watcher;
-    private CallableView member;
+    private final CallableView member;
     private String shellName;
     /** Name of the result object */
+    @OnThread(Tag.Any)
     private String objName;
     /** The name that the object will have on the object bench.
         Used by data collection. */
     private String benchName;
-    private Map<String,GenTypeParameter> typeMap; // map type parameter names to types
+    @OnThread(Tag.Any)
+    private final Map<String,GenTypeParameter> typeMap; // map type parameter names to types
     private ValueCollection localVars;
     private ValueCollection objectBenchVars;
-    private ObjectBenchInterface objectBench;
+    private final ObjectBenchInterface objectBench;
     private Debugger debugger;
     private String imports; // import statements to include in shell file
     private NameTransform nameTransform;
@@ -122,8 +134,9 @@ public class Invoker
     private Charset sourceCharset;
     
     /** Name of the target object to which the call is applied */
-    private String instanceName;
+    private final String instanceName;
 
+    @OnThread(Tag.FXPlatform)
     private CallDialog dialog;
     private boolean constructing;
 
@@ -136,12 +149,13 @@ public class Invoker
     /**
      * Construct an invoker, specifying most attributes manually.
      */
-    public Invoker(JFrame frame, CallableView member, ResultWatcher watcher, File pkgPath, String pkgName,
+    public Invoker(Stage frame, CallableView member, ResultWatcher watcher, File pkgPath, String pkgName,
             String pkgScopeId, CallHistory callHistory, ValueCollection objectBenchVars,
             ObjectBenchInterface objectBench, Debugger debugger, InvokerCompiler compiler,
             String instanceName, Charset sourceCharset)
     {
-        this.pmf = frame;
+        if (frame != null)
+            Platform.runLater(() -> { this.parent = frame; });
         this.member = member;
         this.watcher = watcher;
         if (member instanceof ConstructorView) {
@@ -169,6 +183,7 @@ public class Invoker
         this.compiler = compiler;
         this.shellName = getShellName();
         this.sourceCharset = sourceCharset;
+        this.typeMap = null;
     }
 
     /**
@@ -178,13 +193,11 @@ public class Invoker
      */
     public Invoker(PkgMgrFrame pmf, ValueCollection localVars, String command, ResultWatcher watcher)
     {
-        initialize(pmf);
+        this(pmf, (MethodView)null, (String)null, null);
         
         this.watcher = watcher;
-        this.member = null;
         this.shellName = getShellName();
         this.objName = null;
-        this.instanceName = null;
         this.localVars = localVars;
 
         constructing = false;
@@ -205,9 +218,8 @@ public class Invoker
      */
     public Invoker(PkgMgrFrame pmf, CallableView member, ResultWatcher watcher)
     {
-        initialize(pmf);
-
-        this.member = member;
+        this(pmf, member, null, null);
+        
         this.watcher = watcher;
         this.shellName = getShellName();
         codepad = false;
@@ -241,13 +253,6 @@ public class Invoker
      */
     public Invoker(PkgMgrFrame pmf, MethodView member, ObjectWrapper objWrapper, ResultWatcher watcher)
     {
-        initialize(pmf);
-
-        this.member = member;
-        this.watcher = watcher;
-        this.shellName = getShellName();
-        codepad = false;
-
         // We want a map of all the type parameters that may appear in the
         // method signature to the corresponding instantiation types from the
         // object to which the method is being applied.
@@ -255,8 +260,11 @@ public class Invoker
         // Tpar names in the method signature however correspond to names from
         // the class in which the method was declared. So we need to map tpars
         // from the object's class to that class.
-        this.instanceName = objWrapper.getName();
-        this.typeMap = objWrapper.getObject().getGenType().mapToSuper(member.getClassName()).getMap();
+        this(pmf, member, objWrapper.getName(), objWrapper.getObject().getGenType().mapToSuper(member.getClassName()).getMap());
+        
+        this.watcher = watcher;
+        this.shellName = getShellName();
+        codepad = false;
 
         constructing = false;
     }
@@ -264,9 +272,12 @@ public class Invoker
     /**
      * Initialize most of the invoker's necessary fields via a PkgMgrFrame reference.
      */
-    private void initialize(final PkgMgrFrame pmf)
+    private Invoker(final PkgMgrFrame pmf, CallableView member, String instanceName, Map<String, GenTypeParameter> typeMap)
     {
-        this.pmf = pmf;
+        this.member = member;
+        this.instanceName = instanceName;
+        this.typeMap = typeMap;
+        Platform.runLater(() -> { this.parent = pmf.getFXWindow(); });
         this.pkg = pmf.getPackage();
         final Package pkg = pmf.getPackage();
         this.pkgPath = pkg.getPath();
@@ -281,8 +292,9 @@ public class Invoker
             public void compile(File[] files, CompileObserver observer)
             {
                 Project project = pkg.getProject();
-                JobQueue.getJobQueue().addJob(files, observer, project.getClassLoader(),
-                        project.getProjectDir(), true, project.getProjectCharset());
+                List<CompileInputFile> wrapped = Utility.mapList(Arrays.asList(files), f -> new CompileInputFile(f, f));
+                JobQueue.getJobQueue().addJob(wrapped.toArray(new CompileInputFile[0]), observer, project.getClassLoader(),
+                        project.getProjectDir(), true, project.getProjectCharset(), CompileReason.INVOKE, CompileType.INTERNAL_COMPILE);
             }
         };
         this.sourceCharset = pmf.getProject().getProjectCharset();
@@ -313,70 +325,51 @@ public class Invoker
         // check for a method call with no parameter
         // if so, just do it
         if ((!constructing || Config.isGreenfoot()) && !member.hasParameters()) {
-            dialog = null;
             doInvocation(null, (JavaType []) null, null);
         }
         else {
-            CallDialog cDialog;
-            if (member instanceof MethodView) {
-                // Method requires a method dialog
-                MethodView mmember = (MethodView) member;
-                MethodDialog mDialog = methods.get(member);
+            Platform.runLater(() -> {
+                CallDialog cDialog;
+                if (member instanceof MethodView)
+                {
+                    // Method requires a method dialog
+                    MethodView mmember = (MethodView)member;
+                    MethodDialog mDialog = new MethodDialog(parent, objectBench, callHistory, instanceName, mmember, typeMap, this);
+                    cDialog = mDialog;
+                }
+                else
+                {
+                    // Constructor
+                    ConstructorView cmember = (ConstructorView)member;
+                    ConstructorDialog conDialog = new ConstructorDialog(parent, objectBench, callHistory, objName, cmember, this);
+                    cDialog = conDialog;
+                }
 
-                if (mDialog == null) {
-                    mDialog = new MethodDialog(pmf, objectBench, callHistory, instanceName, mmember, typeMap);
-                    methods.put(mmember, mDialog);
-                }
-                else {
-                    mDialog.setInstanceInfo(instanceName, typeMap);
-                    mDialog.setCallLabel(mmember.isStatic() ? mmember.getClassName() : instanceName);
-                }
-                cDialog = mDialog;
-            }
-            else {
-                // Constructor
-                ConstructorView cmember = (ConstructorView) member;
-                ConstructorDialog conDialog = constructors.get(cmember);
-                
-                if (conDialog == null) {
-                    conDialog = new ConstructorDialog(pmf, objectBench, callHistory, objName, cmember);
-                    constructors.put(cmember, conDialog);
-                }
-                else {
-                    conDialog.setInstanceInfo(objName);
-                }
-                cDialog = conDialog;
-            }
+                cDialog.show();
+                //org.scenicview.ScenicView.show(cDialog.getDialogPane());
 
-            cDialog.setVisible(true);
-            cDialog.setEnabled(true);
-            cDialog.setWatcher(this);
-            dialog = cDialog;
+                dialog = cDialog;
+            });
         }
     }
 
-    // -- CallDialogWatcher interface --
-
     /**
-     * The call dialog notified of an event. If it is an OK, start doing the
-     * call.
+     * The call dialog had OK clicked.
      */
-    public void callDialogEvent(CallDialog dlg, int event)
+    @OnThread(Tag.FXPlatform)
+    public void callDialogOK()
     {
-        if (event == CallDialog.CANCEL) {
-            dlg.setVisible(false);
-        }
-        else if (event == CallDialog.OK) {
+        dialog.setOKEnabled(false);
+        String[] actualTypeParams = dialog.getTypeParams();
+        String newInstanceName = dialog.getNewInstanceName();
+        String[] args = dialog.getArgs();
+        JavaType[] argGenTypes = dialog.getArgGenTypes(true);
+        SwingUtilities.invokeLater(() -> {
             gotError = false;
-            dialog.setEnabled(false);
-            objName = dialog.getNewInstanceName();
+            objName = newInstanceName;
             benchName = objName;
-            String[] actualTypeParams = dialog.getTypeParams();
-            doInvocation(dialog.getArgs(), dialog.getArgGenTypes(true), actualTypeParams);
-        }
-        else {
-            Debug.reportError("Invoker: Unknown CallDialog event");
-        }
+            doInvocation(args, argGenTypes, actualTypeParams);
+        });
     }
 
     // -- end of CallDialogWatcher interface --
@@ -527,11 +520,7 @@ public class Invoker
             // goes into an infinite loop can hang BlueJ.
             new Thread() {
                 public void run() {
-                    EventQueue.invokeLater(new Runnable() {
-                        public void run() {
-                            closeCallDialog();
-                        }
-                    });
+                    Platform.runLater(Invoker.this::closeCallDialog);
                     
                     final DebuggerResult result = debugger.instantiateClass(className);
 
@@ -557,7 +546,7 @@ public class Invoker
                 compileInvocationFile(shell);
             }
             else {
-                endCompile(new File[0], false);
+                endCompile(new CompileInputFile[0], false, CompileType.INTERNAL_COMPILE);
             }
         }
     }
@@ -844,7 +833,7 @@ public class Invoker
             shell.close();
         }
         catch (IOException e) {
-            DialogManager.showError(pmf, "could-not-write-shell-file");
+            Platform.runLater(() -> DialogManager.showErrorFX(parent, "could-not-write-shell-file"));
             if (shell != null) {
                 try {
                     shell.close();
@@ -1030,20 +1019,20 @@ public class Invoker
     private void compileInvocationFile(File shellFile)
     {
         File[] files = {shellFile};
-        compiler.compile(files, new EventqueueCompileObserver(this));
+        compiler.compile(files, new EventqueueCompileObserverAdapter(this));
     }
 
     // -- CompileObserver interface --
 
     // not interested in these events:
     @Override
-    public void startCompile(File[] sources) { }
+    public void startCompile(CompileInputFile[] sources, CompileReason reason, CompileType type) { }
 
     /*
      * @see bluej.compiler.CompileObserver#compilerMessage(bluej.compiler.Diagnostic)
      */
     @Override
-    public boolean compilerMessage(Diagnostic diagnostic)
+    public boolean compilerMessage(Diagnostic diagnostic, CompileType type)
     {
         if (diagnostic.getType() == Diagnostic.ERROR) {
             if (! gotError) {
@@ -1063,9 +1052,12 @@ public class Invoker
     {
         DataCollector.invokeCompileError(pkg, commandString, message);
         
-        if (dialog != null) {
-            dialog.setErrorMessage("Error: " + message);
-        }
+        Platform.runLater(() -> {
+            if (dialog != null)
+            {
+                dialog.setErrorMessage("Error: " + message);
+            }
+        });
         watcher.putError(message, ir);
     }
     
@@ -1074,14 +1066,18 @@ public class Invoker
      * now. Then clean up.
      */
     @Override
-    public synchronized void endCompile(File[] sources, boolean successful)
+    public synchronized void endCompile(CompileInputFile[] sources, boolean successful, CompileType type)
     {
-        if (dialog != null) {
-            dialog.setWaitCursor(false);
-            if (successful) {
-                closeCallDialog();
+        Platform.runLater(() -> {
+            if (dialog != null)
+            {
+                dialog.setWaitCursor(false);
+                if (successful)
+                {
+                    closeCallDialog();
+                }
             }
-        }
+        });
 
         if (successful) {
             watcher.beginExecution(ir);
@@ -1100,27 +1096,24 @@ public class Invoker
     {
         deleteShellFiles();
         
-        if (! successful && dialog != null) {
-            // Re-enable call dialog: use can try again with
-            // different parameters.
-            dialog.setEnabled(true);
-        }
+        Platform.runLater(() -> {
+            if (!successful && dialog != null)
+            {
+                // Re-enable call dialog: use can try again with
+                // different parameters.
+                dialog.setOKEnabled(true);
+            }
+        });
     }
     
+    @OnThread(Tag.FXPlatform)
     private void closeCallDialog()
     {
         if (dialog != null) {
             dialog.setWaitCursor(false);
-            dialog.setVisible(false);
-            // JDK on Windows has a bug. If the PkgMgrFrame is
-            // minimised while the call dialog is still showing, the
-            // call dialog re-appears when the PkgMgrFrame is restored.
-            // Calling dispose() as a workaround.
-            // See http://bugs.sun.com/bugdatabase/view_bug.do?bug_id=5005454
-            if (Config.isWinOS()) {
-                dialog.dispose();
-            }
-            dialog.updateParameters();
+            dialog.close();
+            dialog.saveCallHistory();
+            dialog = null;
         }
     }
 
@@ -1192,6 +1185,7 @@ public class Invoker
      * 
      * <p>This method is called on the Swing event thread.
      */
+    @OnThread(Tag.Swing)
     public void handleResult(DebuggerResult result, boolean unwrap)
     {
         try {
@@ -1277,6 +1271,7 @@ public class Invoker
             mypackage = p;
         }
 
+        @OnThread(value = Tag.Swing, ignoreParent = true)
         public String transform(String n)
         {
             return cleverQualifyTypeName(mypackage, n);
