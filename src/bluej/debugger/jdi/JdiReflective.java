@@ -121,7 +121,7 @@ public class JdiReflective extends Reflective
             if (rclass == null) {
                 Debug.message("Attempt to use unloaded type: " + name);
                 Debug.message("  name = " +  name + ", sourceLoader = " + sourceLoader);
-                Debug.message("  (in JdiReflective.checkLoader()");
+                Debug.message("  (in JdiReflective.checkLoaded()");
                 return;
             }
             name = null;
@@ -818,6 +818,37 @@ public class JdiReflective extends Reflective
         return typeFromSignature(iterator, null, parent);
     }
 
+    /**
+     * Determine the complete type of a local variable,
+     * 
+     * @param t
+     *            The type as returned by getType() on the variable, or null if that threw
+     *            a ClassNotLoadedException
+     * @param genericSignature
+     *            The generic signature of the variable
+     * @param typeName
+     *            The name of the variable type
+     * @param declaringType
+     *            The declaring type of the variable
+     * @return The type of the field value
+     */
+    public static JavaType fromLocalVar(Type t, String genericSignature, String typeName, ReferenceType declaringType)
+    {
+        if (t == null) {
+            t = findClass(typeNameToBinaryName(typeName), declaringType.classLoader(), declaringType.virtualMachine());
+        }
+        
+        if (genericSignature == null) {
+            return getNonGenericType(typeName, t, declaringType.classLoader(), declaringType.virtualMachine());
+        }
+
+        // if the generic signature wasn't null, get the type from it.
+        StringIterator iterator = new StringIterator(genericSignature);
+        Map<String,GenTypeParameter> tparams = new HashMap<String,GenTypeParameter>();
+        addDefaultParamBases(tparams, new JdiReflective(declaringType));
+        return typeFromSignature(iterator, tparams, declaringType);
+    }
+    
     /**
      * Determine the complete type of a local variable,
      * 

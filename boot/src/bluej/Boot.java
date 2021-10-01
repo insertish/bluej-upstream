@@ -49,7 +49,7 @@ public class Boot
     // and then the update-version target should be executed.
     public static final int BLUEJ_VERSION_MAJOR = 3;
     public static final int BLUEJ_VERSION_MINOR = 0;
-    public static final int BLUEJ_VERSION_RELEASE = 6;
+    public static final int BLUEJ_VERSION_RELEASE = 7;
     public static final String BLUEJ_VERSION_SUFFIX = "";
 
     // public static final int BLUEJ_VERSION_NUMBER = BLUEJ_VERSION_MAJOR * 1000 +
@@ -98,7 +98,7 @@ public class Boot
         "bluejcore.jar", "bluejeditor.jar", "bluejext.jar",
         "AppleJavaExtensions.jar", "junit-4.8.2.jar", "bluej.jar",
         "commons-httpclient-3.1.jar", "commons-logging-api-1.1.1.jar",
-        "commons-codec-1.3.jar", JLAYER_MP3_JAR};
+        "commons-codec-1.3.jar", JLAYER_MP3_JAR, "opencsv-2.3.jar"};
 
     // Jars that should be included with exported scenarios
     public static final String[] GREENFOOT_EXPORT_JARS = {JLAYER_MP3_JAR};

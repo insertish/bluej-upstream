@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2010,2011  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2010,2011,2012  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -635,13 +635,15 @@ public final class Package extends Graph
         }
 
         addImmovableTargets();
+        List<Target> targetsToPlace = new ArrayList<Target>();
+        
         // make our Package targets reflect what is actually on disk
         // note that we consider this on-disk version the master
         // version so if we have a class target called Foo but we
         // discover a directory call Foo, a PackageTarget will be
         // inserted to replace the ClassTarget
         File subDirs[] = getPath().listFiles(new SubPackageFilter());
-
+        
         for (int i = 0; i < subDirs.length; i++) {
             // first check if the directory name would be a valid package name
             if (!JavaNames.isIdentifier(subDirs[i].getName()))
@@ -651,7 +653,7 @@ public final class Package extends Graph
 
             if (target == null || !(target instanceof PackageTarget)) {
                 target = new PackageTarget(this, subDirs[i].getName());
-                findSpaceForVertex(target);
+                targetsToPlace.add(target);
             }
 
             addTarget(target);
@@ -670,9 +672,15 @@ public final class Package extends Graph
             Target target = propTargets.get(targetName);
             if (target == null || !(target instanceof ClassTarget)) {
                 target = new ClassTarget(this, targetName);
-                findSpaceForVertex(target);
+                targetsToPlace.add(target);
             }
             addTarget(target);
+        }
+        
+        // Find an empty spot for any targets which didn't already have
+        // a position
+        for (Target t : targetsToPlace) {
+            findSpaceForVertex(t);
         }
         
         // Start with all classes in the normal (compiled) state.
@@ -2424,7 +2432,7 @@ public final class Package extends Graph
             }
         }
 
-        private void sendEventToExtensions(String filename, int lineNo, String message, int eventType)
+        private void sendEventToExtensions(String filename, int [] errorPosition, String message, int eventType)
         {
             File [] sources;
             if (filename != null) {
@@ -2435,7 +2443,7 @@ public final class Package extends Graph
                 sources = new File[0];
             }
             CompileEvent aCompileEvent = new CompileEvent(eventType, sources);
-            aCompileEvent.setErrorLineNumber(lineNo);
+            aCompileEvent.setErrorPosition(errorPosition);
             aCompileEvent.setErrorMessage(message);
             ExtensionsManager.getInstance().delegateEvent(aCompileEvent);
         }
@@ -2444,6 +2452,7 @@ public final class Package extends Graph
          * A compilation has been started. Mark the affected classes as being
          * currently compiled.
          */
+        @Override
         public void startCompile(File[] sources)
         {
             // Send a compilation starting event to extensions.
@@ -2457,34 +2466,39 @@ public final class Package extends Graph
             markAsCompiling(sources);
         }
 
+        @Override
         public void compilerMessage(Diagnostic diagnostic)
         {
+            int [] errorPosition = new int[4];
+            errorPosition[0] = (int) diagnostic.getStartLine();
+            errorPosition[1] = (int) diagnostic.getStartColumn();
+            errorPosition[2] = (int) diagnostic.getEndLine();
+            errorPosition[3] = (int) diagnostic.getEndColumn();
             if (diagnostic.getType() == Diagnostic.ERROR) {
-                errorMessage(diagnostic.getFileName(), (int) diagnostic.getStartLine(),
-                        diagnostic.getMessage());
+                errorMessage(diagnostic.getFileName(), errorPosition, diagnostic.getMessage());
             }
             else {
-                warningMessage(diagnostic.getFileName(), (int) diagnostic.getStartLine(),
-                        diagnostic.getMessage());
+                warningMessage(diagnostic.getFileName(), errorPosition, diagnostic.getMessage());
             }
         }
         
-        private void errorMessage(String filename, int lineNo, String message)
+        private void errorMessage(String filename, int [] errorPosition, String message)
         {
             // Send a compilation Error event to extensions.
-            sendEventToExtensions(filename, lineNo, message, CompileEvent.COMPILE_ERROR_EVENT);
+            sendEventToExtensions(filename, errorPosition, message, CompileEvent.COMPILE_ERROR_EVENT);
         }
 
-        private void warningMessage(String filename, int lineNo, String message)
+        private void warningMessage(String filename, int [] errorPosition, String message)
         {
             // Send a compilation Error event to extensions.
-            sendEventToExtensions(filename, lineNo, message, CompileEvent.COMPILE_WARNING_EVENT);
+            sendEventToExtensions(filename, errorPosition, message, CompileEvent.COMPILE_WARNING_EVENT);
         }
 
         /**
          * Compilation has ended. Mark the affected classes as being normal
          * again.
          */
+        @Override
         public void endCompile(File[] sources, boolean successful)
         {
             for (int i = 0; i < sources.length; i++) {
