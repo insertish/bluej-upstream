@@ -237,11 +237,7 @@
         <delete dir="winsetup/SourceDir" />
         <delete dir="winsetup" includes="*.wixobj" />
         <unzip src="greenfoot-dist.jar" dest="winsetup/SourceDir" />
-        
-        <exec dir="winsetup" executable="${wix_bin}/candle.exe">
-            <arg line="JDKDlg.wxs"/>
-        </exec>
-        
+
         <exec dir="winsetup" executable="${wix_bin}/candle.exe">
             <arg line="CheckboxExtrasDlg.wxs"/>
         </exec>
@@ -264,7 +260,7 @@
         </exec>
         
         <exec dir="winsetup" executable="${wix_bin}/light.exe">
-            <arg line="-ext WixUIExtension -loc greenfoot.wxl greenfoot.wixobj CheckboxExtrasDlg.wixobj JDKDlg.wixobj ui.wixobj greenfoot-install-files.wixobj -o greenfoot-${greenfoot.version}.msi"/>
+            <arg line="-ext WixUIExtension -loc greenfoot.wxl greenfoot.wixobj CheckboxExtrasDlg.wixobj ui.wixobj greenfoot-install-files.wixobj -o greenfoot-${greenfoot.version}.msi"/>
         </exec>
         <delete dir="winsetup/SourceDir" />
     </target>
@@ -357,15 +353,21 @@
             <fileset dir="gfdeb">
                 <patternset includes="**" />
             </fileset>
+            <dirset dir="gfdeb">
+                <patternset includes="**" />
+            </dirset>
         </chown>
         <chgrp group="root">
             <fileset dir="gfdeb">
                 <patternset includes="**" />
             </fileset>
+            <dirset dir="gfdeb">
+                <patternset includes="**" />
+            </dirset>
         </chgrp>
         
-        <chmod perm="+x" file="gfdeb/DEBIAN/postinst" />
-        <chmod perm="+x" file="gfdeb/DEBIAN/postrm" />
+        <chmod perm="755" file="gfdeb/DEBIAN/postinst" />
+        <chmod perm="755" file="gfdeb/DEBIAN/postrm" />
         <exec executable="dpkg-deb" searchpath="true">
             <arg value="-b" />
             <arg file="gfdeb" />
