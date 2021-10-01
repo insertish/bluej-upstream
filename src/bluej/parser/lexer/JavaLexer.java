@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 2009,2010,2011,2012  Michael Kolling and John Rosenberg 
+ Copyright (C) 2009,2010,2011,2012,2014  Michael Kolling and John Rosenberg 
 
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -38,7 +38,7 @@ import bluej.parser.TokenStream;
  */
 public final class JavaLexer implements TokenStream
 {
-    private StringBuffer textBuffer; // text of current token
+    private StringBuffer textBuffer = new StringBuffer(); // text of current token
     private EscapedUnicodeReader reader;
     private int rChar; 
     private int beginColumn, beginLine, beginPosition;
@@ -135,7 +135,7 @@ public final class JavaLexer implements TokenStream
      */
     public LocatableToken nextToken()
     {  
-        textBuffer=new StringBuffer();
+        textBuffer.setLength(0);
         
         if (generateWhitespaceTokens && Character.isWhitespace((char)rChar))
         {
@@ -267,14 +267,14 @@ public final class JavaLexer implements TokenStream
      */
     private int readDigitToken(char ch, boolean dot)
     {
-        int rval = ch;     
+        int rval = ch;
         textBuffer.append(ch);
         int type = dot ? JavaTokenTypes.NUM_DOUBLE : JavaTokenTypes.NUM_INT;
 
         boolean fpValid = true; // whether a subsequent dot would be valid.
                 // (will be set false for a non-decimal literal).
         
-        if (ch == '0') {
+        if (ch == '0' && ! dot) {
             rval = readNextChar();
             if (rval == 'x' || rval == 'X') {
                 // hexadecimal
@@ -288,6 +288,11 @@ public final class JavaLexer implements TokenStream
                     textBuffer.append((char) rval);
                     rval = readNextChar();
                 } while (isHexDigit((char) rval) || rval == '_');
+                if (rval == 'p' || rval == 'P') {
+                    // super-funky semi-hexadecimal floating point literal
+                    textBuffer.append((char) rval);
+                    return superFunkyHFPL();
+                }
                 fpValid = false;
             }
             else if (rval == 'b' || rval == 'B') {
@@ -385,6 +390,45 @@ public final class JavaLexer implements TokenStream
         return type;
     }
 
+    private int superFunkyHFPL()
+    {
+        // A super-funky semi-hexadecimal floating point literal looks like this:
+        //   0xABCp12f
+        // The 'ABC' is in hex, the 'p' can also be 'P', the '12' is a *decimal*
+        // representation of the *power 2* exponent (may be negative); the 'f' (or 'F')
+        // marks as a float rather than the default double ('d' or 'D').
+        // So the above represents 0xABC * 2^123, or 0xABC << 12, as a float.
+        
+        // Up to this point, we've seen the 'p'.
+        int rval = readNextChar();
+        if (rval == -1) {
+            return JavaTokenTypes.INVALID;
+        }
+        if (! Character.isDigit((char) rval) && rval != '-') {
+            return JavaTokenTypes.INVALID;
+        }
+        
+        textBuffer.append((char) rval);
+        rval = readNextChar();
+        while (Character.isDigit((char) rval)) {
+            textBuffer.append((char) rval);
+            rval = readNextChar();
+        }
+        
+        if (rval == 'f' || rval == 'F') {
+            textBuffer.append((char) rval);
+            readNextChar();
+            return JavaTokenTypes.NUM_FLOAT;
+        }
+        
+        if (rval == 'd' || rval == 'D') {
+            textBuffer.append((char) rval);
+            readNextChar();
+        }
+        
+        return JavaTokenTypes.NUM_DOUBLE;
+    }
+    
     private int getMLCommentType(char ch)
     {
         do{
@@ -447,7 +491,11 @@ public final class JavaLexer implements TokenStream
             return JavaTokenTypes.SEMI;
         }
         if (':' == ch) {
-            readNextChar();
+            int rval = readNextChar();
+            if (rval == ':') {
+                readNextChar();
+                return JavaTokenTypes.METHOD_REFERENCE;
+            }
             return JavaTokenTypes.COLON;
         }
         if ('^' == ch)
@@ -608,6 +656,7 @@ public final class JavaLexer implements TokenStream
         //-, -=, --
         int rval=readNextChar();
         char thisChar=(char)rval; 
+
         if (thisChar=='='){
             textBuffer.append(thisChar);
             readNextChar();
@@ -617,6 +666,11 @@ public final class JavaLexer implements TokenStream
             textBuffer.append(thisChar); 
             readNextChar();
             return JavaTokenTypes.DEC; 
+        }
+        if (thisChar == '>'){
+            textBuffer.append(thisChar);
+            readNextChar();
+            return JavaTokenTypes.LAMBDA;
         }
 
         return JavaTokenTypes.MINUS;

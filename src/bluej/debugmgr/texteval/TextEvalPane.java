@@ -66,6 +66,7 @@ import bluej.editor.moe.MoeSyntaxDocument;
 import bluej.editor.moe.MoeSyntaxEditorKit;
 import bluej.parser.TextAnalyzer;
 import bluej.pkgmgr.PkgMgrFrame;
+import bluej.prefmgr.PrefMgr;
 import bluej.testmgr.record.InvokerRecord;
 import bluej.utility.Debug;
 import bluej.utility.Utility;
@@ -149,8 +150,7 @@ public class TextEvalPane extends JEditorPane
      */
     public void clear()
     {
-        setText(" ");
-        caretToEnd();
+        setText("");
     }
     
     /**
@@ -240,20 +240,22 @@ public class TextEvalPane extends JEditorPane
     /*
      * @see bluej.debugmgr.ResultWatcher#beginExecution()
      */
+    @Override
     public void beginCompile() { }
     
     /*
      * @see bluej.debugmgr.ResultWatcher#beginExecution()
      */
+    @Override
     public void beginExecution(InvokerRecord ir)
     { 
         BlueJEvent.raiseEvent(BlueJEvent.METHOD_CALL, ir);
     }
     
-    /**
-     * An invocation has completed - here is the result.
-     * If the invocation has a void result (note that is a void type), result == null.
+    /*
+     * @see bluej.debugmgr.ResultWatcher#putResult(bluej.debugger.DebuggerObject, java.lang.String, bluej.testmgr.record.InvokerRecord)
      */
+    @Override
     public void putResult(final DebuggerObject result, final String name, final InvokerRecord ir)
     {
         frame.getObjectBench().addInteraction(ir);
@@ -269,7 +271,6 @@ public class TextEvalPane extends JEditorPane
             newlyDeclareds = null;
         }
         
-        append(" ");
         boolean giveUninitializedWarning = autoInitializedVars != null && autoInitializedVars.size() != 0; 
         
         if (giveUninitializedWarning && Utility.firstTimeThisRun("TextEvalPane.uninitializedWarning")) {
@@ -293,7 +294,7 @@ public class TextEvalPane extends JEditorPane
             autoInitializedVars.clear();
         }
         
-        if (result != null && !result.isNullObject()) {
+        if (!result.isNullObject()) {
             DebuggerField resultField = result.getField(0);
             String resultString = resultField.getValueString();
             
@@ -319,6 +320,9 @@ public class TextEvalPane extends JEditorPane
                 }
             }            
         } 
+        else {
+            markCurrentAs(TextEvalSyntaxView.OUTPUT, false);
+        }
         
         ExecutionEvent executionEvent = new ExecutionEvent(frame.getPackage());
         executionEvent.setCommand(currentCommand);
@@ -442,7 +446,6 @@ public class TextEvalPane extends JEditorPane
      */
     private void showErrorMsg(final String message)
     {
-        append(" ");
         error("Error: " + message);
         completeExecution();
     }
@@ -452,7 +455,6 @@ public class TextEvalPane extends JEditorPane
      */
     private void showExceptionMsg(final String message)
     {
-        append(" ");
         error("Exception: " + message);
         completeExecution();
     }
@@ -557,19 +559,12 @@ public class TextEvalPane extends JEditorPane
     {
         try {
             doc.insertString(doc.getLength(), s, null);
-            caretToEnd();
+            setCaretPosition(doc.getLength());
+        
         }
         catch(BadLocationException exc) {
             Debug.reportError("bad location in terminal operation");
         }
-    }
-    
-    /**
-     * Move the caret to the end of the text.
-     */
-    private void caretToEnd() 
-    {
-        setCaretPosition(doc.getLength());
     }
 
     /**
@@ -617,7 +612,7 @@ public class TextEvalPane extends JEditorPane
     {
         AbstractDocument doc = (AbstractDocument) getDocument();
         Element line = doc.getParagraphElement(doc.getLength());
-        return line.getStartOffset() + 1;  // ignore space at front
+        return line.getStartOffset();
     }
     
     /**
@@ -627,7 +622,7 @@ public class TextEvalPane extends JEditorPane
     private String getCurrentLine()
     {
         Element line = doc.getParagraphElement(doc.getLength());
-        int lineStart = line.getStartOffset() + 1;  // ignore space at front
+        int lineStart = line.getStartOffset();
         int lineEnd = line.getEndOffset() - 1;      // ignore newline char
         
         try {
@@ -650,7 +645,7 @@ public class TextEvalPane extends JEditorPane
     }
 
     /**
-     * Return tha column for a given position.
+     * Return the column for a given position.
      */
     private int getColumnFromPosition(int pos)
     {
@@ -664,7 +659,7 @@ public class TextEvalPane extends JEditorPane
      */
     private void markAs(String flag, Object value)
     {
-        append("\n ");          // ensure space at the beginning of every line
+        append("\n");
         SimpleAttributeSet a = new SimpleAttributeSet();
         a.addAttribute(flag, value);
         doc.setParagraphAttributes(doc.getLength()-2, a);
@@ -688,7 +683,7 @@ public class TextEvalPane extends JEditorPane
     private void replaceLine(String s)
     {
         Element line = doc.getParagraphElement(doc.getLength());
-        int lineStart = line.getStartOffset() + 1;  // ignore space at front
+        int lineStart = line.getStartOffset();
         int lineEnd = line.getEndOffset() - 1;      // ignore newline char
         
         try {
@@ -783,10 +778,11 @@ public class TextEvalPane extends JEditorPane
     {
         Keymap newmap = JTextComponent.addKeymap("texteval", getKeymap());
 
-        Action action = new InsertCharacterAction();
-        newmap.setDefaultAction(action);
+        // Note that we rely on behavior of the current DefaultEditorKit default key typed
+        // handler to actually insert characters (it calls replaceSelection to do so,
+        // which we've overridden).
 
-        action = new ExecuteCommandAction();
+        Action action = new ExecuteCommandAction();
         newmap.addActionForKeyStroke(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0), action);
 
         softReturnAction = new ContinueCommandAction();
@@ -799,14 +795,17 @@ public class TextEvalPane extends JEditorPane
         newmap.addActionForKeyStroke(KeyStroke.getKeyStroke(KeyEvent.VK_LEFT, 0), action);
         newmap.addActionForKeyStroke(KeyStroke.getKeyStroke(KeyEvent.VK_KP_LEFT, 0), action);
 
-        action = new HistoryBackAction();
-        newmap.addActionForKeyStroke(KeyStroke.getKeyStroke(KeyEvent.VK_UP, 0), action);
-        newmap.addActionForKeyStroke(KeyStroke.getKeyStroke(KeyEvent.VK_KP_UP, 0), action);
+        if (PrefMgr.getFlag(PrefMgr.ACCESSIBILITY_SUPPORT) == false)
+        {
+            action = new HistoryBackAction();
+            newmap.addActionForKeyStroke(KeyStroke.getKeyStroke(KeyEvent.VK_UP, 0), action);
+            newmap.addActionForKeyStroke(KeyStroke.getKeyStroke(KeyEvent.VK_KP_UP, 0), action);
 
-        action = new HistoryForwardAction();
-        newmap.addActionForKeyStroke(KeyStroke.getKeyStroke(KeyEvent.VK_DOWN, 0), action);
-        newmap.addActionForKeyStroke(KeyStroke.getKeyStroke(KeyEvent.VK_KP_DOWN, 0), action);
-
+            action = new HistoryForwardAction();
+            newmap.addActionForKeyStroke(KeyStroke.getKeyStroke(KeyEvent.VK_DOWN, 0), action);
+            newmap.addActionForKeyStroke(KeyStroke.getKeyStroke(KeyEvent.VK_KP_DOWN, 0), action);
+        }
+        
         action = new TransferFocusAction(true);
         newmap.addActionForKeyStroke(KeyStroke.getKeyStroke(KeyEvent.VK_TAB, 0), action);
 
@@ -817,33 +816,6 @@ public class TextEvalPane extends JEditorPane
         newmap.addActionForKeyStroke(KeyStroke.getKeyStroke(KeyEvent.VK_HOME, 0), action);
 
         setKeymap(newmap);
-    }
-    
-    
-    final class InsertCharacterAction extends AbstractAction {
-
-        /**
-         * Create a new action object. This action executes the current command.
-         */
-        public InsertCharacterAction()
-        {
-            super("InsertCharacter");
-        }
-        
-        /**
-         * Insert a character into the text.
-         */
-        final public void actionPerformed(ActionEvent event)
-        {
-            if(!isEditable())
-                return;
-            
-            String s = event.getActionCommand();  // will always be length 1
-            if(s.charAt(0) != '\n') {             // bug workaround: enter goes through default
-                                                  //  action as well as set action
-                replaceSelection(s);
-            }
-        }
     }
 
     final class ExecuteCommandAction extends AbstractAction {
@@ -870,9 +842,7 @@ public class TextEvalPane extends JEditorPane
             if(currentCommand.length() != 0) {
                        
                 history.add(line);
-                append("\n");      // ensure space at the beginning of every line, because
-                                    // line properties do not work otherwise
-                markCurrentAs(TextEvalSyntaxView.OUTPUT, Boolean.TRUE);
+                append("\n");
                 firstTry = true;
                 setEditable(false);    // don't allow input while we're thinking
                 busy = true;
@@ -982,21 +952,22 @@ public class TextEvalPane extends JEditorPane
          */
         final public void actionPerformed(ActionEvent event)
         {
-            if (busy)
+            if (busy) {
                 return;
+            }
             
-            if(getCurrentColumn() > 1) {
-                try {
-                    if(getSelectionEnd() == getSelectionStart()) { // no selection
+            try {
+                if(getSelectionEnd() == getSelectionStart()) { // no selection
+                    if (getCurrentColumn() > 0) {
                         doc.remove(getCaretPosition()-1, 1);
                     }
-                    else {
-                        replaceSelection("");
-                    }
                 }
-                catch(BadLocationException exc) {
-                    Debug.reportError("bad location in text eval operation");
+                else {
+                    replaceSelection("");
                 }
+            }
+            catch(BadLocationException exc) {
+                Debug.reportError("bad location in text eval operation");
             }
         }
     }
@@ -1016,10 +987,11 @@ public class TextEvalPane extends JEditorPane
          */
         final public void actionPerformed(ActionEvent event)
         {
-            if (busy)
+            if (busy) {
                 return;
+            }
             
-            if(getCurrentColumn() > 1) {
+            if(getCurrentColumn() > 0) {
                 Caret caret = getCaret();
                 caret.setDot(caret.getDot() - 1);
             }
@@ -1042,13 +1014,15 @@ public class TextEvalPane extends JEditorPane
          */
         public void actionPerformed(ActionEvent event)
         {
-            if (busy)
+            if (busy) {
                 return;
+            }
             
             Caret caret = getCaret();
             int curCol = getColumnFromPosition(caret.getDot());
-            if (curCol != 1)
-                caret.setDot(caret.getDot() - curCol + 1);
+            if (curCol != 1) {
+                caret.setDot(caret.getDot() - curCol);
+            }
         }
     }
 

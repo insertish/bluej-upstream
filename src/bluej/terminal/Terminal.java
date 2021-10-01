@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2010,2011,2012  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2013,2014  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -22,7 +22,6 @@
 package bluej.terminal;
 
 import java.awt.BorderLayout;
-import java.awt.Color;
 import java.awt.Event;
 import java.awt.EventQueue;
 import java.awt.Font;
@@ -57,7 +56,6 @@ import javax.swing.JMenuItem;
 import javax.swing.JScrollPane;
 import javax.swing.JSeparator;
 import javax.swing.JSplitPane;
-import javax.swing.JTextArea;
 import javax.swing.KeyStroke;
 
 import bluej.BlueJEvent;
@@ -350,12 +348,8 @@ public final class Terminal extends JFrame
             clear();
         }
         if(recordMethodCalls) {
-            if (isVoid) {
-                text.appendMethodCall(callString + ";\n");
-            }
-            else {
-                text.appendMethodCall(callString + "\n");
-            }
+            // If isVoid, it will have a ';' anyway.
+            text.appendMethodCall(callString + "\n");
         }
         newMethodCall = true;
     }
@@ -444,14 +438,10 @@ public final class Terminal extends JFrame
     // ---- KeyListener interface ----
 
     @Override
-    public void keyPressed(KeyEvent event)
-    {
-    }
+    public void keyPressed(KeyEvent event) { }
     
     @Override
-    public void keyReleased(KeyEvent event)
-    {
-    }
+    public void keyReleased(KeyEvent event) { }
 
     @Override
     public void keyTyped(KeyEvent event)
@@ -461,7 +451,14 @@ public final class Terminal extends JFrame
         
         char ch = event.getKeyChar();
         switch (ch) {
-            
+        case KeyEvent.VK_UP:
+        case KeyEvent.VK_DOWN:
+        case KeyEvent.VK_LEFT:
+        case KeyEvent.VK_RIGHT:
+            if (PrefMgr.getFlag(PrefMgr.ACCESSIBILITY_SUPPORT))
+                return; // Let the arrow keys take effect
+        
+        
         case KeyEvent.VK_EQUALS: // increase the font size
         case KeyEvent.VK_PLUS: // increase the font size (non-uk keyboards)
             if (event.getModifiers() == SHORTCUT_MASK) {
@@ -597,7 +594,7 @@ public final class Terminal extends JFrame
                         // Handled via paste() in TermTextArea
                         return actionName;
                     }
-                    return null;
+                    return PrefMgr.getFlag(PrefMgr.ACCESSIBILITY_SUPPORT) ? actionName : null;
                 }
                 
                 return actionName;
@@ -697,7 +694,8 @@ public final class Terminal extends JFrame
             
         if(isFirstShow) {
             pack();
-        } else {
+        }
+        else {
             validate();
         }
         
@@ -846,7 +844,8 @@ public final class Terminal extends JFrame
             super(Config.getString("terminal.recordCalls"));
         }
 
-        public void actionPerformed(ActionEvent e) {
+        public void actionPerformed(ActionEvent e)
+        {
             recordMethodCalls = recordCalls.isSelected();
             Config.putPropBoolean(RECORDMETHODCALLSPROPNAME, recordMethodCalls);
         }
@@ -859,7 +858,8 @@ public final class Terminal extends JFrame
             super(Config.getString("terminal.buffering"));
         }
 
-        public void actionPerformed(ActionEvent e) {
+        public void actionPerformed(ActionEvent e)
+        {
             unlimitedBufferingCall = unlimitedBuffering.isSelected();
             text.setUnlimitedBuffering(unlimitedBufferingCall);
             Config.putPropBoolean(UNLIMITEDBUFFERINGCALLPROPNAME, unlimitedBufferingCall);
@@ -891,9 +891,7 @@ public final class Terminal extends JFrame
             return ! buffer.isEmpty();
         }
         
-        public void close()
-        {
-        }
+        public void close() { }
     }
 
     /**
@@ -932,13 +930,8 @@ public final class Terminal extends JFrame
             catch (InterruptedException ie) {}
         }
 
-        public void flush()
-        {
-        }
+        public void flush() { }
 
-        public void close()
-        {
-        }
+        public void close() { }
     }
-
 }

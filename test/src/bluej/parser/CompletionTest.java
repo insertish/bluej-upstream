@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2014  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -26,6 +26,7 @@ import java.io.StringReader;
 import java.lang.reflect.Modifier;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Executor;
 
 import javax.swing.text.BadLocationException;
 import javax.swing.text.PlainDocument;
@@ -744,6 +745,31 @@ public class CompletionTest extends TestCase
         LocatableToken stoken = suggests.getSuggestionToken();
         assertNull(stoken);
     }
+
+    public void testCompletionResolution2() throws Exception
+    {
+        String aClassSrc =
+            "import static javax.swing.text.DefaultEditorKit.*;\n" +    // 0 - 51     
+            "class A {\n" +             // 51 - 61 
+            "  BeepAction ba;\n" +      // 61 - 78  
+            "  public void m() {\n" +   // 78 - 98
+            "    ba.\n" +           //  ba.  <--  105 
+            "  }\n" +
+            "}\n";
+    
+        PlainDocument doc = new PlainDocument();
+        doc.insertString(0, aClassSrc, null);
+
+        ParsedCUNode aNode = cuForSource(aClassSrc, "");
+        resolver.addCompilationUnit("", aNode);
+        
+        CodeSuggestions suggests = aNode.getExpressionType(105, doc);
+        assertNotNull(suggests);
+        assertEquals("javax.swing.text.DefaultEditorKit.BeepAction", suggests.getSuggestionType().toString());
+        assertFalse(suggests.isStatic());
+        LocatableToken stoken = suggests.getSuggestionToken();
+        assertNull(stoken);
+    }
     
     public void testCompletionInArrayElement() throws Exception
     {
@@ -784,13 +810,20 @@ public class CompletionTest extends TestCase
         assertNotNull(suggests);
         assertEquals("java.util.List<?>", suggests.getSuggestionType().toString());
         
-        AssistContent [] assists = ParseUtils.getPossibleCompletions(suggests, "", new JavadocResolver() {
+        AssistContent [] assists = ParseUtils.getPossibleCompletions(suggests, new JavadocResolver() {
             public void getJavadoc(MethodReflective method)
             {
                 // We want to check that the return type has an erased type.
                 assertNotNull(method.getReturnType().getErasedType());
             }
-        });
+            
+            @Override
+            public boolean getJavadocAsync(MethodReflective method,
+                    AsyncCallback callback, Executor executor)
+            {
+                throw new RuntimeException("Not implemented in test stub.");
+            }
+        }, null);
         
         for (AssistContent assist : assists) {
             assist.getJavadoc();
@@ -854,12 +887,19 @@ public class CompletionTest extends TestCase
         CodeSuggestions suggests = aNode.getExpressionType(57, doc);
         assertNotNull(suggests);
         
-        AssistContent[] acontent = ParseUtils.getPossibleCompletions(suggests, "", new JavadocResolver() {
+        AssistContent[] acontent = ParseUtils.getPossibleCompletions(suggests, new JavadocResolver() {
             @Override
             public void getJavadoc(MethodReflective method)
             {
             }
-        });
+            
+            @Override
+            public boolean getJavadocAsync(MethodReflective method,
+                    AsyncCallback callback, Executor executor)
+            {
+                throw new RuntimeException("Not implemented in test stub.");
+            }
+        }, null);
         
         assertNotNull(acontent);
     }
@@ -979,15 +1019,34 @@ public class CompletionTest extends TestCase
         assertEquals("java.lang.String[]", suggests.getSuggestionType().toString());        
     }
     
-    // Yet to do:
-    
-    // Test that multiple fields defined in a single statement are handled correctly,
-    // particularly if one in the middle is assigned a complex expression involving an
-    // anonymous inner class
-    
-    // Test that forward references behave the same way as in Java
-    // - field definitions may not forward reference other fields in the same class
-    //   (although the declarations are visible!)
-    // - variables cannot be forward referenced (declarations are not visible).
+    public void testMultiFieldDecWithInner() throws Exception
+    {
+        String aClassSrc =
+                "class A {\n" +            // 0 - 10
+                "  Runnable r, b = new Runnable() {\n" +  // 10 - 45
+                "    public void run() {\n" +             // 45 - 69
+                "      c.run();\n" +                      // 69 - 84   c. <- 77
+                "    }\n" +                               // 84 - 90 
+                "  }, c = new Thread() {;\n" +            // 90 - 115
+                "    public void run() {\n" +             // 115 - 139 
+                "       b.run();\n" +                     // 139 - 155  b. <- 148
+                "    }\n" +
+                "  };\n" +
+                "}\n";
+
+        PlainDocument doc = new PlainDocument();
+        doc.insertString(0, aClassSrc, null);
+        ParsedCUNode aNode = cuForSource(aClassSrc, "");
+        resolver.addCompilationUnit("", aNode);
+            
+        CodeSuggestions suggests = aNode.getExpressionType(77, doc);
+        assertNotNull(suggests);
+        assertEquals("java.lang.Runnable", suggests.getSuggestionType().toString());
+        
+        suggests = aNode.getExpressionType(148, doc);
+        assertNotNull(suggests);
+        assertEquals("java.lang.Runnable", suggests.getSuggestionType().toString());
+    }
+
 
 }

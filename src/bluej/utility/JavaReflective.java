@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2011,2013  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2011,2013,2014  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -404,23 +404,32 @@ public class JavaReflective extends Reflective
     }
     
     @Override
-    public List<Reflective> getInners()
-    {
-        Class<?>[] inners = c.getDeclaredClasses();
-        List<Reflective> innersR = new ArrayList<Reflective>(inners.length);
-        for (Class<?> inner : inners) {
-            innersR.add(new JavaReflective(inner));
-        }
-        return innersR;
-    }
-    
-    @Override
     public Reflective getOuterClass()
     {
         Class<?> declaring = c.getDeclaringClass();
         if (declaring != null) {
             return new JavaReflective(declaring);
         }
+        return null;
+    }
+    
+    @Override
+    public Reflective getInnerClass(String name)
+    {
+        try {
+            Class<?> [] declared = c.getDeclaredClasses();
+            for (Class<?> inner : declared) {
+                String innerName = inner.getName();
+                int lastDollar = innerName.lastIndexOf('$');
+                if (lastDollar != -1) {
+                    String baseName = innerName.substring(lastDollar + 1);
+                    if (baseName.equals(name)) {
+                        return new JavaReflective(inner);
+                    }
+                }
+            }
+        }
+        catch (LinkageError le) {}
         return null;
     }
 }

@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2011,2012,2013  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2011,2012,2013,2014  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -51,7 +51,7 @@ import bluej.utility.JavaNames;
 public class ObjectBench extends JPanel implements Accessible, ValueCollection,
     FocusListener, KeyListener, MouseListener, ObjectBenchInterface
 {
-    private static final Color BACKGROUND_COLOR = Config.getOptionalItemColour("colour.objectbench.background");
+    private static final Color TRANSPARENT = new Color(0f, 0f, 0f, 0.0f);
 
     private JScrollPane scroll;
     private ObjectBenchPanel obp;
@@ -72,7 +72,19 @@ public class ObjectBench extends JPanel implements Accessible, ValueCollection,
         objects = new ArrayList<ObjectWrapper>();
         createComponent();
         this.pkgMgrFrame = pkgMgrFrame;
-        getAccessibleContext().setAccessibleName(Config.getString("pkgmgr.objBench.title"));
+        updateAccessibleName();
+    }
+    
+    /**
+     * Updates the accessible name for screen readers, based on the number
+     * of objects currently on the bench
+     */
+    private void updateAccessibleName()
+    {
+        String name = Config.getString("pkgmgr.objBench.title");
+        final int n = getObjectCount();
+        name += ": " + n + " " + Config.getString(n == 1 ? "pkgmgr.objBench.suffix.singular" : "pkgmgr.objBench.suffix.plural");
+        getAccessibleContext().setAccessibleName(name);
     }
 
     /**
@@ -100,6 +112,7 @@ public class ObjectBench extends JPanel implements Accessible, ValueCollection,
         objects.add(wrapper);
         obp.revalidate();
         obp.repaint();
+        updateAccessibleName();
     }
 
     
@@ -180,6 +193,7 @@ public class ObjectBench extends JPanel implements Accessible, ValueCollection,
         resetRecordingInteractions();
         obp.revalidate();
         obp.repaint();
+        updateAccessibleName();
     }
 
     
@@ -190,8 +204,9 @@ public class ObjectBench extends JPanel implements Accessible, ValueCollection,
      */
     public void removeObject(ObjectWrapper wrapper, String scopeId)
     {
-        if(wrapper == selectedObject)
+        if(wrapper == selectedObject) {
             setSelectedObject(null);
+        }
      
         DataCollector.removeObject(wrapper.getPackage(), wrapper.getName());
         
@@ -202,6 +217,7 @@ public class ObjectBench extends JPanel implements Accessible, ValueCollection,
 
         obp.revalidate();
         obp.repaint();
+        updateAccessibleName();
     }
 
     
@@ -229,11 +245,26 @@ public class ObjectBench extends JPanel implements Accessible, ValueCollection,
         selectedObject = aWrapper;
         
         if (selectedObject != null) {
-            selectedObject.setSelected(true);
             selectedObject.requestFocusInWindow();
         }
     }
-
+    
+    /**
+     * Notify that an object has gained focus. The object becomes the selected object.
+     */
+    public void objectGotFocus(ObjectWrapper aWrapper)
+    {
+        if (selectedObject == aWrapper) {
+            return;
+        }
+        
+        if (selectedObject != null) {
+            selectedObject.setSelected(false);
+        }
+        
+        selectedObject = aWrapper;
+        selectedObject.setSelected(true);
+    }
     
     /**
      * Returns the currently selected object wrapper. 
@@ -272,12 +303,12 @@ public class ObjectBench extends JPanel implements Accessible, ValueCollection,
      */
     public void fireObjectEvent(ObjectWrapper wrapper)
     {
-        setSelectedObject(wrapper);
         // guaranteed to return a non-null array
         Object[] listeners = listenerList.getListenerList();
         // process the listeners last to first, notifying
         // those that are interested in this event
-        for (int i = listeners.length-2; i>=0; i-=2) {   // I don't understand this - why step 2? (mik)
+        for (int i = listeners.length-2; i>=0; i-=2) {
+            // Loop steps by 2 because the list is a list of pairs: [listener class, listener]
             if (listeners[i] == ObjectBenchListener.class) {
                 ((ObjectBenchListener)listeners[i+1]).objectEvent(
                         new ObjectBenchEvent(this,
@@ -318,7 +349,9 @@ public class ObjectBench extends JPanel implements Accessible, ValueCollection,
      */
     public void focusGained(FocusEvent e) 
     {
-        showFocusHiLight(true);
+        if (isEnabled()) {
+            showFocusHiLight(true);
+        }
     }
 
     
@@ -343,10 +376,12 @@ public class ObjectBench extends JPanel implements Accessible, ValueCollection,
     public void keyPressed(KeyEvent e) 
     {
         int selectedObjectIndex;
-        if(selectedObject == null)
+        if(selectedObject == null) {
             selectedObjectIndex = -1;
-        else
+        }
+        else {
             selectedObjectIndex = objects.indexOf(selectedObject);
+        }
         int key = e.getKeyCode();
         
         switch (key){
@@ -385,11 +420,6 @@ public class ObjectBench extends JPanel implements Accessible, ValueCollection,
             case KeyEvent.VK_CONTEXT_MENU:
                 showPopupMenu();
                 break;
-
-            case KeyEvent.VK_ESCAPE:
-                setSelectedObject(null);
-                repaint();
-                break;
         }
     }
 
@@ -399,8 +429,7 @@ public class ObjectBench extends JPanel implements Accessible, ValueCollection,
      */
     private void setSelectedObjectByIndex(int i)
     {
-        setSelectedObject((ObjectWrapper) objects.get(i));
-        repaint();
+        ((ObjectWrapper) objects.get(i)).requestFocusInWindow();
     }
     
     /**
@@ -555,13 +584,13 @@ public class ObjectBench extends JPanel implements Accessible, ValueCollection,
 
         // a panel holding the actual object components
         obp = new ObjectBenchPanel();
-        obp.setBackground(BACKGROUND_COLOR);
-        obp.setOpaque(false);
-        setOpaque(false);
+        if (!Config.isRaspberryPi()) obp.setBackground(TRANSPARENT);
+        if (!Config.isRaspberryPi()) obp.setOpaque(true);
+        if (!Config.isRaspberryPi()) setOpaque(false);
         
         scroll = new JScrollPane(obp);
         scroll.setBorder(Config.normalBorder);
-        scroll.setOpaque(false);
+        if (!Config.isRaspberryPi()) scroll.setOpaque(false);
         Dimension sz = obp.getMinimumSize();
         Insets in = scroll.getInsets();
         sz.setSize(sz.getWidth()+in.left+in.right, sz.getHeight()+in.top+in.bottom);
@@ -651,22 +680,25 @@ public class ObjectBench extends JPanel implements Accessible, ValueCollection,
                 boolean codePadVisible = pkgMgrFrame.isTextEvalVisible();
                  
                 // Paint a gradient from top to bottom:
-                GradientPaint gp;
-                if (codePadVisible) {
-                    gp = new GradientPaint(
-                            w/4, 0, new Color(209, 203, 179),
-                            w*3/4, h, new Color(235, 230, 200));
-                } else {
-                    gp = new GradientPaint(
-                        w/4, 0, new Color(235, 230, 200),
-                        w*3/4, h, new Color(209, 203, 179));
+                if (!Config.isRaspberryPi()){
+                    GradientPaint gp;
+                    if (codePadVisible) {
+                        gp = new GradientPaint(
+                                w/4, 0, new Color(209, 203, 179),
+                                w*3/4, h, new Color(235, 230, 200));
+                    } else {
+                        gp = new GradientPaint(
+                            w/4, 0, new Color(235, 230, 200),
+                            w*3/4, h, new Color(209, 203, 179));
+                    }
+       
+                    g2d.setPaint(gp);
+                }else{
+                    g2d.setPaint(new Color(222,217, 190));
                 }
-   
-                g2d.setPaint(BACKGROUND_COLOR != null ? BACKGROUND_COLOR : gp);
                 g2d.fillRect(0, 0, w+1, h+1);
+
             }
         }
-        
-        
     }
 }

@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2011,2012  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2013,2014  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -41,7 +41,6 @@ import java.util.LinkedHashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
-import java.util.Map.Entry;
 import java.util.Properties;
 import java.util.Set;
 import java.util.StringTokenizer;
@@ -422,9 +421,11 @@ public class Project implements DebuggerListener, InspectorManager
                         done = true;
                         break;
 
-                    case FileUtility.DEST_EXISTS:
-                        DialogManager.showError(null, "directory-exists");
-
+                    case FileUtility.DEST_EXISTS_NOT_DIR:
+                        DialogManager.showError(null, "directory-exists-file");
+                        break;
+                    case FileUtility.DEST_EXISTS_NON_EMPTY:
+                        DialogManager.showError(null, "directory-exists-non-empty");
                         break;
 
                     case FileUtility.SRC_NOT_DIRECTORY:
@@ -519,11 +520,11 @@ public class Project implements DebuggerListener, InspectorManager
             // check whether name is already in use
             File dir = new File(projectPath);
 
-            if (dir.exists()) {
+            if (dir.exists() && (!dir.isDirectory() || dir.list().length > 0)) {
                 return false;
             }
 
-            if (dir.mkdir()) {
+            if (dir.exists() || dir.mkdir()) {
                 File newreadmeFile = new File(dir, Package.readmeName);
                 
                 if ( isJavaMEproj ) {
@@ -725,14 +726,17 @@ public class Project implements DebuggerListener, InspectorManager
         }
         
         // See if it is on the bench:
-        String benchName = null;
-        for (ObjectWrapper ow : PkgMgrFrame.findFrame(pkg).getObjectBench().getObjects())
-        {
-            if (ow.getObject().equals(obj))
-                benchName = ow.getName();
+        if (! Config.isGreenfoot()) {
+            String benchName = null;
+            for (ObjectWrapper ow : PkgMgrFrame.findFrame(pkg).getObjectBench().getObjects())
+            {
+                if (ow.getObject().equals(obj)){
+                    benchName = ow.getName();
+                }
+            }
+
+            DataCollector.inspectorObjectShow(pkg, inspector, benchName, obj.getClassName(), name);
         }
-        
-        DataCollector.inspectorObjectShow(pkg, inspector, benchName, obj.getClassName(), name);
 
         return inspector;
     }
@@ -1847,14 +1851,14 @@ public class Project implements DebuggerListener, InspectorManager
     }
     
     /**
-     * Show the source code corresponding to the top of the given thread stack.
+     * Show the source code at a particular position
      */
-    public void showSource(DebuggerThread thread)
+    public void showSource(String className, String sourceName, int lineNumber)
     {
-        String packageName = JavaNames.getPrefix(thread.getClass(0));
+        String packageName = JavaNames.getPrefix(className);
         Package pkg = getPackage(packageName);
         if (pkg != null) {
-            pkg.showSourcePosition(thread);
+            pkg.showSourcePosition(sourceName, lineNumber);
         }
     }
 

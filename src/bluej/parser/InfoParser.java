@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2010,2011  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2011,2013,2014  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -71,14 +71,15 @@ import bluej.utility.JavaNames;
  */
 public class InfoParser extends EditorParser
 {
-    private String targetPkg;
-    private ClassInfo info;
+    protected String targetPkg;
+    protected ClassInfo info;
     private int classLevel = 0; // number of nested classes
     private boolean isPublic;
     private boolean isAbstract;
     private int lastTdType; // last typedef type (TYPEDEF_CLASS, _INTERFACE etc)
     private boolean storeCurrentClassInfo;
     private int arrayCount = 0;
+    private boolean methodTypeParams = false;  // Type parameters are for a method
 
     private List<LocatableToken> lastTypespecToks;
     private boolean modPublic = false;
@@ -119,7 +120,7 @@ public class InfoParser extends EditorParser
     private List<Selection> interfaceSelections;
     private Selection lastCommaSelection;
 
-    private boolean hadError;
+    protected boolean hadError;
 
     private LocatableToken pkgLiteralToken;
     private List<LocatableToken> packageTokens;
@@ -193,16 +194,13 @@ public class InfoParser extends EditorParser
             infoParser.resolveComments();
             return infoParser.info;
         }
-        else {
-            return null;
-        }
+        return null;
     }
     
     /**
-     * All type references and method declarations are unresolved after parsing.
-     * Call this method to resolve them.
+     * Resolve the method parameter and return types to their fully qualified types.
      */
-    public void resolveComments()
+    protected void resolveMethodTypes()
     {
         methodLoop:
         for (MethodDesc md : methodDescs) {
@@ -241,7 +239,16 @@ public class InfoParser extends EditorParser
             md.paramNames = md.paramNames.trim();
             info.addComment(methodSig, md.javadocText, md.paramNames);
         }
+    }
     
+    /**
+     * All type references and method declarations are unresolved after parsing.
+     * Call this method to resolve them.
+     */
+    public void resolveComments()
+    {
+        resolveMethodTypes();
+        
         // Now also resolve references
         for (JavaEntity entity: typeReferences) {
             entity = entity.resolveAsType();
@@ -314,13 +321,19 @@ public class InfoParser extends EditorParser
         if (ctype != null) {
             addTypeReference(ctype.getErasedType().toString());
             List<? extends GenTypeParameter> plist = ctype.getTypeParamList();
+            // Process type arguments:
             for (GenTypeParameter param : plist) {
-                GenTypeSolid [] ubounds = param.getUpperBounds();
-                for (GenTypeSolid ubound : ubounds) {
-                    GenTypeClass ubctype = ubound.asClass();
-                    if (ubctype != null) {
-                        addTypeReference(ubctype);
-                    }
+                GenTypeSolid sparam = param.asSolid();
+                if (sparam != null) {
+                    addTypeReference(sparam);
+                }
+                else {
+                    // primitive or wildcard type
+                    // (primitives are technically not allowed).
+                    JavaType upperBound = param.getUpperBound();
+                    JavaType lowerBound = param.getLowerBound();
+                    if (upperBound != null) addTypeReference(upperBound);
+                    if (lowerBound != null) addTypeReference(lowerBound);
                 }
             }
         }
@@ -441,6 +454,30 @@ public class InfoParser extends EditorParser
     }
 
     @Override
+    protected void gotMethodTypeParamsBegin()
+    {
+        super.gotMethodTypeParamsBegin();
+        methodTypeParams = true;
+    }
+    
+    @Override
+    protected void gotTypeParam(LocatableToken idToken)
+    {
+        super.gotTypeParam(idToken);
+        if (storeCurrentClassInfo && !methodTypeParams && classLevel == 0) {
+            info.addTypeParameterText(idToken.getText());
+            info.setTypeParametersSelection(getSelection(idToken));
+        }
+    }
+    
+    @Override
+    protected void endMethodTypeParams()
+    {
+        super.endMethodTypeParams();
+        methodTypeParams = false;
+    }
+    
+    @Override
     protected void gotTypeParamBound(List<LocatableToken> tokens)
     {
         super.gotTypeParamBound(tokens);
@@ -505,6 +542,7 @@ public class InfoParser extends EditorParser
         }
     }
     
+    @Override
     protected void gotMethodDeclaration(LocatableToken token, LocatableToken hiddenToken)
     {
         super.gotMethodDeclaration(token, hiddenToken);
@@ -518,6 +556,7 @@ public class InfoParser extends EditorParser
         arrayCount = 0;
     }
 
+    @Override
     protected void gotConstructorDecl(LocatableToken token, LocatableToken hiddenToken)
     {
         super.gotConstructorDecl(token, hiddenToken);
@@ -530,10 +569,11 @@ public class InfoParser extends EditorParser
         arrayCount = 0;
     }
 
+    @Override
     protected void gotMethodParameter(LocatableToken token, LocatableToken ellipsisToken)
     {
         super.gotMethodParameter(token, ellipsisToken);
-        if (currentMethod != null) {
+        if (currentMethod != null && lastTypespecToks != null) {
             currentMethod.paramNames += token.getText() + " ";
             JavaEntity ptype = ParseUtils.getTypeEntity(scopeStack.peek(),
                     currentQuerySource(), lastTypespecToks);
@@ -555,6 +595,7 @@ public class InfoParser extends EditorParser
         arrayCount++;
     }
 
+    @Override
     protected void gotAllMethodParameters()
     {
         super.gotAllMethodParameters();
@@ -573,6 +614,7 @@ public class InfoParser extends EditorParser
         lastTdType = tdType;
     }
 
+    @Override
     protected void gotTypeDefName(LocatableToken nameToken)
     {
         super.gotTypeDefName(nameToken);
@@ -593,12 +635,14 @@ public class InfoParser extends EditorParser
                             joinTokens(packageTokens), getSelection(pkgSemiToken));
                 }
                 storeCurrentClassInfo = true;
-            } else {
+            }
+            else {
                 storeCurrentClassInfo = false;
             }
         }
     }
 
+    @Override
     protected void gotTypeDefExtends(LocatableToken extendsToken)
     {
         super.gotTypeDefExtends(extendsToken);
@@ -623,6 +667,7 @@ public class InfoParser extends EditorParser
         }
     }
 
+    @Override
     protected void gotTypeDefImplements(LocatableToken implementsToken)
     {
         super.gotTypeDefImplements(implementsToken);
@@ -635,18 +680,21 @@ public class InfoParser extends EditorParser
         }
     }
 
+    @Override
     protected void beginPackageStatement(LocatableToken token)
     {
         super.beginPackageStatement(token);
         pkgLiteralToken = token;
     }
 
+    @Override
     protected void gotPackage(List<LocatableToken> pkgTokens)
     {
         super.gotPackage(pkgTokens);
         packageTokens = pkgTokens;
     }
 
+    @Override
     protected void gotPackageSemi(LocatableToken token)
     {
         super.gotPackageSemi(token);

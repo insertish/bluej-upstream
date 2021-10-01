@@ -15,7 +15,7 @@
      After changing the version number the target "update-version-number" should be run -->
     <property name="bluej.version.major" value="3" />
     <property name="bluej.version.minor" value="1" />
-    <property name="bluej.version.release" value="0" />
+    <property name="bluej.version.release" value="4" />
     <property name="bluej.version.suffix" value="" />
 	<!-- suffix with no spaces, eg "pre2" -->
 	<property name="bluej.version.nonspace.suffix" value="" />
@@ -102,9 +102,7 @@
                 deprecation="yes"
                 includeantruntime="false"
                 encoding="utf-8"
-                excludes="bluej/editor/moe/Moe.java,
-                	bluej/editor/moe/**,
-        			${srcexcludes}">
+                >
 
             <classpath>
                 <path refid="bluej.class.path"/>
@@ -261,6 +259,10 @@
 	<target name="windows-msi-dist" depends="dist">
 	    <ant dir="package" target="windows-msi-dist"/>
 	</target>
+	
+	<target name="windows-msi-bundled-dist" depends="dist">
+	    <ant dir="package" target="windows-msi-bundled-dist"/>
+	</target>
 
     <target name="mac-dist" description="build Mac distributable bundles">
         <ant dir="package" target="mac-dist"/>
@@ -415,5 +417,24 @@
 
     <target name="editor-clean">
         <ant antfile="editor.xml" dir="src/bluej/editor" target="clean"/>
+    </target>
+    
+    <target name="pi4j-compile">
+        <exec dir="${bluej_home}/pi4j" executable="mvn">
+            <arg line="package" />
+        </exec>
+    </target>
+    
+    <target name="clean-pi4j">
+        <exec dir="${bluej_home}/pi4j" executable="mvn">
+            <arg line="clean" />
+        </exec>
+    </target>
+    
+    <target name="pi4j-move-to-lib" depends="pi4j-compile">
+        <move file="${bluej_home}/pi4j/pi4j-distribution/target/distro-contents/lib/pi4j-device.jar" todir="${bluej_home}/lib/userlib" />
+        <move file="${bluej_home}/pi4j/pi4j-distribution/target/distro-contents/lib/pi4j-gpio-extension.jar" todir="${bluej_home}/lib/userlib" />
+        <move file="${bluej_home}/pi4j/pi4j-distribution/target/distro-contents/lib/pi4j-service.jar" todir="${bluej_home}/lib/userlib" />
+        <move file="${bluej_home}/pi4j/pi4j-distribution/target/distro-contents/lib/pi4j-core.jar" todir="${bluej_home}/lib/userlib" />
     </target>
 </project>

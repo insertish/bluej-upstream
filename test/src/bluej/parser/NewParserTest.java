@@ -1,3 +1,24 @@
+/*
+ This file is part of the BlueJ program. 
+ Copyright (C) 2014  Michael Kolling and John Rosenberg 
+ 
+ This program is free software; you can redistribute it and/or 
+ modify it under the terms of the GNU General Public License 
+ as published by the Free Software Foundation; either version 2 
+ of the License, or (at your option) any later version. 
+ 
+ This program is distributed in the hope that it will be useful, 
+ but WITHOUT ANY WARRANTY; without even the implied warranty of 
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the 
+ GNU General Public License for more details. 
+ 
+ You should have received a copy of the GNU General Public License 
+ along with this program; if not, write to the Free Software 
+ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA. 
+ 
+ This file is subject to the Classpath exception as provided in the  
+ LICENSE.txt file that accompanied this code.
+ */
 package bluej.parser;
 
 import java.io.StringReader;
@@ -365,6 +386,126 @@ public class NewParserTest extends TestCase
         ip.parseExpression();
     }
     
+    // Lambda syntax tests
+    private void checkLambdaExpression(String s)
+    {
+        // test when parenthesized:
+        StringReader sr = new StringReader("(" + s + ")");
+        JavaParser ip = new JavaParser(sr);
+        ip.parseExpression();
+        
+        // test when used in assigment:
+        sr = new StringReader("Runnable r = " + s + ";");
+        ip = new JavaParser(sr);
+        ip.parseStatement();
+        
+        // test when used as method parameter:
+        sr = new StringReader("doSomething(" + s + ");");
+        ip = new JavaParser(sr);
+        ip.parseStatement();
+    }
+    
+    
+    public void testLambdaNoParameters1()
+    {
+        checkLambdaExpression("() -> {}");
+    }
+
+    public void testLambdaNoParameters2()
+    {
+        checkLambdaExpression("() -> 42");   // No parameters; expression body
+    }
+
+    public void testLambdaNoParameters3()
+    {
+        checkLambdaExpression("() -> null"); // No parameters; expression body
+    }
+
+    public void testLambdaNoParameters4()
+    {
+        checkLambdaExpression("() -> {return 42;}"); // No parameters; block body with return
+    }
+
+    public void testLambdaNoParameters5()
+    {
+        checkLambdaExpression("() -> System.gc()"); // No parameters; void block body
+    }
+
+    public void testLambdaNoParameters6()
+    {
+        String s = "() -> {\n "
+                + "    if (true) return 12;\n"
+                + "    else {\n"
+                + "        int result = 15;\n"
+                + "        for (int i = 1; i < 10; i++)\n"
+                + "            result *= i;\n"
+                + "        return result;\n"
+                + "    }\n"
+                + "}\n"; // Complex block body with returns
+        
+        checkLambdaExpression(s);
+    }
+    
+    public void testLambdaSingleParameter1()
+    {
+        checkLambdaExpression("(int x) -> x+1"); // Single declared-type parameter
+    }
+    
+    public void testLambdaSingleParameter2()
+    {
+        checkLambdaExpression("(x) -> x+1"); // Single inferred-type parameter
+    }
+    
+    public void testLambdaSingleParameter3()
+    {
+        checkLambdaExpression("x -> x+1"); // Parens optional for single inferred-type case
+    }
+    
+    public void testLambdaSingleParameter4()
+    {
+        checkLambdaExpression("t -> { t.start(); } "); // Single inferred-type parameter
+    }
+    
+    public void testLambdaSingleParameter5()
+    {
+        checkLambdaExpression("(final int x) -> x+1"); // Modified declared-type parameter
+    }
+    
+    public void testLambdaSingleParameter6()
+    {
+        checkLambdaExpression("(CustomClass x) -> x+1"); // Modified declared-type parameter
+    }
+    
+    public void testLambdaSingleParameter7()
+    {
+        checkLambdaExpression("(int... x) -> x+1"); // Modified declared-type parameter
+    }
+    
+    public void testLambdaMultipleParameters1()
+    {
+        checkLambdaExpression("(int x, float y) -> x+y"); // Multiple declared-type parameters
+    }
+    
+    public void testLambdaMultipleParameters2()
+    {
+        checkLambdaExpression("(x,y) -> x+y"); // Multiple inferred-type parameters
+    }    
+
+    public void testMethodRef2()
+    {
+        checkLambdaExpression("SomeClass::someMethod");
+    }
+    
+    public void testMethodRef3()
+    {
+        checkLambdaExpression("somepkg.someotherpkg.SomeClass::someMethod");
+    }
+    
+    public void testMethodRef4()
+    {
+        checkLambdaExpression("SomeClass::new");
+    }
+    
     /** Test generic method call */
     public void testGenericMethodCall()
     {
@@ -483,5 +624,36 @@ public class NewParserTest extends TestCase
                 );
         JavaParser ip = new JavaParser(sr);
         ip.parseExpression();
+    }
+    
+    public void testTopLevelExtraSemis()
+    {
+        StringReader sr = new StringReader(
+                "import java.lang.*; ;" +
+                "interface A {" +
+                "};"
+        );
+        JavaParser ip = new JavaParser(sr);
+        ip.parseCU();
+    }
+    
+    public void testParenthesizedInTrinary()
+    {
+        StringReader sr = new StringReader(
+                "sb.append((isFilled) ? \"yes\": \"no\");"
+        );
+        JavaParser ip = new JavaParser(sr);
+        ip.parseStatement();
+    }
+    
+    public void testDefaultMethodModifier()
+    {
+        StringReader sr = new StringReader(
+                "interface A {\n" +
+                "  default int someMethod() { return 3; }\n" +
+                "}"
+        );
+        JavaParser ip = new JavaParser(sr);
+        ip.parseCU();
     }
 }

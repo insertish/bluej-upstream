@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2011,2012  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2011,2012,2013,2014  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -522,11 +522,18 @@ public class JavaParser
     
     protected void gotAllMethodParameters() { }
     
+    /**
+     * Saw a type parameter for a class or method. If for a method, will be bracketed by
+     * calls to {@code gotMethodTypeParamsBegin} and {@code endMethodTypeParams}
+     * @param idToken  The token with the type parameter identifier
+     */
     protected void gotTypeParam(LocatableToken idToken) { }
     
     protected void gotTypeParamBound(List<LocatableToken> tokens) { }
 
     protected void gotMethodTypeParamsBegin() { }
+    
+    protected void endMethodTypeParams() { }
 
     /**
      * Called by the lexer when it sees a comment.
@@ -585,6 +592,10 @@ public class JavaParser
     public void parseCU(int state)
     {
         while (tokenStream.LA(1).getType() != JavaTokenTypes.EOF) {
+            if (tokenStream.LA(1).getType() == JavaTokenTypes.SEMI) {
+                nextToken();
+                continue;
+            }
             state = parseCUpart(state);
         }
     }
@@ -1007,7 +1018,8 @@ public class JavaParser
                 || tokType == JavaTokenTypes.STRICTFP
                 || tokType == JavaTokenTypes.LITERAL_transient
                 || tokType == JavaTokenTypes.LITERAL_synchronized
-                || tokType == JavaTokenTypes.AT);
+                || tokType == JavaTokenTypes.AT
+                || tokType == JavaTokenTypes.LITERAL_default);
     }
 
     /**
@@ -1067,7 +1079,7 @@ public class JavaParser
         
         gotDeclBegin(token);
         tokenStream.pushBack(token);
-        LocatableToken hiddenToken = (LocatableToken) token.getHiddenBefore();
+        LocatableToken hiddenToken = token.getHiddenBefore();
         
         // field declaration, method declaration, inner class
         List<LocatableToken> modifiers = parseModifiers();
@@ -1122,6 +1134,7 @@ public class JavaParser
                     // generic method
                     gotMethodTypeParamsBegin();
                     parseTypeParams();
+                    endMethodTypeParams();
                 }
                 else {
                     tokenStream.pushBack(token);
@@ -1282,7 +1295,8 @@ public class JavaParser
     }
         
     /**
-     * Parse a statement block - such as a method body
+     * Parse a statement block - such as a method body. The opening curly brace should already be consumed.
+     * On return the closing curly (if present) remains in the token stream.
      */
     public void parseStmtBlock()
     {
@@ -2072,7 +2086,7 @@ public class JavaParser
             beginIfCondBlock(token);
             token = parseStatement(token, false);
             endIfCondBlock(token);
-            while (tokenStream.LA(1).getType() == JavaTokenTypes.LITERAL_else) {
+            if (tokenStream.LA(1).getType() == JavaTokenTypes.LITERAL_else) {
                 tokenStream.nextToken(); // "else"
                 if (tokenStream.LA(1).getType() == JavaTokenTypes.LITERAL_if) {
                     nextToken(); // "if"
@@ -2768,6 +2782,7 @@ public class JavaParser
         expressionOpIndexes[JavaTokenTypes.GE] = 11;
         expressionOpIndexes[JavaTokenTypes.LAND] = 11;
         expressionOpIndexes[JavaTokenTypes.LOR] = 11;
+        expressionOpIndexes[JavaTokenTypes.METHOD_REFERENCE] = 11;
     }
     
     /**
@@ -2777,6 +2792,26 @@ public class JavaParser
     private boolean isExpressionTokenType(int ttype)
     {
         return expressionTokenIndexes[ttype] != 0;
+    }
+    
+    private void parseLambdaBody()
+    {
+        if (tokenStream.LA(1).getType() == JavaTokenTypes.LCURLY) {
+            beginStmtblockBody(nextToken()); // consume the curly
+            parseStmtBlock();
+            LocatableToken token = nextToken();
+            if (token.getType() != JavaTokenTypes.RCURLY) {
+                error("Expecting '}' at end of lambda block");
+                tokenStream.pushBack(token);
+                endStmtblockBody(token, false);
+            }
+            else {
+                endStmtblockBody(token, true);
+            }
+        }
+        else {
+            parseExpression();
+        }
     }
     
     /**
@@ -2820,6 +2855,10 @@ public class JavaParser
                     // Method call
                     gotMethodCall(token);
                     parseArgumentList(nextToken());
+                }
+                else if (tokenStream.LA(1).getType() == JavaTokenTypes.LAMBDA) {
+                    nextToken(); // consume LAMBDA symbol
+                    parseLambdaBody();
                 }
                 else if (tokenStream.LA(1).getType() == JavaTokenTypes.DOT &&
                         tokenStream.LA(2).getType() == JavaTokenTypes.IDENT &&
@@ -2955,7 +2994,7 @@ public class JavaParser
                 // -it's not followed by an expression terminator - ; : , ) } ] EOF
 
                 int tt2 = tokenStream.LA(2).getType();
-                boolean isCast = isTypeSpec && tokenStream.LA(1).getType() == JavaTokenTypes.RPAREN;
+                boolean isCast = isTypeSpec && tokenStream.LA(1).getType() == JavaTokenTypes.RPAREN && (tt2 != JavaTokenTypes.LAMBDA);
                 if (tt2 != JavaTokenTypes.LPAREN) {
                     isCast &= !isOperator(tokenStream.LA(2)) || (isPrimitive
                             && isUnaryOperator(tokenStream.LA(2)));
@@ -2963,8 +3002,9 @@ public class JavaParser
                             && tt2 != JavaTokenTypes.RCURLY && tt2 != JavaTokenTypes.EOF;
                     isCast &= tt2 != JavaTokenTypes.COMMA && tt2 != JavaTokenTypes.COLON
                             && tt2 != JavaTokenTypes.RBRACK;
+                    isCast &= tt2 != JavaTokenTypes.QUESTION;
                 }
-
+                
                 if (isCast) {
                     // This surely must be type cast
                     gotTypeCast(tlist);
@@ -2973,14 +3013,61 @@ public class JavaParser
                     continue exprLoop;
                 }
                 else {
+                    // This may be either an expression OR a Lambda function.
+                    //check if it is a Lambda function.
+
+                    boolean isLambda = false;
+                    if (isTypeSpec) {
+                        if (tokenStream.LA(1).getType() == JavaTokenTypes.RPAREN && tt2 == JavaTokenTypes.LAMBDA) {
+                            isLambda = true;
+                        }
+                        if (! isLambda && tokenStream.LA(1).getType() == JavaTokenTypes.IDENT) {
+                            // A lambda parameter with name and type
+                            isLambda = true;
+                        }
+                        if (! isLambda && tokenStream.LA(1).getType() == JavaTokenTypes.TRIPLE_DOT) {
+                            // A lambda parameter with name and type
+                            isLambda = true;
+                        }
+                    }
                     pushBackAll(tlist);
-                    parseExpression();
-                    token = nextToken();
-                    if (token.getType() != JavaTokenTypes.RPAREN) {
-                        tokenStream.pushBack(token);
-                        error("Unmatched '(' in expression; expecting ')'");
-                        endExpression(token, false);
-                        return;
+                    int tt1 = tokenStream.LA(1).getType();
+                    tt2 = tokenStream.LA(2).getType();
+                    if (! isLambda) {
+                        if (tt1 == JavaTokenTypes.RPAREN && tt2 == JavaTokenTypes.LAMBDA) {
+                            isLambda = true;
+                        }
+                        else if (isModifier(tokenStream.LA(1))) {
+                            isLambda = true;
+                        }
+                        else if (tt1 == JavaTokenTypes.IDENT && tt2 == JavaTokenTypes.COMMA) {
+                            isLambda = true;
+                        }
+                    }
+                    
+                    if (isLambda) {
+                        // now we need to consume the tokens.
+                        parseLambdaParameterList();
+                        token = nextToken();
+                        if (token.getType() == JavaTokenTypes.RPAREN) token = nextToken();
+                        //Now we are expecting the lambda symbol.
+                        if (token.getType() != JavaTokenTypes.LAMBDA){
+                            error("Lambda identifier misplaced or not found");
+                            endExpression(token, false);
+                            return;
+                        }
+                        parseLambdaBody();
+                        break;
+                    } else {
+                        //it is an expression.
+                        parseExpression();
+                        token = nextToken();
+                        if (token.getType() != JavaTokenTypes.RPAREN) {
+                            tokenStream.pushBack(token);
+                            error("Unmatched '(' in expression; expecting ')'");
+                            endExpression(token, false);
+                            return;
+                        }
                     }
                 }
                 break;
@@ -3126,9 +3213,16 @@ public class JavaParser
                     gotBinaryOperator(opToken);
                     break opLoop;
                 case 11: // binary operator
-                    // Binary operators - need another operand
-                    gotBinaryOperator(token);
-                    token = nextToken();
+                    if (token.getType() == JavaTokenTypes.METHOD_REFERENCE &&
+                            tokenStream.LA(1).getType() == JavaTokenTypes.LITERAL_new) {
+                        nextToken(); // consume LITERAL_new
+                        continue;
+                    }
+                    else {
+                        // Binary operators - need another operand
+                        gotBinaryOperator(token);
+                        token = nextToken();
+                    }
                     break opLoop;
                     
                 default:
@@ -3281,6 +3375,54 @@ public class JavaParser
         }
         endArgumentList(token);
         return;
+    }
+    
+    /**
+     * Parse a list of formal parameters in Lambda (possibly empty)
+     */
+    public void parseLambdaParameterList()
+    {
+        LocatableToken token = nextToken();
+        
+        while (token.getType() != JavaTokenTypes.RPAREN
+                && token.getType() != JavaTokenTypes.RCURLY) {
+            tokenStream.pushBack(token);
+            //parse modifiers if any
+            List<LocatableToken> rval = parseModifiers();
+            
+            int tt1 = tokenStream.LA(1).getType();
+            int tt2 = tokenStream.LA(2).getType();
+            if (tt1 == JavaTokenTypes.IDENT && (tt2 == JavaTokenTypes.COMMA || tt2 == JavaTokenTypes.RPAREN)) {
+                token = nextToken(); // identifier
+                token = nextToken();
+            }
+            else {
+                if (! parseTypeSpec(false, true, rval)) {
+                    modifiersConsumed();
+                    error("Formal lambda parameter specified incorrectly");
+                    return;
+                }
+                token = nextToken();
+                if (token.getType() == JavaTokenTypes.TRIPLE_DOT) {
+                    token = nextToken();
+                }
+                if (token.getType() != JavaTokenTypes.IDENT) {
+                    modifiersConsumed();
+                    error("Formal lambda parameter lacks a name");
+                    return;
+                }
+                parseArrayDeclarators();
+                token = nextToken();
+            }
+            
+            modifiersConsumed();
+ 
+            if (token.getType() != JavaTokenTypes.COMMA) {
+                break;
+            }
+            token = nextToken();
+        }
+        tokenStream.pushBack(token);
     }
     
     /**

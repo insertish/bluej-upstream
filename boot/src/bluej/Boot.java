@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2011,2012,2013  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2011,2012,2013,2014  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -21,7 +21,9 @@
  */
 package bluej;
 
+import java.awt.EventQueue;
 import java.io.File;
+import java.lang.reflect.InvocationTargetException;
 import java.net.MalformedURLException;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -49,7 +51,7 @@ public class Boot
     // and then the update-version target should be executed.
     public static final int BLUEJ_VERSION_MAJOR = 3;
     public static final int BLUEJ_VERSION_MINOR = 1;
-    public static final int BLUEJ_VERSION_RELEASE = 0;
+    public static final int BLUEJ_VERSION_RELEASE = 4;
     public static final String BLUEJ_VERSION_SUFFIX = "";
 
     // public static final int BLUEJ_VERSION_NUMBER = BLUEJ_VERSION_MAJOR * 1000 +
@@ -65,8 +67,8 @@ public class Boot
     
     // The version numbers for Greenfoot are changed in the Greenfoot build.xml
     // and then the update-version target should be executed.
-    public static String GREENFOOT_VERSION = "2.2.1";
-    public static String GREENFOOT_API_VERSION = "2.4.0";
+    public static String GREENFOOT_VERSION = "2.4.0";
+    public static String GREENFOOT_API_VERSION = "2.6.0";
     
     // A singleton boot object so the rest of BlueJ can pick up args etc.
     private static Boot instance;
@@ -215,14 +217,29 @@ public class Boot
      * @param args the arguments with which main() was invoked
      * @param props the properties (created from the args)
      */
-    private Boot(String[] args, Properties props, SplashLabel image)
+    private Boot(String[] args, Properties props, final SplashLabel image)
     {
         // Display the splash window, and wait until it's been painted before
         // proceeding. Otherwise, the event thread may be occupied by BlueJ
         // starting up and the window might *never* be painted.
-        splashWindow = new SplashWindow(image);
-        splashWindow.repaint(); // avoid delay before painting
-        splashWindow.waitUntilPainted();
+        
+        try {
+            EventQueue.invokeAndWait(new Runnable() {
+                @Override
+                public void run()
+                {
+                    splashWindow = new SplashWindow(image);
+                    splashWindow.repaint(); // avoid delay before painting
+                }
+            });
+            splashWindow.waitUntilPainted();
+        }
+        catch (InvocationTargetException ite) {
+            ite.printStackTrace();
+        }
+        catch (InterruptedException ie) {
+            ie.printStackTrace();
+        }
 
         this.args = args;
         this.commandLineProps = props;
@@ -233,7 +250,9 @@ public class Boot
      */
     public void disposeSplashWindow()
     {
-        splashWindow.dispose();
+        if (splashWindow != null) {
+            splashWindow.dispose();
+        }
     }
 
     /**

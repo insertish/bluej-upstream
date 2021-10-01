@@ -36,6 +36,7 @@ debugger.inspector.get=Get
 debugger.inspector.class.nameLabel=Class
 debugger.inspector.enum.nameLabel=Enum
 debugger.inspector.interface.nameLabel=Interface
+debugger.inspector.numFields=Number of fields
 
 debugger.objectwrapper.methodException=Exception accessing methods:
 debugger.objectwrapper.invocationException=Exception during invocation:
@@ -127,6 +128,8 @@ prefmgr.interface.title=Interface
 prefmgr.interface.language.title=Language selection
 prefmgr.interface.language=Language
 prefmgr.interface.language.restart=You will need to restart $APPNAME for the language setting to take effect.
+prefmgr.accessibility.title=Accessibility
+prefmgr.accessibility.support=Accessibility Support
 
 # Extensions Manager Help panel
 extmgr.title=BlueJ:  Installed Extensions
@@ -286,6 +289,9 @@ editor.highlight.notFound=not found.
 # Message shown in code completion pane when nothing is found
 editor.completion.noMatch=No matching completions
 
+#Message shown in code completion while processing
+editor.completion.working=Loading...
+
 # Messages shown when determining what function is bound to a given key
 editor.keypressed.keyIsNotBound=is not bound to a function.
 editor.keypressed.callsTheFunction=calls the function "
@@ -360,6 +366,8 @@ pkgmgr.chooseWebPage.buttonLabel=Save HTML page
 pkgmgr.parentpackagetarget.open=Open
 pkgmgr.parentpackagetarget.openunamed=Open unnamed package
 
+pkgmgr.noProjectOpened.message=Use the Project menu to create or open a project
+
 pkgmgr.packagemenu.open=Open
 pkgmgr.packagemenu.remove=Remove
 
@@ -388,6 +396,8 @@ pkgmgr.test.popup.fixtureToBench=Test Fixture to Object Bench
 
 #Accessibility
 pkgmgr.objBench.title=Object Bench
+pkgmgr.objBench.suffix.singular=object
+pkgmgr.objBench.suffix.plural=objects
 pkgmgr.codepad.title=Codepad
 pkgmgr.graphEditor.title=Class Diagram
 
@@ -565,6 +575,9 @@ pkgmgr.error.open=The project does not exist (anymore)
 pkgmgr.checkingVersion=Making connection to version server...
 pkgmgr.midlet.deploying=Deploying MIDlet suite...
 pkgmgr.midlet.deployed=Deploying MIDlet suite... Done.
+
+# accessibility messages
+pkgmgr.accessibility.compileDone=Compilation successful.
 
 properties.heading.bluej=BlueJ properties. Settings in this file override \"bluej.defs\"
 properties.heading.moe=Moe Editor properties. Settings in this file override \"moe.defs\"
@@ -772,6 +785,7 @@ graph.tooltip.classBroken=This class cannot currently be parsed
 #Copyright
 
 menu.help.copyright.title=BlueJ Copyright, Licensing and Redistribution
+menu.help.copyright.line0=BlueJ \u00a9 2000-2014 Michael K\u00F6lling, John Rosenberg.
 menu.help.copyright.line1=BlueJ is available under the GNU General Public License  
 menu.help.copyright.line2=version 2 with Classpath exception.
 menu.help.copyright.line3=For more information please see the files LICENSE.txt 

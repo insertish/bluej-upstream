@@ -36,6 +36,11 @@
         <include name="lib/bluej.defs" />
         <include name="lib/moe.defs" />
         <include name="lib/userlib/README.TXT" />
+        <!-- Pi4J -->
+        <include name="lib/userlib/pi4j-device.jar" />
+        <include name="lib/userlib/pi4j-gpio-extension.jar" />
+        <include name="lib/userlib/pi4j-service.jar" />
+        <include name="lib/userlib/pi4j-core.jar" />
         <include name="lib/windowtofront.js" />
     </patternset>
 
@@ -132,7 +137,11 @@
 
         <!-- make sure the people .class files are dated in the future so they
              will appear to be compiled -->
-        <touch datetime="1/1/2010 12:00 pm">
+         <tstamp>
+            <format property="touch.time" pattern="MM/dd/yyyy hh:mm aa" offset="5" unit="year"/>
+        </tstamp>
+
+        <touch datetime="${touch.time}">
             <fileset dir="install_tmp" >
                 <patternset refid="bluej.examples.classes"/>
             </fileset>
@@ -240,7 +249,7 @@
         <property name="executable_files" value="**/PkgInfo,**/JavaApplicationStub" />
 
         <!-- copy the skeleton mac dir -->
-        <copy todir="${zip_dir}/BlueJ-legacy.app">
+        <copy todir="${zip_dir}/BlueJ.app">
             <fileset dir="macfiles/BlueJ-legacy.app"/> 
         </copy>
         
@@ -248,7 +257,7 @@
         <replaceregexp byline="true">
             <regexp pattern="VERSION" />
             <substitution expression="${bluej.version}" />
-            <fileset dir="${zip_dir}/BlueJ-legacy.app/Contents" includes="Info.plist" />
+            <fileset dir="${zip_dir}/BlueJ.app/Contents" includes="Info.plist" />
         </replaceregexp>
         
         <copy todir="${zip_dir}">
@@ -260,10 +269,10 @@
         </copy>
         
         <!-- The lib dir should not be in the root dir, so we move the contents to the proper mac-location -->
-        <move todir="${zip_dir}/BlueJ-legacy.app/Contents/Resources/Java">
+        <move todir="${zip_dir}/BlueJ.app/Contents/Resources/Java">
             <fileset dir="${zip_dir}/lib/" />
         </move>
-        <delete dir="${zip_dir}/BlueJ-legacy.app/Contents/Resources/Java/lib" />
+        <delete dir="${zip_dir}/BlueJ.app/Contents/Resources/Java/lib" />
 
         <!-- ZIP it -->
         <zip destfile="${dist.mac.legacy}" duplicate="fail">
@@ -272,10 +281,16 @@
             <zipfileset dir="mac_tmp" filemode="755" includes="${executable_files}" />
         </zip>
     	
+    	<!-- Bundled JDK build -->
+    	<!-- rename BlueJ.app to BlueJ-legacy.app -->
+    	<move file="${zip_dir}/BlueJ.app" tofile="${zip_dir}/BlueJ-legacy.app" />
+    	
         <!-- copy the skeleton mac dir -->
         <copy todir="${zip_dir}/BlueJ.app">
             <fileset dir="macfiles/BlueJ.app"/> 
         </copy>
+    	
+    	<!-- copy the native launcher into place -->
     	<copy todir="${zip_dir}/BlueJ.app/Contents/MacOS" file="macfiles/nativelauncher/JavaAppLauncher" />
     	
         <!-- update version number -->
@@ -288,23 +303,22 @@
     	<!-- Move contents from legacy app to new app -->
         <move file="${zip_dir}/BlueJ-legacy.app/Contents/Resources/Java"
         	todir="${zip_dir}/BlueJ.app/Contents/Resources" />
-    	
-    	<!-- Copy the JDK to the app -->
-    	<copy  todir="${zip_dir}/BlueJ.app/Contents/PlugIns/jdk">
-    		<fileset dir="${mac_bundled_jdk_path}" />
-    	</copy>
-    	
+
     	<!-- Remove the legacy app -->
     	<delete dir="${zip_dir}/BlueJ-legacy.app" />
-
-        <property name="executable_files2" value="**/PkgInfo,**/JavaAppLauncher,**/Contents/PlugIns/jdk/Contents/**/bin/*" />
-
-        <!-- ZIP it -->
-        <zip destfile="${dist.mac}" duplicate="fail">
-            <zipfileset dir="mac_tmp" excludes="${executable_files2}" />
-            <!-- Make the files executable that need to be executable -->
-            <zipfileset dir="mac_tmp" filemode="755" includes="${executable_files2}" />
-        </zip>
+    	
+        <property name="executable_files2" value="**/PkgInfo,**/JavaAppLauncher" />
+        <chmod perm="+x">
+            <fileset dir="${zip_dir}/BlueJ.app/Contents" includes="${executable_files2}" />
+        </chmod>
+    	
+    	<chmod perm="+x" file="bundle-mac.sh" />
+        <exec executable="bundle-mac.sh" resolveexecutable="true">
+            <arg value="${zip_dir}" />
+        	<arg value="BlueJ.app" />
+        	<arg value="${mac_bundled_jdk_path}" />
+        	<arg value="${basedir}/${dist.mac}" />
+        </exec>
     	
         <delete dir="mac_tmp" />
 
@@ -318,7 +332,15 @@
 		<delete dir="winsetup/SourceDir" />
 		<delete dir="winsetup" includes="*.wixobj" />
 		<unzip src="${dist.jar}" dest="winsetup/SourceDir" />
-			
+
+        <!-- make sure line endings are in windows format -->
+        <fixcrlf srcdir="winsetup/SourceDir" eol="crlf" encoding="ISO-8859-1">
+            <patternset refid="bluej.textfiles.iso88591" />
+        </fixcrlf>
+        <fixcrlf srcdir="winsetup/SourceDir" eol="crlf" encoding="UTF-8">
+            <patternset refid="bluej.textfiles.utf8" />
+        </fixcrlf>
+		
 		<exec dir="winsetup" executable="${wix_bin}/candle.exe">
 			<arg line="CheckboxExtrasDlg.wxs"/>
 		</exec>
@@ -346,6 +368,59 @@
 		<delete dir="winsetup/SourceDir" />
 	</target>
 
+	<target name="windows-msi-bundled-dist" depends="dist">
+		<delete dir="winsetup/SourceDir" />
+		<delete dir="winsetup" includes="*.wixobj" />
+		<unzip src="${dist.jar}" dest="winsetup/SourceDir" />
+
+        <!-- make sure line endings are in windows format -->
+        <fixcrlf srcdir="winsetup/SourceDir" eol="crlf" encoding="ISO-8859-1">
+            <patternset refid="bluej.textfiles.iso88591" />
+        </fixcrlf>
+        <fixcrlf srcdir="winsetup/SourceDir" eol="crlf" encoding="UTF-8">
+            <patternset refid="bluej.textfiles.utf8" />
+        </fixcrlf>
+		
+		<!-- Fix the path to the JDK in bluej.defs -->
+        <replaceregexp byline="true">
+            <regexp pattern="#bluej\.windows\.vm=.*"/>
+            <substitution expression="bluej.windows.vm=jdk"/>
+            <fileset dir="winsetup/SourceDir/lib" includes="bluej.defs"/>
+        </replaceregexp>
+
+		<!-- Copy the JDK to be bundled -->
+		<copy todir="winsetup/SourceDir/jdk">
+			<fileset dir="${win_bundled_jdk_path}" />
+		</copy>
+		
+		<!-- The heat tool scans all the files in SourceDir and generates
+		     a WiX file that has all the XML needed for installing all those files -->
+		<exec dir="winsetup" executable="${wix_bin}/heat.exe">
+			<arg line="dir SourceDir -cg BlueJFiles -dr INSTALLDIR -ke -gg -srd -sfrag -sreg -scom template fragment -out bluej-install-files.wxs"/>
+		</exec>
+
+		<exec dir="winsetup" executable="${wix_bin}/candle.exe">
+			<arg line="CheckboxExtrasDlg.wxs"/>
+		</exec>
+			
+		<exec dir="winsetup" executable="${wix_bin}/candle.exe">
+			<arg line="ui.wxs"/>
+		</exec>
+			
+		<exec dir="winsetup" executable="${wix_bin}/candle.exe">
+			<arg line="bluej.wxs"/>
+		</exec>
+			
+		<exec dir="winsetup" executable="${wix_bin}/candle.exe">
+			<arg line="bluej-install-files.wxs"/>
+		</exec>
+			
+		<exec dir="winsetup" executable="${wix_bin}/light.exe">
+			<arg line="-ext WixUIExtension -loc bluej.wxl bluej.wixobj CheckboxExtrasDlg.wixobj ui.wixobj bluej-install-files.wixobj -o bluej-${bluej.version}-bundled.msi"/>
+		</exec>
+		<delete dir="winsetup/SourceDir" />
+	</target>
+		
 	<target name="debian-dist">
 		<mkdir dir="bluejdeb" />
 		<copy todir="bluejdeb">
@@ -483,6 +558,7 @@
             	<include name="doc/README.TXT" />
                 <include name="doc/BlueJ-architecture-and-design.txt" />
             	<include name="doc/BlueJ-parser.txt" />
+                 <include name="doc/Pi4J-readme.txt"/>
             	<include name="doc/threading-issues.txt" />
 	            <include name="examples/**/*" />          
 	            <include name="icons/**/*" />           

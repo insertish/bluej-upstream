@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2011  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2011,2013,2014  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -311,12 +311,11 @@ public class GenTypeClass extends GenTypeSolid
             if (! outer.equals(oClass.outer))
                 return false;
         
-        if (params == null && oClass.params == null)
-            return true;
-        if (params == null && oClass.params != null)
+        if (params == null) {
+            return oClass.params == null;
+        } else if (oClass.params == null) {
             return false;
-        if (params != null && oClass.params == null)
-            return false;
+        }
         
         Iterator<? extends GenTypeParameter> i = params.iterator();
         Iterator<? extends GenTypeParameter> j = oClass.params.iterator();
@@ -740,5 +739,33 @@ public class GenTypeClass extends GenTypeSolid
     public GenTypeClass getArray()
     {
         return new GenTypeArrayClass(reflective.getArrayOf(), this);
+    }
+    
+    @Override
+    public GenTypeClass getCapture()
+    {
+        if (outer == null && params == null) {
+            return this;
+        }
+        
+        GenTypeClass outerCapture = outer == null ? null : outer.getCapture();
+        
+        boolean isDifferent = outerCapture != outer;
+        
+        List<JavaType> capturedParams = null;
+        if (params != null) {
+            capturedParams = new ArrayList<JavaType>(params.size());
+            for (GenTypeParameter param : params) {
+                JavaType captured = param.getTparCapture();
+                isDifferent |= captured != param;
+                capturedParams.add(captured);
+            }
+        }
+        
+        if (isDifferent) {
+            return new GenTypeClass(reflective, capturedParams, outerCapture);
+        }
+        
+        return this;
     }
 }

@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2011,2012  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2011,2012,2014  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -25,6 +25,7 @@ import java.util.*;
 
 import bluej.debugger.gentype.*;
 import bluej.utility.Debug;
+import bluej.utility.JavaNames;
 
 import com.sun.jdi.*;
 
@@ -103,12 +104,23 @@ public class JdiReflective extends Reflective
     @Override
     public Reflective getRelativeClass(String name)
     {
+        ClassLoaderReference cl;
+        VirtualMachine vm;
         if (rclass != null) {
-            return new JdiReflective(name, rclass);
+            cl = rclass.classLoader();
+            vm = rclass.virtualMachine();
         }
         else {
-            return new JdiReflective(name, sourceLoader, sourceVM);
+            cl = this.sourceLoader;
+            vm = this.sourceVM;
         }
+        
+        ReferenceType resultClass = findClass(name, cl, vm);
+        if (resultClass == null) {
+            return null;
+        }
+        
+        return new JdiReflective(resultClass);
     }
 
     /**
@@ -552,7 +564,7 @@ public class JdiReflective extends Reflective
             // type parameter
             String tname = readClassName(i);
             if (tparams != null && tparams.get(tname) != null) {
-                return tparams.get(tname).getCapture();
+                return tparams.get(tname).asType();
             }
             else {
                 return new GenTypeTpar(tname);
@@ -905,7 +917,7 @@ public class JdiReflective extends Reflective
                 String paramName = tpar.getTparName();
                 
                 GenTypeSolid [] ubounds = tpar.upperBounds();
-                GenTypeWildcard type = new GenTypeWildcard(ubounds, new GenTypeSolid[0]);
+                GenTypeWildcard type = new GenTypeWildcard(IntersectionType.getIntersection(ubounds), null);
                 if( ! tparams.containsKey(paramName)) {
                     tparams.put(paramName, type);
                 }
@@ -1007,9 +1019,25 @@ public class JdiReflective extends Reflective
     }
     
     @Override
-    public List<Reflective> getInners()
+    public Reflective getInnerClass(String name)
     {
-        return Collections.emptyList(); // not implemented
+        checkLoaded();
+        // Look for already loaded types first:
+        for (ReferenceType nested : rclass.nestedTypes()) {
+            if (JavaNames.getBase(nested.name()).equals(name)) {
+                return new JdiReflective(nested);
+            }
+        }
+        
+        ClassLoaderReference sourceLoader = rclass.classLoader();
+        VirtualMachine sourceVM = rclass.virtualMachine();
+        ReferenceType nested = findClass(getName() + "$" + name, sourceLoader, sourceVM);
+        
+        if (nested != null) {
+            return new JdiReflective(nested);
+        }
+        
+        return null;
     }
     
     static class StringIterator

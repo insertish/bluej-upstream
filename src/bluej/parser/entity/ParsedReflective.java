@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2011  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2011,2014  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -41,6 +41,7 @@ import bluej.debugger.gentype.Reflective;
 import bluej.parser.JavaParser;
 import bluej.parser.nodes.FieldNode;
 import bluej.parser.nodes.MethodNode;
+import bluej.parser.nodes.ParsedNode;
 import bluej.parser.nodes.ParsedTypeNode;
 import bluej.parser.nodes.TypeInnerNode;
 import bluej.utility.JavaUtils;
@@ -267,7 +268,7 @@ public class ParsedReflective extends Reflective
                 if (rtypeEnt == null) continue; // constructor
                 rtypeEnt = rtypeEnt.resolveAsType();
                 if (rtypeEnt == null) continue;
-                JavaType rtype = rtypeEnt.getType().getCapture();
+                JavaType rtype = rtypeEnt.getType();
                 List<JavaType> paramTypes = new ArrayList<JavaType>();
                 List<JavaEntity> mparamTypes = method.getParamTypes();
                 for (JavaEntity mparam : mparamTypes) {
@@ -290,13 +291,6 @@ public class ParsedReflective extends Reflective
     }
     
     @Override
-    public List<Reflective> getInners()
-    {
-        // TODO fix
-        return Collections.emptyList();
-    }
-    
-    @Override
     public Reflective getOuterClass()
     {
         ParsedTypeNode containing = pnode.getContainingClass();
@@ -304,5 +298,37 @@ public class ParsedReflective extends Reflective
             return new ParsedReflective(containing);
         }
         return null;
+    }
+    
+    @Override
+    public ParsedReflective getInnerClass(String name)
+    {
+        Map<String,ParsedNode> contained = pnode.getInner().getContainedClasses();
+        ParsedNode innerParsedNode = contained.get(name);
+        if (innerParsedNode instanceof ParsedTypeNode) {
+            return new ParsedReflective((ParsedTypeNode) innerParsedNode);
+        }
+        return null;
+    }
+    
+    @Override
+    public boolean equals(Object obj)
+    {
+        if (obj == this) {
+            return true;
+        }
+        
+        if (obj instanceof ParsedReflective) {
+            ParsedReflective other = (ParsedReflective) obj;
+            return pnode == other.pnode;
+        }
+        
+        return false;
+    }
+    
+    @Override
+    public int hashCode()
+    {
+        return pnode.hashCode();
     }
 }
