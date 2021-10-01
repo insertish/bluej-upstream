@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kšlling and John Rosenberg 
+ Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -21,6 +21,7 @@
  */
 package bluej.pkgmgr;
 
+import java.awt.Component;
 import java.awt.EventQueue;
 import java.awt.Window;
 import java.io.File;
@@ -79,9 +80,11 @@ import bluej.terminal.Terminal;
 import bluej.testmgr.record.ClassInspectInvokerRecord;
 import bluej.testmgr.record.InvokerRecord;
 import bluej.utility.Debug;
+import bluej.utility.DialogManager;
 import bluej.utility.FileUtility;
 import bluej.utility.JavaNames;
 import bluej.utility.Utility;
+import bluej.utility.FileUtility.WriteCapabilities;
 import bluej.views.View;
 
 
@@ -92,7 +95,7 @@ import bluej.views.View;
  * @author  Axel Schmolitzky
  * @author  Andrew Patterson
  * @author  Bruce Quig
- * @version $Id: Project.java 6164 2009-02-19 18:11:32Z polle $
+ * @version $Id: Project.java 6215 2009-03-30 13:28:25Z polle $
  */
 public class Project implements DebuggerListener, InspectorManager 
 {
@@ -236,11 +239,14 @@ public class Project implements DebuggerListener, InspectorManager
      * @param projectPath
      *            a string representing the path to open. This can either be a
      *            directory name or the filename of a bluej.pkg file.
+     * @param parent 
+     *            Component used as parent if we need to show any messages.
+     *            Can be null.
      * @return the Project representing the BlueJ project that has this
      *         directory within it or null if there were no bluej.pkg files in
      *         the specified directory.
      */
-    public static Project openProject(String projectPath) 
+    public static Project openProject(String projectPath, Component parent) 
     {
         String startingPackageName;
         File projectDir;
@@ -331,6 +337,25 @@ public class Project implements DebuggerListener, InspectorManager
             proj.initialPackageName = startingPackageName;
         }
 
+        if(Config.isWinOSVista()) {
+        	WriteCapabilities capabilities = FileUtility.getVistaWriteCapabilities(projectDir);
+        	switch (capabilities) {
+			case VIRTUALIZED_WRITE:
+	        	DialogManager.showMessage(parent, "project-is-virtualized");
+				break;
+			case READ_ONLY:
+	            DialogManager.showMessage(parent, "project-is-readonly");
+				break;
+			case NORMAL_WRITE:
+				break;
+			default:
+				break;
+			}
+        }
+    	else if (!projectDir.canWrite()) {
+            DialogManager.showMessage(parent, "project-is-readonly");
+        }
+        
         ExtensionsManager.getInstance().projectOpening(proj);
 
         return proj;
@@ -718,17 +743,8 @@ public class Project implements DebuggerListener, InspectorManager
         else {
             return null;
         }
-    }
-    
-    /**
-     * Return whether the project is located in a readonly directory
-     * @return
-     */
-    public boolean isReadOnly() 
-    {
-        return !projectDir.canWrite();
-    }
-
+    }      
+	
     /**
      * A string which uniquely identifies this project
      */

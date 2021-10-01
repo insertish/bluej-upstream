@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kšlling and John Rosenberg 
+ Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -81,7 +81,7 @@ import com.apple.eawt.ApplicationEvent;
 /**
  * The main user interface frame which allows editing of packages
  * 
- * @version $Id: PkgMgrFrame.java 6165 2009-02-19 19:06:05Z polle $
+ * @version $Id: PkgMgrFrame.java 6269 2009-04-21 07:47:57Z polle $
  */
 public class PkgMgrFrame extends JFrame
     implements BlueJEventListener, MouseListener, PackageEditorListener, FocusListener
@@ -1061,7 +1061,7 @@ public class PkgMgrFrame extends JFrame
     public boolean newProject(String dirName, boolean isJavaMEproject )
     {
         if (Project.createNewProject(dirName, isJavaMEproject)) {
-            Project proj = Project.openProject(dirName);
+            Project proj = Project.openProject(dirName, this);
             
             Package unNamedPkg = proj.getPackage("");
             
@@ -1164,6 +1164,7 @@ public class PkgMgrFrame extends JFrame
     /**
      * Allow the user to select a directory into which we create a project.
      * @param isJavaMEproject   Whether this is a Java Micro Edition project or not.
+     * @return true if the project was successfully created. False otherwise.
      */
     public boolean doNewProject( boolean isJavaMEproject )
     {
@@ -1177,7 +1178,11 @@ public class PkgMgrFrame extends JFrame
         if (newname == null)
             return false;
 
-        if( ! newProject( newname, isJavaMEproject ) ) {
+        if(new File(newname).exists()) {
+            DialogManager.showErrorWithText(null, "directory-exists", newname);
+            return false;
+        }
+        else if( ! newProject( newname, isJavaMEproject ) ) {
             DialogManager.showErrorWithText(null, "cannot-create-directory", newname);
             return false;
         }
@@ -1210,15 +1215,10 @@ public class PkgMgrFrame extends JFrame
      */
     private boolean openProject(String projectPath)
     {
-        Project openProj = Project.openProject(projectPath);
-
+        Project openProj = Project.openProject(projectPath, this);
         if (openProj == null)
             return false;
         else {
-            if (openProj.isReadOnly()) {
-                DialogManager.showMessage(this, "project-is-readonly");
-            }
-
             Package pkg = openProj.getPackage(openProj.getInitialPackageName());
 
             PkgMgrFrame pmf;

@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kšlling and John Rosenberg 
+ Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -42,7 +42,7 @@ import bluej.utility.SwingWorker;
  * project.
  * 
  * @author Kasper
- * @version $Id: CheckoutAction.java 6164 2009-02-19 18:11:32Z polle $
+ * @version $Id: CheckoutAction.java 6215 2009-03-30 13:28:25Z polle $
  */
 public class CheckoutAction extends TeamAction
 {
@@ -181,7 +181,7 @@ public class CheckoutAction extends TeamAction
                     }
                 }
                 
-                Project project = Project.openProject(projDir.toString());
+                Project project = Project.openProject(projDir.toString(), newFrame);
                 
                 project.setTeamSettingsController(tsc);
                 Package initialPackage = project.getPackage(project.getInitialPackageName());

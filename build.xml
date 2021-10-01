@@ -15,9 +15,10 @@
      After changing the version number the target "update-version-number" should be run -->
     <property name="bluej.version.major" value="2" />
     <property name="bluej.version.minor" value="5" />
-    <property name="bluej.version.release" value="0" />
+    <property name="bluej.version.release" value="1" />
     <property name="bluej.version.suffix" value="" />
     <property name="bluej.version" value="${bluej.version.major}.${bluej.version.minor}.${bluej.version.release}${bluej.version.suffix}" />
+    <property name="bluej.version.nodots" value="${bluej.version.major}${bluej.version.minor}${bluej.version.release}${bluej.version.suffix}" />
 
     <!-- user specific properties that are edited to match local build environment-->
     <property file="build.properties"/>
@@ -56,7 +57,7 @@
      to update the 'add-license-to-sources' target as well -->    
     <property name="license" value="/*${line.separator}
 This file is part of the BlueJ program. ${line.separator}
-Copyright (C) 1999-2009  Michael Kölling and John Rosenberg ${line.separator}
+Copyright (C) 1999-2009  Michael Kolling and John Rosenberg ${line.separator}
 ${line.separator}
 This program is free software; you can redistribute it and/or ${line.separator}
 modify it under the terms of the GNU General Public License ${line.separator}
@@ -384,13 +385,15 @@ LICENSE.txt file that accompanied this code.${line.separator}
     </target>
     
     <target name="add-license-to-sources" description="adds the license to each source file" >	      
-	    <replaceregexp flags="s">
+	    <replaceregexp flags="s" encoding="ISO8859-1">
 	        <regexp pattern="(^\/\*\n This file is part of the BlueJ program.*? file that accompanied this code\.\n.\*\/\n)|^"/> 
 	        <substitution expression="${license}"/> 
 	        <fileset dir="." includes="**/*.java" >
 	        	<exclude name="package/Installer.java"/>
 	        	<exclude name="examples/**"/>
 	        	<exclude name="src/org/syntax/jedit/**"/>
+	            <include name="package/winlaunch/**.cc"/>
+	            <include name="package/winlaunch/**.h"/>
 	        </fileset>
 	    </replaceregexp>
     </target>        
@@ -407,6 +410,12 @@ LICENSE.txt file that accompanied this code.${line.separator}
         <delete file="package/greenfoot-install.png" />
         <delete file="boot/src/bluej/greenfootsplash.jpg" />
         <delete dir="lib/greenfoot" />
+        <!-- Commons libraries -->
+     	<delete >
+            <fileset dir="lib">
+                <include name="commons*.jar"/>
+            </fileset>
+        </delete>
         <delete dir="package/scenarios" />
         <delete>
             <fileset file="lib/extensions/greenfoot.jar"/>

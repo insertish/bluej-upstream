@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kšlling and John Rosenberg 
+ Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -41,7 +41,7 @@ import java.util.Properties;
  * @author  Damiano Bolla
  * @author  Michael Kolling
  * @author  Bruce Quig
- * @version $Id: Boot.java 6163 2009-02-19 18:09:55Z polle $
+ * @version $Id: Boot.java 6217 2009-03-30 13:44:08Z polle $
  */
 public class Boot
 {
@@ -50,7 +50,7 @@ public class Boot
     // and then the update-version target should be executed.
     public static final int BLUEJ_VERSION_MAJOR = 2;
     public static final int BLUEJ_VERSION_MINOR = 5;
-    public static final int BLUEJ_VERSION_RELEASE = 0;
+    public static final int BLUEJ_VERSION_RELEASE = 1;
     public static final String BLUEJ_VERSION_SUFFIX = "";
 
     // public static final int BLUEJ_VERSION_NUMBER = BLUEJ_VERSION_MAJOR * 1000 +
