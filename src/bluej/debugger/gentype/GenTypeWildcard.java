@@ -36,9 +36,9 @@ import bluej.utility.Debug;
  * This is an Immutable type.
  * 
  * @author Davin McCall
- * @version $Id: GenTypeWildcard.java 6215 2009-03-30 13:28:25Z polle $
+ * @version $Id: GenTypeWildcard.java 7631 2010-05-20 05:00:59Z davmac $
  */
-public class GenTypeWildcard extends GenTypeParameterizable
+public class GenTypeWildcard extends GenTypeParameter
 {
     GenTypeSolid upperBound; // ? extends upperBound
     GenTypeSolid lowerBound; // ? super lowerBound
@@ -98,7 +98,7 @@ public class GenTypeWildcard extends GenTypeParameterizable
      *   "? extends ? extends X"    => "? extends X".
      *   "? super ? super X"        => "? super X".
      */
-    public JavaType mapTparsToTypes(Map tparams)
+    public GenTypeWildcard mapTparsToTypes(Map<String, ? extends GenTypeParameter> tparams)
     {
         GenTypeSolid newUpper = null;
         GenTypeSolid newLower = null;
@@ -110,7 +110,7 @@ public class GenTypeWildcard extends GenTypeParameterizable
             
             // find the new upper bounds
             for (int i = 0; i < upperBounds.length; i++) {
-                GenTypeParameterizable newBound = (GenTypeParameterizable) upperBounds[i].mapTparsToTypes(tparams);
+                GenTypeParameter newBound = (GenTypeParameter) upperBounds[i].mapTparsToTypes(tparams);
                 if (newBound instanceof GenTypeWildcard) {
                     GenTypeWildcard newWcBound = (GenTypeWildcard) newBound;
                     newUppers.add(newWcBound.upperBound);
@@ -126,17 +126,14 @@ public class GenTypeWildcard extends GenTypeParameterizable
         // This is easier. If the lower bound is an intersection type, it comes from
         // lub() and therefore contains no immediate type parameters.
         if (lowerBound != null) {
-            GenTypeParameterizable newLowerP = (GenTypeParameterizable) lowerBound.mapTparsToTypes(tparams);
+            GenTypeParameter newLowerP = (GenTypeParameter) lowerBound.mapTparsToTypes(tparams);
             newLower = newLowerP.getLowerBound();
         }
         
-        if (newUpper != null && newUpper.equals(newLower))
-            return newUpper;
-        else
-            return new GenTypeWildcard(newUpper, newLower);
+        return new GenTypeWildcard(newUpper, newLower);
     }
     
-    public boolean equals(GenTypeParameterizable other)
+    public boolean equals(GenTypeParameter other)
     {
         if (this == other)
             return true;
@@ -156,7 +153,7 @@ public class GenTypeWildcard extends GenTypeParameterizable
         return true;
     }
     
-    public void getParamsFromTemplate(Map map, GenTypeParameterizable template)
+    public void getParamsFromTemplate(Map map, GenTypeParameter template)
     {
         // This should never actually be called on a wildcard type (I think).
         // TODO fix. Actually it probably can get called. When it is called, it
@@ -196,7 +193,12 @@ public class GenTypeWildcard extends GenTypeParameterizable
      */
     public GenTypeSolid[] getUpperBounds()
     {
-        return upperBound.getUpperBounds();
+        if (upperBound != null) {
+            return upperBound.getUpperBounds();
+        }
+        else {
+            return new GenTypeSolid[0];
+        }
     }
     
     public GenTypeSolid getUpperBound()
@@ -214,23 +216,11 @@ public class GenTypeWildcard extends GenTypeParameterizable
     {
         return lowerBound;
     }
-    
-    public boolean contains(GenTypeParameterizable other)
+        
+    @Override
+    public JavaType getCapture()
     {
-        GenTypeSolid otherUpper = other.getUpperBound();
-        GenTypeSolid otherLower = other.getLowerBound();
-        
-        if (upperBound != null) {
-            if (otherUpper == null || ! upperBound.isAssignableFrom(otherUpper))
-                return false;
-        }
-        
-        if (lowerBound != null) {
-            if (otherLower == null || ! otherLower.isAssignableFrom(lowerBound))
-                return false;
-        }
-        
-        return true;
+        return new GenTypeCapture(this);
     }
 }
 

@@ -30,7 +30,7 @@ import java.util.List;
 
 import javax.swing.JFrame;
 
-import bluej.parser.ClassParser;
+import bluej.parser.InfoParser;
 import bluej.parser.symtab.ClassInfo;
 import bluej.utility.Debug;
 import bluej.utility.DialogManager;
@@ -44,7 +44,6 @@ import bluej.utility.JavaNames;
  * @author  Michael Kolling
  * @author  Axel Schmolitzky
  * @author  Andrew Patterson
- * @version $Id: Import.java 6215 2009-03-30 13:28:25Z polle $
  */
 public class Import
 {
@@ -91,7 +90,7 @@ public class Import
             File f = (File) it.next();
 
             try {
-                ClassInfo info = ClassParser.parse(f);
+                ClassInfo info = InfoParser.parse(f);
 
                 String qf = JavaNames.convertFileToQualifiedName(path, f);
 
@@ -130,9 +129,9 @@ public class Import
      * @returns         a list of File's representing the
      *                  interesting directories
      */
-    public static List findInterestingDirectories(File dir)
+    public static List<File> findInterestingDirectories(File dir)
     {
-        List interesting = new LinkedList();
+        List<File> interesting = new LinkedList<File>();
 
         File[] files = dir.listFiles();
 
@@ -149,7 +148,7 @@ public class Import
                 // a valid java package name before considering
                 // anything in it
                 if(JavaNames.isIdentifier(files[i].getName())) {
-                    List subInteresting = findInterestingDirectories(files[i]);
+                    List<File> subInteresting = findInterestingDirectories(files[i]);
 
                     if (subInteresting.size() > 0) {
                         interesting.addAll(subInteresting);

@@ -114,9 +114,9 @@ public class FileUtility
      *  Get a file name from the user, using a file selection dialogue.
      *  If cancelled or an invalid name was specified, return null.
      */
-    public static String getFileName(Component parent, String title,
-                                     String buttonLabel, FileFilter filter,
-                                     boolean rememberDir)
+    public static File getFile(Component parent, String title,
+                                   String buttonLabel, FileFilter filter,
+                                   boolean rememberDir)
     {
         JFileChooser newChooser = getFileChooser(false, filter);
         
@@ -129,7 +129,7 @@ public class FileUtility
                 PrefMgr.setProjectDirectory(
                       newChooser.getSelectedFile().getParentFile().getPath());
             }
-            return newChooser.getSelectedFile().getPath();
+            return newChooser.getSelectedFile();
         }
         else if (result == JFileChooser.CANCEL_OPTION) {
             return null;
@@ -138,6 +138,17 @@ public class FileUtility
             DialogManager.showError(parent, "error-no-name");
             return null;
         }
+    }
+    
+    public static String getFileName(Component parent, String title,
+            String buttonLabel, FileFilter filter,
+            boolean rememberDir)
+    {
+    	File file = getFile(parent, title, buttonLabel, filter, rememberDir);
+    	if (file == null)
+    		return null;
+    	else
+    		return file.getPath();
     }
     
     /**
@@ -216,6 +227,7 @@ public class FileUtility
         
         return newChooser;
     }
+    
     
     /**
      * Return a BlueJ package chooser, i.e. a file chooser which
@@ -618,7 +630,7 @@ public class FileUtility
         if(!dir.isDirectory()) {
             return WriteCapabilities.UNKNOWN;
         }
-        WriteCapabilities capabilities = WriteCapabilities.UNKNOWN;             
+        WriteCapabilities capabilities = WriteCapabilities.UNKNOWN;		
 
         File tmpFile = null;
         try {
@@ -634,7 +646,7 @@ public class FileUtility
             capabilities = WriteCapabilities.READ_ONLY;
         } finally {
             if(tmpFile != null) {
-                tmpFile.delete();                       
+                tmpFile.delete();			
             }
         }
         return capabilities;
@@ -649,7 +661,7 @@ public class FileUtility
         boolean isVirtualized = false;
 
         // Virtualization only happens on Windows Vista (or later)
-        if (Config.isWinOSVista()) {
+        if (Config.isModernWinOS()) {
             try {
                 String canonicalPath = file.getCanonicalPath();
                 int colonIndex = canonicalPath.indexOf(":");

@@ -27,33 +27,15 @@ import java.util.*;
 import bluej.debugger.gentype.*;
 
 /**
- * Java 1.5 version of JavaUtils.
+ * Java 1.5+ version of JavaUtils.
  * 
  * @author Davin McCall
- * @version $Id: JavaUtils15.java 6215 2009-03-30 13:28:25Z polle $
  */
-public class JavaUtils15 extends JavaUtils {
-
+public class JavaUtils15 extends JavaUtils
+{
     /*
      * Make signatures for methods, constructors
      */
-    
-    public String getSignature(Method method)
-    {
-        String name = getTypeParameters(method);
-        name += getTypeName(method.getGenericReturnType()) + " " + method.getName();
-        Type[] params = method.getGenericParameterTypes();
-        return makeSignature(name, params, method.isVarArgs());
-    }
-    
-    public String getSignature(Constructor cons)
-    {
-        String name = getTypeParameters(cons);
-        name += JavaNames.getBase(cons.getName());
-        Type[] params = cons.getGenericParameterTypes();
-        
-        return makeSignature(name, params, cons.isVarArgs());
-    }
     
     /**
      * Build the signature string. Format: name(type,type,type)
@@ -280,7 +262,7 @@ public class JavaUtils15 extends JavaUtils {
             params = method.getGenericParameterTypes();
         JavaType [] gentypes = new JavaType[params.length];
         for(int i = 0; i < params.length; i++) {
-            gentypes[i] = genTypeFromType(params[i]);
+            gentypes[i] = (JavaType) genTypeFromType(params[i]);
         }
         return gentypes;
     }
@@ -297,7 +279,7 @@ public class JavaUtils15 extends JavaUtils {
         Type [] params = constructor.getGenericParameterTypes();
         JavaType [] gentypes = new JavaType[params.length];
         for(int i = 0; i < params.length; i++) {
-            gentypes[i] = genTypeFromType(params[i]);
+            gentypes[i] = (JavaType) genTypeFromType(params[i]);
         }
         return gentypes;
     }
@@ -307,7 +289,7 @@ public class JavaUtils15 extends JavaUtils {
      */
     public JavaType genTypeFromClass(Class t)
     {
-        return genTypeFromType(t);
+        return (JavaType) genTypeFromType(t);
     }
     
     /* -------------- Internal methods ---------------- */
@@ -442,7 +424,8 @@ public class JavaUtils15 extends JavaUtils {
      * Convert a type name into its vararg form. For instance,
      * "int []" becomes "int ...".
      */
-    static private String createVarArg(String typeName) {
+    static private String createVarArg(String typeName)
+    {
         String lastArrayStripped = typeName.substring(0,typeName.length()-2);
         return lastArrayStripped + " ...";        
     }
@@ -513,14 +496,14 @@ public class JavaUtils15 extends JavaUtils {
      */
     private static JavaType genTypeFromType(Type t)
     {
-        return genTypeFromType(t, new LinkedList());
+        return (JavaType) genTypeFromType(t, new LinkedList());
     }
     
     /**
      * Build a GenType structure from a "Type" object, using the given backTrace
      * stack to avoid infinite recursion.
      */
-    private static JavaType genTypeFromType(Type t, List backTrace)
+    private static GenTypeParameter genTypeFromType(Type t, List backTrace)
     {
         if( t instanceof Class )
             return JavaUtils14.genTypeFromClass14((Class)t);
@@ -594,56 +577,8 @@ public class JavaUtils15 extends JavaUtils {
         
         // Assume we have an array
         GenericArrayType gat = (GenericArrayType)t;
-        JavaType componentType = genTypeFromType(gat.getGenericComponentType(), backTrace);
+        JavaType componentType = (JavaType) genTypeFromType(gat.getGenericComponentType(), backTrace);
         
-        Reflective reflective = new JavaReflective(getRclass(gat));
-        return new GenTypeArray(componentType, reflective);
-    }
-    
-    /**
-     * Get the raw name of some type, such as would be returned by
-     * Class.getName()
-     */
-    static private Class getRclass(Type t)
-    {
-        int arrnum = 0;
-        while (! (t instanceof Class)) {
-            if (t instanceof ParameterizedType)
-                t = ((ParameterizedType) t).getRawType();
-        
-            if (t instanceof TypeVariable)
-                t = ((TypeVariable) t).getBounds()[0];
-            
-            if (t instanceof WildcardType)
-                t = ((WildcardType) t).getUpperBounds()[0];
-            
-            if (t instanceof GenericArrayType) {
-                arrnum++;
-                t = ((GenericArrayType) t).getGenericComponentType();
-            }
-        }
-        
-        String rName;
-        Class rClass = (Class) t;
-        ClassLoader classLoader = rClass.getClassLoader();
-        
-        if (arrnum == 0) {
-            rName = rClass.getName();
-        }
-        else {
-            // arrnum > 0 !
-            rName = genTypeFromType(t).arrayComponentName();
-            while (arrnum > 0) {
-                rName = "[" + rName;
-                arrnum--;
-            }
-        }
-            
-        try {
-            if (classLoader == null)
-                classLoader = ClassLoader.getSystemClassLoader();
-            return classLoader.loadClass(rName);
-        }
-        catch (ClassNotFoundException cnfe) { return null; }
+        return new GenTypeArray(componentType);
     }
 }

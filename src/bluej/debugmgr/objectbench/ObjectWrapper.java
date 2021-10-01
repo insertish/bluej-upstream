@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2010  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -42,6 +42,7 @@ import bluej.BlueJEvent;
 import bluej.Config;
 import bluej.debugger.DebuggerObject;
 import bluej.debugger.gentype.GenTypeClass;
+import bluej.debugger.gentype.GenTypeParameter;
 import bluej.debugger.gentype.JavaType;
 import bluej.debugmgr.ExpressionInformation;
 import bluej.debugmgr.Invoker;
@@ -72,7 +73,6 @@ import bluej.views.ViewFilter;
  * object bench.
  *
  * @author  Michael Kolling
- * @version $Id: ObjectWrapper.java 6475 2009-07-31 14:30:38Z davmac $
  */
 public class ObjectWrapper extends JComponent implements InvokeListener, NamedValue
 {
@@ -89,18 +89,22 @@ public class ObjectWrapper extends JComponent implements InvokeListener, NamedVa
     static final Color envOpColour = Config.getItemColour("colour.menu.environOp");
     static final Color textColour = Color.white;
     
+    // Images
+    private static final Image objectImage = Config.getImageAsIcon("image.bench.object").getImage();
+    private static final Image selectedObjectImage = Config.getImageAsIcon("image.bench.object-selected").getImage();
+    
     // Strokes
     static final Stroke selectedStroke = new BasicStroke(2.0f);
     static final Stroke normalStroke = new BasicStroke(1.0f);
-    
-    protected static final int HGAP = 5;    // horiz. gap between objects (left of each object)
-    protected static final int VGAP = 6;    // vert. gap between objects (above and below of each object)
-    public static final int WIDTH = 95;    // width including gap
-    public static final int HEIGHT = 66;   // height including gap
 
     // vertical offset between instance and class name
     public static final int WORD_GAP = 20;
     public static final int SHADOW_SIZE = 5;
+    
+    protected static final int HGAP = 5;    // horiz. gap between objects (left of each object)
+    protected static final int VGAP = 6;    // vert. gap between objects (above and below of each object)
+    public static final int WIDTH = objectImage.getWidth(null);    // width including gap
+    public static final int HEIGHT = objectImage.getHeight(null);   // height including gap
 
     private static int itemHeight = 19;   // wild guess until we find out
     private static boolean itemHeightKnown = false;
@@ -122,7 +126,7 @@ public class ObjectWrapper extends JComponent implements InvokeListener, NamedVa
 
     private boolean isSelected = false;
     
-    private Color[] colours = {
+    private Color[] shadowColours = {
             new Color(0,0,0,11), //furthest out
             new Color(0,0,0,22),     
             new Color(0,0,0,33),
@@ -291,7 +295,7 @@ public class ObjectWrapper extends JComponent implements InvokeListener, NamedVa
         // If the class is inaccessible, use the invocation type.
         if (cl != null) {
             if (! classIsAccessible(cl)) {
-                cl = pkg.loadClass(iType.rawName());
+                cl = pkg.loadClass(iType.classloaderName());
                 while (cl != null && ! classIsAccessible(cl)) {
                     cl = cl.getSuperclass();
                     if (cl != null) {
@@ -465,7 +469,7 @@ public class ObjectWrapper extends JComponent implements InvokeListener, NamedVa
      * @param actions 
      */
     private static void createMenuItems(JComponent menu, MethodView[] methods, InvokeListener il, ViewFilter filter,
-            int sizeLimit, Map<?, ?> genericParams, Hashtable<JMenuItem, MethodView> actions, Hashtable<String, String> methodsUsed)
+            int sizeLimit, Map<String,GenTypeParameter> genericParams, Hashtable<JMenuItem, MethodView> actions, Hashtable<String, String> methodsUsed)
     {
         JMenuItem item;
         boolean menuEmpty = true;
@@ -598,33 +602,8 @@ public class ObjectWrapper extends JComponent implements InvokeListener, NamedVa
     protected void drawUMLObjectShape(Graphics2D g, int x, int y, int w, int h, int shad, int corner)
     {
         boolean isSelected = isSelected() && ob.hasFocus();
-        drawShadow(g, x, y, w, h, shad, corner);
-        // draw red round rectangle
-        g.setColor(bg);
-        g.fillRoundRect(x, y, w-shad, h-shad, corner, corner);
-        //draw outline
-        g.setColor(Color.BLACK);
-        if(isSelected)
-            g.setStroke(selectedStroke);
-        g.drawRoundRect(x, y, w-shad, h-shad, corner, corner);
-        if(isSelected)
-            g.setStroke(normalStroke);
+        g.drawImage(isSelected ? selectedObjectImage : objectImage, x, y, null);
     }
-
-    /**
-	 * Draw the shadow of an object wrapper.
-	 */
-	private void drawShadow(Graphics2D g, int x, int y, int w, int h, int shad, int corner) 
-    {
-		g.setColor(colours[0]);
-		g.fillRoundRect(x+shad,y+shad,w-shad,h-shad,corner,corner);
-		g.setColor(colours[1]);
-		g.fillRoundRect(x+shad,y+shad,w-shad-1,h-shad-1,corner,corner);
-		g.setColor(colours[2]);
-		g.fillRoundRect(x+shad,y+shad,w-shad-2,h-shad-2,corner,corner);
-		g.setColor(colours[3]);
-		g.fillRoundRect(x+shad,y+shad,w-shad-3,h-shad-3,corner,corner);
-	}
 
     /**
      * Draw the text onto an object wrapper (objectname: classname).
@@ -632,9 +611,9 @@ public class ObjectWrapper extends JComponent implements InvokeListener, NamedVa
 	protected void drawUMLObjectText(Graphics2D g, int x, int y, int w, int shad, 
                                      String objName, String className)
     {
-    	
+	    g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         g.setColor(textColour);
-        g.setFont(PrefMgr.getStandardFont());
+        g.setFont(PrefMgr.getTargetFont());
 
         FontMetrics fm = g.getFontMetrics();
         int fontHeight = fm.getAscent() + 5;
@@ -642,27 +621,23 @@ public class ObjectWrapper extends JComponent implements InvokeListener, NamedVa
         int maxWidth = w - shad - 4;    // our uml object will be (w-shad) pixels wide
                                         // we leave 2 pixels of space either side of shape
 
+        // 54 is a hard hack; the height of the red part of the object image:
+        int totalGap = 54 - (fontHeight + fm.getAscent()); 
+        int start = totalGap / 2;
+        
         // draw top string (normally instance name)
         int aWidth = fm.stringWidth(objName);
         if(aWidth > maxWidth)
             aWidth = maxWidth;
 
-        Utility.drawCentredText(g, objName, x+2, y+5, maxWidth, fontHeight);
-
-        int lineX = x + 2 + ((maxWidth - aWidth)/2);
-        int lineY = y + 5 + fontHeight;
-
-        g.drawLine(lineX, lineY, lineX + aWidth, lineY);
+        Utility.drawCentredText(g, objName, x+2, y+start, maxWidth, fontHeight);
 
         // draw bottom string (normally class name)
         int bWidth = fm.stringWidth(className);
         if(bWidth > maxWidth)
             bWidth = maxWidth;
 
-        Utility.drawCentredText(g, className, x+2, y+25, maxWidth, fontHeight);
-        lineX = x + 2 + ((maxWidth - bWidth)/2);
-        lineY = y + 25 + fontHeight;
-        g.drawLine(lineX, lineY, lineX + bWidth, lineY);
+        Utility.drawCentredText(g, className, x+2, y+start+fontHeight, maxWidth, fontHeight);
     }
 
     /**
@@ -752,7 +727,7 @@ public class ObjectWrapper extends JComponent implements InvokeListener, NamedVa
      */
     protected void inspectObject()
     {
-        InvokerRecord ir = new ObjectInspectInvokerRecord(getName(), obj.isArray());
+        InvokerRecord ir = new ObjectInspectInvokerRecord(getName());
       	pkg.getProject().getInspectorInstance(obj, getName(), pkg, ir, pmf);  // shows the inspector
     }
 

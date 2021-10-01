@@ -45,8 +45,6 @@ import java.util.TreeMap;
 
 import javax.swing.JFrame;
 
-import com.sun.tools.javac.code.Attribute.Array;
-
 import bluej.BlueJEvent;
 import bluej.Boot;
 import bluej.Config;
@@ -75,6 +73,7 @@ import bluej.groupwork.ui.CommitCommentsFrame;
 import bluej.groupwork.ui.StatusFrame;
 import bluej.groupwork.ui.TeamSettingsDialog;
 import bluej.groupwork.ui.UpdateFilesFrame;
+import bluej.parser.entity.EntityResolver;
 import bluej.pkgmgr.target.ClassTarget;
 import bluej.pkgmgr.target.Target;
 import bluej.prefmgr.PrefMgr;
@@ -98,7 +97,6 @@ import bluej.views.View;
  * @author  Axel Schmolitzky
  * @author  Andrew Patterson
  * @author  Bruce Quig
- * @version $Id: Project.java 6707 2009-09-17 05:25:29Z davmac $
  */
 public class Project implements DebuggerListener, InspectorManager 
 {
@@ -113,6 +111,9 @@ public class Project implements DebuggerListener, InspectorManager
     public static final int NEW_PACKAGE_NO_PARENT = 3;
 
     public static final String projectLibDirName = "+libs";
+    
+    /** Property specifying location of JDK source */
+    private static final String JDK_SOURCE_PATH_PROPERTY = "bluej.jdk.source";
     
     /* ------------------- end of static declarations ------------------ */
 
@@ -154,6 +155,7 @@ public class Project implements DebuggerListener, InspectorManager
         have a wrapper on the object bench. Inspectors of fields of
         object inspectors should be handled at the object wrapper level */
     private Map<Object,Inspector> inspectors;
+    
     private boolean inTestMode = false;
     private BPClassLoader currentClassLoader;
     
@@ -171,6 +173,12 @@ public class Project implements DebuggerListener, InspectorManager
     
     // Flag signalling whether this is a Java Micro Edition project
     private boolean isJavaMEproject = false;    
+    
+    /** Resolve javadoc for this project */
+    private JavadocResolver javadocResolver;
+    
+    /** Where to find JDK and other library sources (for extracting javadoc) */
+    private List<DocPathEntry> sourcePath;
 
     /* ------------------- end of field declarations ------------------- */
 
@@ -187,12 +195,43 @@ public class Project implements DebuggerListener, InspectorManager
 
         Debug.log("Opening project: " + projectDir.toString());
         
+        // Make JDK's javadoc available, if we can find the source
+        javadocResolver = new ProjectJavadocResolver(this);
+        sourcePath = new ArrayList<DocPathEntry>();
+        File javaHome = Boot.getInstance().getJavaHome();
+        File jdkSourceZip = new File(javaHome, "src.zip");
+        if (jdkSourceZip.isFile()) {
+            sourcePath.add(new DocPathEntry(jdkSourceZip, ""));
+        }
+        else {
+            File javaHomeParent = javaHome.getParentFile();
+            jdkSourceZip = new File(javaHomeParent, "src.zip");
+            if (jdkSourceZip.exists()) {
+                sourcePath.add(new DocPathEntry(jdkSourceZip, ""));
+            }
+            else {
+                // Mac OS X uses "src.jar" with a "src" prefix
+                jdkSourceZip = new File(javaHome, "src.jar");
+                if (jdkSourceZip.exists()) {
+                    sourcePath.add(new DocPathEntry(jdkSourceZip, "src"));
+                }
+            }
+        }
+        
+        String jdkSourcePath = Config.getPropString(JDK_SOURCE_PATH_PROPERTY, null);
+        if (jdkSourcePath != null) {
+            sourcePath.add(new DocPathEntry(new File(jdkSourcePath), ""));
+        }
+        
         this.projectDir = projectDir;
         inspectors = new HashMap<Object,Inspector>();
         packages = new TreeMap<String, Package>();
+        docuGenerator = new DocuGenerator(this);
 
         try {
-            packages.put("", new Package(this));
+            Package unnamed = new Package(this);
+            packages.put("", unnamed);
+            unnamed.refreshPackage();
         } catch (IOException exc) {
             Debug.reportError("could not read package file (unnamed package)");
         }
@@ -202,8 +241,6 @@ public class Project implements DebuggerListener, InspectorManager
         debugger.newClassLoader(getClassLoader());
         debugger.addDebuggerListener(this);
         debugger.launch();
-
-        docuGenerator = new DocuGenerator(this);
 
         // Check whether this is a shared project
         File ccfFile = new File(projectDir.getAbsoluteFile(), "team.defs");
@@ -340,22 +377,22 @@ public class Project implements DebuggerListener, InspectorManager
             proj.initialPackageName = startingPackageName;
         }
 
-        if(Config.isWinOSVista()) {
-        	WriteCapabilities capabilities = FileUtility.getVistaWriteCapabilities(projectDir);
-        	switch (capabilities) {
-			case VIRTUALIZED_WRITE:
-	        	DialogManager.showMessage(parent, "project-is-virtualized");
-				break;
-			case READ_ONLY:
-	            DialogManager.showMessage(parent, "project-is-readonly");
-				break;
-			case NORMAL_WRITE:
-				break;
-			default:
-				break;
-			}
+        if(Config.isModernWinOS()) {
+            WriteCapabilities capabilities = FileUtility.getVistaWriteCapabilities(projectDir);
+            switch (capabilities) {
+            case VIRTUALIZED_WRITE:
+                DialogManager.showMessage(parent, "project-is-virtualized");
+                break;
+            case READ_ONLY:
+                DialogManager.showMessage(parent, "project-is-readonly");
+                break;
+            case NORMAL_WRITE:
+                break;
+            default:
+                break;
+            }
         }
-    	else if (!projectDir.canWrite()) {
+        else if (!projectDir.canWrite()) {
             DialogManager.showMessage(parent, "project-is-readonly");
         }
         
@@ -716,19 +753,29 @@ public class Project implements DebuggerListener, InspectorManager
     }
 
     /**
+     * Return the source path for the project. The source path contains the JDK source,
+     * if available, and the source for any other libraries which have been explicitly
+     * added.
+     */
+    public List<DocPathEntry> getSourcePath()
+    {
+        return sourcePath;
+    }
+    
+    /**
      * Get the project repository. If the user cancels the credentials dialog,
      * or this is not a team project, returns null.
      */
     public Repository getRepository()
     {
-    	if (isSharedProject) {
-    	    return getTeamSettingsController().getRepository(true);
+        if (isSharedProject) {
+            return getTeamSettingsController().getRepository(true);
         }
         else {
             return null;
         }
     }      
-	
+        
     /**
      * A string which uniquely identifies this project
      */
@@ -747,11 +794,11 @@ public class Project implements DebuggerListener, InspectorManager
     }
 
     /**
-     * Get an existing package from the project. The package is opened (i.e an
-     * new Package is created) if it's not already open. All parent packages on
+     * Get an existing package from the project. The package is opened (i.e a new
+     * Package object is constructed) if it's not already open. All parent packages on
      * the way to the root of the package tree will also be constructed.
      * 
-     * @param qualifiedName package name ie java.util or "" for unnamed package
+     * @param qualifiedName package name i.e. java.util or "" for unnamed package
      * @returns  the package, or null if the package doesn't exist (directory
      *           doesn't exist, or doesn't contain bluej.pkg file)
      */
@@ -777,6 +824,7 @@ public class Project implements DebuggerListener, InspectorManager
                     pkg = new Package(this, JavaNames.getBase(qualifiedName),
                             parent);
                     packages.put(qualifiedName, pkg);
+                    pkg.refreshPackage();
                 } else { // parent package does not exist. How can it not exist ?
                     pkg = null;
                 }
@@ -875,7 +923,8 @@ public class Project implements DebuggerListener, InspectorManager
      * @return Project.NEW_PACKAGE_DONE, Project.NEW_PACKAGE_EXIST,
      *         Project.NEW_PACKAGE_BAD_NAME
      */
-    public int newPackage(String qualifiedName) {
+    public int newPackage(String qualifiedName)
+    {
         if (qualifiedName == null) {
             return NEW_PACKAGE_BAD_NAME;
         }
@@ -906,6 +955,7 @@ public class Project implements DebuggerListener, InspectorManager
             Package pkg = new Package(this, JavaNames.getBase(qualifiedName),
                     parent);
             packages.put(qualifiedName, pkg);
+            pkg.refreshPackage();
         } catch (IOException exc) {
             return NEW_PACKAGE_BAD_NAME;
         }
@@ -992,7 +1042,7 @@ public class Project implements DebuggerListener, InspectorManager
 
     public void saveAllEditors()
     {
-    	Iterator<Package> i = packages.values().iterator();
+        Iterator<Package> i = packages.values().iterator();
 
         while(i.hasNext()) {
             Package pkg = (Package) i.next();
@@ -1009,11 +1059,11 @@ public class Project implements DebuggerListener, InspectorManager
      * Make all the Packages in this project save their graphlayout
      */
     public void saveAllGraphLayout(){
-    	Iterator<Package> i = packages.values().iterator();
+        Iterator<Package> i = packages.values().iterator();
  
         while(i.hasNext()) {
             Package pkg = (Package) i.next();
-				pkg.save(null);
+                                pkg.save(null);
         }
     }
     
@@ -1039,13 +1089,13 @@ public class Project implements DebuggerListener, InspectorManager
      */
     public void clearAllSelections()
     {
-    	Iterator<Package> i = packages.values().iterator();
+        Iterator<Package> i = packages.values().iterator();
 
         while(i.hasNext()) {
             Package pkg = (Package) i.next();
             PackageEditor editor = pkg.getEditor();
             if (editor != null){
-            	editor.clearSelection();
+                editor.clearSelection();
             }
         }
     }
@@ -1123,14 +1173,14 @@ public class Project implements DebuggerListener, InspectorManager
      */
     private List<Target> getSelectedTargets()
     {
-    	List<Target> selectedTargets = new LinkedList<Target>();
-    	List<String> packageNames = getPackageNames();
-    	for (Iterator<String> i = packageNames.iterator(); i.hasNext();) {
-    	    String packageName = i.next();
-    	    Package p = getPackage(packageName);
-    	    selectedTargets.addAll(Arrays.asList(p.getSelectedTargets()));
-    	}
-    	return selectedTargets;
+        List<Target> selectedTargets = new LinkedList<Target>();
+        List<String> packageNames = getPackageNames();
+        for (Iterator<String> i = packageNames.iterator(); i.hasNext();) {
+            String packageName = i.next();
+            Package p = getPackage(packageName);
+            selectedTargets.addAll(Arrays.asList(p.getSelectedTargets()));
+        }
+        return selectedTargets;
     }
     
     /**
@@ -1448,7 +1498,7 @@ public class Project implements DebuggerListener, InspectorManager
 
         try {
             // Junit is always part of the project libraries, only Junit, not the core Bluej.
-			//   pathList.add( Boot.getInstance().getJunitLib().toURI().toURL());
+                        //   pathList.add( Boot.getInstance().getJunitLib().toURI().toURL());
             
             // Until the rest of BlueJ is clean we also need to add bluejcore
             // It should be possible to run BlueJ only with Junit
@@ -1494,6 +1544,25 @@ public class Project implements DebuggerListener, InspectorManager
         return currentClassLoader;
     }
 
+    /**
+     * Get an entity resolver which can be used to resolve symbols for this project.
+     * 
+     * @return an entity resolver which resolves symbols from classes in this project,
+     *         and from the classpath.
+     */
+    public EntityResolver getEntityResolver()
+    {
+        return new ProjectEntityResolver(this);
+    }
+    
+    /**
+     * Get a javadoc resolver, which can be used to retrieve comments for methods.
+     */
+    public JavadocResolver getJavadocResolver()
+    {
+        return javadocResolver;
+    }
+    
     /**
      * Converts a list of URLs into a list of Strings.
      * @param urlList List of URLs to convert to Strings.
@@ -1611,7 +1680,7 @@ public class Project implements DebuggerListener, InspectorManager
                             break;
 
                             //case DebuggerEvent.THREAD_CONTINUE:
-                            //	break;
+                            //  break;
                         case DebuggerEvent.THREAD_SHOWSOURCE:
                             pkg.showSourcePosition(thr);
 

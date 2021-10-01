@@ -33,13 +33,13 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.OutputStreamWriter;
 import java.io.PrintStream;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 import java.util.Properties;
-import java.util.StringTokenizer;
 
 import javax.swing.ImageIcon;
 import javax.swing.KeyStroke;
@@ -77,14 +77,13 @@ import bluej.utility.Utility;
  * @author Michael Cahill
  * @author Michael Kolling
  * @author Andrew Patterson
- * @version $Id: Config.java 6689 2009-09-16 14:18:42Z davmac $
  */
 
 public final class Config
 {
     public static final String nl = System.getProperty("line.separator");
 
-    // bluej configuration properties heirarchy
+    // bluej configuration properties hierarchy
     // (command overrides user which overrides system)
     
     private static Properties systemProps;      // bluej.defs
@@ -152,6 +151,9 @@ public final class Config
                     new Color(195, 195, 195)));
    
     private static Color selectionColour;
+    private static Color selectionColour2;
+    private static Color highlightColour;
+    private static Color highlightColour2;
     private static List<String> debugVMArgs = new ArrayList<String>();
     
     /** whether this is the debug vm or not. */
@@ -383,7 +385,7 @@ public final class Config
     }
     
     /**
-     * True if this is the debugVM false if not.
+     * True if this is the debugVM or false if not.
      */
     public static boolean isDebugVM() 
     {
@@ -404,7 +406,16 @@ public final class Config
     public static boolean isMacOSLeopard()
     {
         return osname.startsWith("Mac") &&
-               System.getProperty("os.version").compareTo("10.5") >= 0;
+                System.getProperty("os.version").compareTo("10.5") >= 0;
+    }
+    
+    /**
+     * Tell use whether we are running on MacOS 10.6 (Snow Leopard) or later
+     */
+    public static boolean isMacOSSnowLeopard()
+    {
+        return osname.startsWith("Mac") &&
+                System.getProperty("os.version").compareTo("10.6") >= 0;
     }
     
     /**
@@ -416,12 +427,12 @@ public final class Config
     }
     
     /**
-     * Tell us whether we are running on MS Windows Vista or a later Windows version
+     * True if OS is Windows Vista or newer.
      */
-    public static boolean isWinOSVista()
+    public static boolean isModernWinOS()
     {
-                return isWinOS()
-                                && System.getProperty("os.version").compareTo("6.0") >= 0;
+        return isWinOS()
+                && System.getProperty("os.version").compareTo("6.0") >= 0;
     }
     
     /**
@@ -536,7 +547,7 @@ public final class Config
                         new PrintStream(new FileOutputStream(debugLogFile));
                     System.setOut(outStream);
                     System.setErr(outStream);
-                    Debug.setDebugStream(outStream);
+                    Debug.setDebugStream(new OutputStreamWriter(outStream));
 
                     Debug.message(getApplicationName() + " run started: " + new Date());
                     if(isGreenfoot())
@@ -565,7 +576,7 @@ public final class Config
         // - we are on the debug VM (and in Greenfoot) or
         // - bluej.debug=true or
         // - creating the debug log failed
-        Debug.setDebugStream(System.out);
+        Debug.setDebugStream(new OutputStreamWriter(System.out));
     }
     
     /**
@@ -992,7 +1003,6 @@ public final class Config
     {
         try {
             java.net.URL u = getImageFile(propname).toURI().toURL();
-
             return new ImageIcon(u);
         }
         catch (java.net.MalformedURLException mue) { }
@@ -1000,6 +1010,21 @@ public final class Config
         return null;
     }
     
+    /**
+     * Return an icon for an image file name, without going through bluej.defs.
+     * The parameter specifies the final image name, not a property.
+     */
+    public static ImageIcon getFixedImageAsIcon(String filename)
+    {
+        File image = new File(bluejLibDir, "images" + File.separator + filename);
+        try {
+            return new ImageIcon(image.toURI().toURL());
+        }
+        catch (java.net.MalformedURLException mue) { }
+        catch (NullPointerException npe) { }
+        return null;
+    }
+
     /**
      * Find and return the icon for an image, without using the properties
      * (the name provided is the actual file name in ../lib/images).
@@ -1084,14 +1109,14 @@ public final class Config
                 if (jdkPath != null) {
                     binPath = new File(jdkPath, "bin");
 
-                                        // try to find normal (unix??) executable
+                    // try to find normal (unix??) executable
                     potentialExe = new File(binPath, executableName);
                     if(potentialExe.exists())
                         return potentialExe.getAbsolutePath();
-                                        // try to find windows executable
-                                        potentialExe = new File(binPath, executableName + ".exe");
-                                        if(potentialExe.exists())
-                                                return potentialExe.getAbsolutePath();
+                        // try to find windows executable
+                        potentialExe = new File(binPath, executableName + ".exe");
+                        if(potentialExe.exists())
+                            return potentialExe.getAbsolutePath();
                 }
             }
 
@@ -1203,6 +1228,38 @@ public final class Config
     }
     
     /**
+     * Return a color value from the bluej properties.
+     * 
+     * If the value is not present, return null
+     */
+    public static Color getOptionalItemColour(String itemname)
+    {
+        try {
+            String rgbStr = getPropString(itemname, null);
+            if (rgbStr == null) {
+                return null;
+            } else {
+                String rgbVal[] = Utility.split(rgbStr, ",");
+
+                if (rgbVal.length < 3)
+                    Debug.reportError("Error reading colour ["+itemname+"]");
+                else {
+                    int r = Integer.parseInt(rgbVal[0].trim());
+                    int g = Integer.parseInt(rgbVal[1].trim());
+                    int b = Integer.parseInt(rgbVal[2].trim());
+
+                    return new Color(r, g, b);
+                }
+            }
+        }
+        catch(Exception e) {
+            Debug.reportError("Could not get colour for " + itemname);
+        }
+
+        return null;
+    }
+    
+    /**
      * Return a color value for selections.
      */
     public static Color getSelectionColour()
@@ -1212,7 +1269,40 @@ public final class Config
         }
         return selectionColour;
     }
-    
+
+    /**
+     * Return the second (gradient) color value for selections.
+     */
+    public static Color getSelectionColour2()
+    {
+        if(selectionColour2 == null) {
+            selectionColour2 = Config.getItemColour("colour.selection2");
+        }
+        return selectionColour2;
+    }
+
+    /**
+     * Return a color value for selections.
+     */
+    public static Color getHighlightColour()
+    {
+        if(highlightColour == null) {
+            highlightColour = Config.getItemColour("colour.highlight");
+        }
+        return highlightColour;
+    }
+
+    /**
+     * Return the second (gradient) color value for selections.
+     */
+    public static Color getHighlightColour2()
+    {
+        if(highlightColour2 == null) {
+            highlightColour2 = Config.getItemColour("colour.highlight2");
+        }
+        return highlightColour2;
+    }
+
     /**
      * Get a font from a specified property, using the given default font name and
      * the given size. Font name can end with "-bold" to indicate bold style.
@@ -1389,6 +1479,7 @@ public final class Config
             }
             else if(laf.equals("crossplatform")) {
                 UIManager.setLookAndFeel(UIManager.getCrossPlatformLookAndFeelClassName());
+                usingMacOSScreenMenubar = false; // Screen menu bar requires aqua look-and-feel
                 return;
             }
             
@@ -1403,6 +1494,7 @@ public final class Config
                 
                 // Try as a class name
                 UIManager.setLookAndFeel(laf);
+                return;
             }
             
             // do the "default, ie. let BlueJ decide
@@ -1435,39 +1527,69 @@ public final class Config
         if(args != null && !args.equals("bluej.vm.args")) {
             // if there is more than one arg set
             List<String> splitArgs = splitVMArgs(args);
-                debugVMArgs.addAll(splitArgs);
+            debugVMArgs.addAll(splitArgs);
         }        
     }
     
      /**
      * Splits VM args String into separate args including handling quotes
-     * used for file paths with spaces. 
+     * used for file paths with spaces.<p>
+     * 
+     * Backslash can be used to quote any character including whitespace or
+     * quote, or itself. (In the bluej.defs file, a backslash must be
+     * doubled as properties processing also treats it as an escape).
+     * 
      * @param str - the string to be split
      * @returns an array of Strings
      */
     private static List<String> splitVMArgs(String str)
     {
-        boolean inQuote = false;
         List<String> strings = new ArrayList<String>();
-        StringTokenizer t = new StringTokenizer(str, " ", true);
-        while(t.hasMoreTokens()) {
-            String arg = t.nextToken();
-            // if we have a "
-            if(arg.indexOf("\"")!= -1) {
-                inQuote = true;
-                while(t.hasMoreTokens() && inQuote == true) {
-                    String next = t.nextToken();
-                    arg = arg + next;
-                    if(next.indexOf("\"") != -1) {
-                        inQuote = false;
+        
+        int i = 0;
+        while (i < str.length()) {
+            // Skip white space
+            while (i < str.length() && Character.isWhitespace(str.charAt(i))) {
+                i++;
+            }
+            
+            StringBuffer arg = new StringBuffer();
+            char c = str.charAt(i++);
+            
+            do {
+                if (c == '\\') {
+                    if (i < str.length()) {
+                        arg.append(str.charAt(i++));
                     }
                 }
-                strings.add(arg); 
-            }
-            else if(!arg.equals(" ")) {
-                strings.add(arg);
-            }
+                else if (c == '\"') {
+                    // Process quoted string
+                    while (i < str.length()) {
+                        c = str.charAt(i++);
+                        if (c == '\"') {
+                            break;
+                        }
+                        if (c == '\\') {
+                            if (i < str.length()) {
+                                arg.append(str.charAt(i++));
+                            }
+                        }
+                        else {
+                            arg.append(c);
+                        }
+                    }
+                }
+                else if (Character.isWhitespace(c)) {
+                    break;
+                }
+                else {
+                    arg.append(c);
+                }
+                c = str.charAt(i++);
+            } while (i < str.length());
+            strings.add(arg.toString());
         }
+        
         return strings;
     }
     

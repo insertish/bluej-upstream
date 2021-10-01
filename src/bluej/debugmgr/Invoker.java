@@ -38,11 +38,9 @@ import bluej.compiler.JobQueue;
 import bluej.debugger.Debugger;
 import bluej.debugger.DebuggerResult;
 import bluej.debugger.ExceptionDescription;
-import bluej.debugger.gentype.GenTypeSolid;
-import bluej.debugger.gentype.GenTypeWildcard;
+import bluej.debugger.gentype.GenTypeParameter;
 import bluej.debugger.gentype.JavaType;
 import bluej.debugger.gentype.NameTransform;
-import bluej.debugger.gentype.TextType;
 import bluej.debugmgr.objectbench.ObjectWrapper;
 import bluej.pkgmgr.Package;
 import bluej.pkgmgr.PkgMgrFrame;
@@ -61,7 +59,7 @@ import bluej.views.MethodView;
  * resulting class file and executes a method in a new thread.
  * 
  * @author Michael Kolling
- * @version $Id: Invoker.java 6703 2009-09-17 04:48:20Z davmac $
+ * @version $Id: Invoker.java 7006 2010-01-13 05:08:52Z marionz $
  */
 
 public class Invoker
@@ -92,7 +90,7 @@ public class Invoker
     private CallableView member;
     private String shellName;
     private String objName;
-    private Map<?, ?> typeMap; // map type parameter names to types
+    private Map<String,GenTypeParameter> typeMap; // map type parameter names to types
     private ValueCollection localVars;
     private String imports; // import statements to include in shell file
     private boolean doTryAgain = false; // whether to re-try
@@ -172,7 +170,7 @@ public class Invoker
         }
         else if (member instanceof MethodView) {
             constructing = false;
-                executionEvent = new ExecutionEvent(pkg, member.getClassName(), null );
+        	executionEvent = new ExecutionEvent(pkg, member.getClassName(), null );
         }
         else {
             Debug.reportError("illegal member type in invocation");
@@ -248,8 +246,7 @@ public class Invoker
         }
         
         if (!Config.isGreenfoot()) {
-            boolean isStatic = constructing || member.isStatic();
-            if (!pkg.getProject().getExecControls().processDebuggerState(pmf, isStatic)) {
+            if (!pmf.checkDebuggerState()) {
                 return;
             }
         }
@@ -270,6 +267,10 @@ public class Invoker
             }
             else {
                 mDialog.setInstanceInfo(objName, typeMap);
+                String methodName=null;
+                if (member instanceof MethodView)
+                    methodName=((MethodView) member).getName();
+                mDialog.setCallLabel(member.getClassName(),methodName);
             }
 
             mDialog.setEnabled(true);
@@ -285,7 +286,7 @@ public class Invoker
      */
     public void tryAgain()
     {
-        doTryAgain = true;
+    	doTryAgain = true;
     }
 
     // -- CallDialogWatcher interface --
@@ -369,16 +370,6 @@ public class Invoker
         if (! member.isGeneric() || member.isConstructor()) {
             for (int i = 0; i < numArgs; i++) {
                 JavaType argType = argTypes[i];
-                
-                if (argType instanceof GenTypeWildcard) {
-                    GenTypeSolid [] ubounds = ((GenTypeWildcard) argType).getUpperBounds();
-                    
-                    if (ubounds.length != 0)
-                        argType = ubounds[0];
-                    else
-                        argType = new TextType("java.lang.Object");
-                }
-                
                 argTypeStrings[i] = argType.toString(new CleverQualifyTypeNameTransform(pkg));
             }
         }
@@ -507,12 +498,12 @@ public class Invoker
             // goes into an infinite loop can hang BlueJ.
             new Thread() {
                 public void run() {
-                        EventQueue.invokeLater(new Runnable() {
-                                public void run() {
+                	EventQueue.invokeLater(new Runnable() {
+                		public void run() {
                             closeCallDialog();
-                                }
-                        });
-                        
+                		}
+                	});
+                	
                     final DebuggerResult result = pkg.getProject().getDebugger().instantiateClass(className);
                     
                     EventQueue.invokeLater(new Runnable() {
@@ -1074,9 +1065,9 @@ public class Invoker
         deleteShellFiles();
         
         if (! successful && doTryAgain) {
-                doTryAgain = false;
-                doFreeFormInvocation(null);
-                return;
+        	doTryAgain = false;
+        	doFreeFormInvocation(null);
+        	return;
         }
         
         if (! successful && dialog != null) {

@@ -25,19 +25,17 @@ import java.util.*;
 
 /**
  * Represent a (possibly generic) type. This can include wildcard types,
- * type parameters, etc; ie. anything that JDK 1.5 "Type" can represent. But 
- * this works for java 1.4 as well...
+ * type parameters, etc; ie. anything that JDK 1.5 "Type" can represent. 
  * 
  * Objects of this type are immutable.
  * 
  * @author Davin McCall
- * @version $Id: GenTypeClass.java 6215 2009-03-30 13:28:25Z polle $
  */
-public class GenTypeClass extends GenTypeSolid {
-
+public class GenTypeClass extends GenTypeSolid
+{
     // ---------- Instance fields -----------
     
-    protected List params = null; // List of GenTypeParameterizable's: type parameters
+    protected List<? extends GenTypeParameter> params = null; // List of GenTypeParameterizable's: type parameters
     protected Reflective reflective = null;
     protected GenTypeClass outer = null; // outer class of this class
     
@@ -60,11 +58,9 @@ public class GenTypeClass extends GenTypeSolid {
      * @param params  A list of GenTypeParameterizables giving the type
      *                  parameters in declaration order
      */
-    public GenTypeClass(Reflective r, List params)
+    public GenTypeClass(Reflective r, List<GenTypeParameter> params)
     {
-        reflective = r;
-        if( params != null && ! params.isEmpty() )
-            this.params = params;
+        this(r, params, null);
     }
     
     /**
@@ -77,10 +73,10 @@ public class GenTypeClass extends GenTypeSolid {
      * constructor is equivalent to GenTypeClass(r, params). 
      * 
      * @param r  The Reflective representing the class.
-     * @param params  A list of GenTypeParameterizables giving the type
+     * @param params  A list of GenTypeParameter giving the type
      *                  parameters in declaration order
      */
-    public GenTypeClass(Reflective r, List params, GenTypeClass outer)
+    public GenTypeClass(Reflective r, List<? extends GenTypeParameter> params, GenTypeClass outer)
     {
         reflective = r;
         if( params != null && ! params.isEmpty() )
@@ -95,27 +91,30 @@ public class GenTypeClass extends GenTypeSolid {
      * is treated as a raw type.
      * 
      * @param r  The Reflective representing the class.
-     * @param mparams  A map of String -> GenTypeParameterizable giving the
+     * @param mparams  A map of String -> GenTypeParameter giving the
      *                 type parameters. The map may be modified (if it is not
      *                 empty) by this constructor.
      */
-    public GenTypeClass(Reflective r, Map mparams)
+    public GenTypeClass(Reflective r, Map<String,GenTypeParameter> mparams)
     {
         reflective = r;
         
         // if mparams == null, this is a raw type. Nothing more to do.
-        if (mparams == null)
+        if (mparams == null) {
             return;
+        }
         
-        params = new ArrayList();
-        Iterator declParmsI = r.getTypeParams().iterator();
+        List<GenTypeParameter> params = new ArrayList<GenTypeParameter>();
+        this.params = params;
+        
+        Iterator<GenTypeDeclTpar> declParmsI = r.getTypeParams().iterator();
         while( declParmsI.hasNext() ) {
-            GenTypeDeclTpar next = (GenTypeDeclTpar)declParmsI.next();
+            GenTypeDeclTpar next = declParmsI.next();
             String nextName = next.getTparName();
             if(mparams.get(nextName) == null)
                 params.add(new GenTypeExtends(next.getBound()));
             else {
-                params.add(mparams.get(nextName));
+                params.add((GenTypeParameter) mparams.get(nextName));
                 mparams.remove(nextName);
             }
         }
@@ -144,36 +143,35 @@ public class GenTypeClass extends GenTypeSolid {
         return this;
     }
     
-    public JavaType getErasedType()
+    public GenTypeClass getErasedType()
     {
         return new GenTypeClass(reflective);
     }
-    
+        
     /**
-     * Get the raw name of the type. The name returned is encoded so that it
-     * can be passed to a ClassLoader's "loadClass" method (ie, dots between
-     * outer and inner class names are changed to $).
-     * 
-     * @return the raw name
+     * Get the name of the type as known to the classloader. The name returned is
+     * encoded so that it can be passed to a ClassLoader's "loadClass" method (dots
+     * between outer and inner class names are changed to '$', and arrays are
+     * encoded).
      */
-    public String rawName()
+    public String classloaderName()
     {
         return reflective.getName();
     }
     
     public String arrayComponentName()
     {
-        return "L" + rawName() + ";";
+        return "L" + classloaderName() + ";";
     }
     
     /**
      * Return an unmodifiable list of the type parameters applied to the
      * innermost class in this generic type. 
      */
-    public List getTypeParamList()
+    public List<? extends GenTypeParameter> getTypeParamList()
     {
         if (params == null)
-            return Collections.EMPTY_LIST;
+            return Collections.emptyList();
         else
             return params;
     }
@@ -225,9 +223,10 @@ public class GenTypeClass extends GenTypeSolid {
         // and it is not possible for the inner class to be raw if the outer
         // is not also raw (or, if it is, the outer should be treated as
         // raw anyway).
-        if (outer != null)
+        if (outer != null) {
             return false;
-        List formalParams = reflective.getTypeParams();
+        }
+        List<?> formalParams = reflective.getTypeParams();
         return params == null && ! formalParams.isEmpty();
     }
 
@@ -239,7 +238,7 @@ public class GenTypeClass extends GenTypeSolid {
     // transform is only applied to outermost class
     public String toString(NameTransform nt)
     {
-        String baseClass = rawName();
+        String baseClass = classloaderName();
 
         if (outer != null) {
             int i = baseClass.lastIndexOf('$');
@@ -258,8 +257,8 @@ public class GenTypeClass extends GenTypeSolid {
         if(params == null)
             return baseClass;
         String r = baseClass + '<';
-        for(Iterator i = params.iterator(); i.hasNext(); ) {
-            r += ((GenTypeParameterizable)i.next()).toTypeArgString(nt);
+        for(Iterator<? extends GenTypeParameter> i = params.iterator(); i.hasNext(); ) {
+            r += i.next().toTypeArgString(nt);
             if( i.hasNext() )
                 r += ',';
         }
@@ -272,19 +271,29 @@ public class GenTypeClass extends GenTypeSolid {
         return toString(nt);
     }
     
-    public boolean equals(GenTypeParameterizable other)
+    public boolean equals(JavaType other)
     {
         if (other == this)
             return true;
         if (other == null)
             return false;
-        if (other.getClass() != GenTypeClass.class)
-            return false;
         
-        GenTypeClass oClass = (GenTypeClass)other;
+        GenTypeClass oClass = other.asClass();
+        if (oClass == null) {
+            return false;
+        }
+        
+        JavaType arrayComponent = getArrayComponent();
+        JavaType oarrayComponent = oClass.getArrayComponent();
+        if (arrayComponent != null) {
+            return arrayComponent.equals(oarrayComponent);
+        }
+        else if (oarrayComponent != null) {
+            return false;
+        }
         
         // the class name must match
-        if (! rawName().equals(oClass.rawName()))
+        if (! classloaderName().equals(oClass.classloaderName()))
             return false;
         
         // outer class (if any) must match
@@ -301,17 +310,14 @@ public class GenTypeClass extends GenTypeSolid {
         if (params != null && oClass.params == null)
             return false;
         
-        Iterator i = params.iterator();
-        Iterator j = oClass.params.iterator();
+        Iterator<? extends GenTypeParameter> i = params.iterator();
+        Iterator<? extends GenTypeParameter> j = oClass.params.iterator();
         
         // All the parameter types must match...
         while( i.hasNext() ) {
-            if( ! j.hasNext() )
+            if( ! j.hasNext() || ! i.next().equals(j.next())) {
                 return false;
-            GenTypeParameterizable iNext = (GenTypeParameterizable)i.next();
-            GenTypeParameterizable jNext = (GenTypeParameterizable)j.next();
-            if( ! iNext.equals(jNext) )
-                return false;
+            }
         }
         
         // and there must be the same number of parameters
@@ -321,6 +327,10 @@ public class GenTypeClass extends GenTypeSolid {
         return true;
     }
     
+    /**
+     * Get the reflective represented by this GenTypeClass. This can return null
+     * if the GenTypeClass represents an array.
+     */
     public Reflective getReflective()
     {
         return reflective;
@@ -363,11 +373,11 @@ public class GenTypeClass extends GenTypeSolid {
                 return false;
             while (cclass != null) {
                 if (cclass.params != null) {
-                    Iterator i = cclass.params.iterator();
-                    Iterator j = tclass.params.iterator();
+                    Iterator<? extends GenTypeParameter> i = cclass.params.iterator();
+                    Iterator<? extends GenTypeParameter> j = tclass.params.iterator();
                     while (i.hasNext()) {
-                        GenTypeParameterizable cpar = (GenTypeParameterizable) i.next();
-                        GenTypeParameterizable tpar = (GenTypeParameterizable) j.next();
+                        GenTypeParameter cpar = i.next();
+                        GenTypeParameter tpar = j.next();
                         if (! cpar.contains(tpar))
                             return false;
                     }
@@ -389,11 +399,6 @@ public class GenTypeClass extends GenTypeSolid {
         return false;
     }
     
-    public boolean contains(GenTypeParameterizable other)
-    {
-        return this.equals(other);
-    }
-    
     public boolean isAssignableFrom(GenTypeClass c)
     {
         Reflective r = c.reflective;
@@ -411,11 +416,11 @@ public class GenTypeClass extends GenTypeSolid {
             }
             
             if (params != null) {
-                Iterator i = params.iterator();
-                Iterator j = other.params.iterator();
+                Iterator<? extends GenTypeParameter> i = params.iterator();
+                Iterator<? extends GenTypeParameter> j = other.params.iterator();
                 while (i.hasNext()) {
-                    GenTypeParameterizable myParam = (GenTypeParameterizable) i.next();
-                    GenTypeParameterizable oParam = (GenTypeParameterizable) j.next();
+                    GenTypeParameter myParam = i.next();
+                    GenTypeParameter oParam = j.next();
                     if (! myParam.contains(oParam))
                         return false;
                 }
@@ -457,7 +462,7 @@ public class GenTypeClass extends GenTypeSolid {
      */
     public GenTypeClass mapToSuper(String basename)
     {
-        if( rawName().equals(basename))
+        if( classloaderName().equals(basename))
             return this;
         
         // the base type could actually be an interface, or a base class. 
@@ -509,7 +514,7 @@ public class GenTypeClass extends GenTypeSolid {
      *                 can be null to return the raw type.
      * @return the corresponding type structure, with parameters mapped.
      */
-    public JavaType mapTparsToTypes(Map tparams)
+    public GenTypeClass mapTparsToTypes(Map<String, ? extends GenTypeParameter> tparams)
     {
         // If there are no generic parameters, there's nothing to map...
         if( params == null && outer == null )
@@ -520,7 +525,7 @@ public class GenTypeClass extends GenTypeSolid {
         if (params != null) {
             Iterator i = params.iterator();
             while( i.hasNext() ) {
-                retlist.add(((GenTypeParameterizable)i.next()).mapTparsToTypes(tparams));
+                retlist.add(((GenTypeParameter)i.next()).mapTparsToTypes(tparams));
             }
         }
         
@@ -539,12 +544,12 @@ public class GenTypeClass extends GenTypeSolid {
         
         // One simple class is when super class = this.
         // TODO don't use class names as equality test
-        if( derivedType.getName().equals(rawName()))
+        if( derivedType.getName().equals(classloaderName()))
             return this;
         
         // Construct a list (actually a stack) of classes from the
         // super type down to this type.
-        Stack classes = getInheritanceChain(derivedType, rawName());
+        Stack classes = getInheritanceChain(derivedType, classloaderName());
         if( classes == null )
             return null;
         
@@ -560,7 +565,7 @@ public class GenTypeClass extends GenTypeSolid {
             HashMap newMap = new HashMap();
            
             // Check that the super inherits from the generic version of base
-            GenTypeClass baseDecl = curSubtype.superTypeByName(curBaseC.rawName());
+            GenTypeClass baseDecl = curSubtype.superTypeByName(curBaseC.classloaderName());
             if (baseDecl.isRaw())
                 return new GenTypeClass(derivedType);
             
@@ -587,12 +592,12 @@ public class GenTypeClass extends GenTypeSolid {
      * 
      * @return the map (of String -> GenTypeParameterizable).
      */
-    public Map getMap()
+    public Map<String,GenTypeParameter> getMap()
     {
         if (isRaw())
             return null;
         
-        HashMap r = new HashMap();
+        HashMap<String,GenTypeParameter> r = new HashMap<String,GenTypeParameter>();
         mergeMap(r);
         return r;
     }
@@ -603,21 +608,21 @@ public class GenTypeClass extends GenTypeSolid {
      * 
      * The returned does not indicate if this type is a raw type.
      */
-    public void mergeMap(Map m)
+    public void mergeMap(Map<String, GenTypeParameter> m)
     {
         if (outer != null)
             outer.mergeMap(m);
 
-        List formalParams = reflective.getTypeParams();
+        List<GenTypeDeclTpar> formalParams = reflective.getTypeParams();
         if( params == null )
             return;
-        Iterator paramIterator = params.iterator();
-        Iterator formalIterator = formalParams.iterator();
+        Iterator<? extends GenTypeParameter> paramIterator = params.iterator();
+        Iterator<GenTypeDeclTpar> formalIterator = formalParams.iterator();
         
         // go through each type parameter, assign it the type from our
         // params list.
         while( paramIterator.hasNext() ) {
-            JavaType paramType = (JavaType)paramIterator.next();
+            GenTypeParameter paramType = paramIterator.next();
             GenTypeDeclTpar formalType = (GenTypeDeclTpar)formalIterator.next();
             
             String paramName = formalType.getTparName();
@@ -631,20 +636,21 @@ public class GenTypeClass extends GenTypeSolid {
      * A and C is "A,B,C". Likewise, if D implements E which extends F, the
      * chain between D and F is "D,E,F".
      * 
-     * returns a Stack of ReflectiveType.
+     * returns a Stack of Reflective.
      */
-    private static Stack getInheritanceChain(Reflective top, String bottom)
+    private static Stack<Reflective> getInheritanceChain(Reflective top, String bottom)
     {
-        Stack r = new Stack();
+        Stack<Reflective> r = new Stack<Reflective>();
         r.push(top);
-        if( top.getName().equals(bottom ))
+        if( top.getName().equals(bottom )) {
             return r;
+        }
         
         // Go through each base/interface and try to discover the hieararchy
-        List l = top.getSuperTypesR();
-        for(Iterator i = l.iterator(); i.hasNext(); ) {
-            Reflective next = (Reflective)i.next();
-            Stack r2 = getInheritanceChain(next, bottom);
+        List<Reflective> l = top.getSuperTypesR();
+        for(Iterator<Reflective> i = l.iterator(); i.hasNext(); ) {
+            Reflective next = i.next();
+            Stack<Reflective> r2 = getInheritanceChain(next, bottom);
             if( r2 != null ) {
                 r.addAll(r2);
                 return r;
@@ -656,7 +662,7 @@ public class GenTypeClass extends GenTypeSolid {
     /*
      * see bluej.debugger.gentype.GenTypeSolid#getParamsFromTemplate(java.util.Map, bluej.debugger.gentype.GenTypeParameterizable)
      */
-    public void getParamsFromTemplate(Map r, GenTypeParameterizable template)
+    public void getParamsFromTemplate(Map r, GenTypeParameter template)
     {
         // We are classA<...>, template could be anything.
         // possibilities for template:
@@ -669,11 +675,11 @@ public class GenTypeClass extends GenTypeSolid {
         
         if (template instanceof GenTypeClass) {
             GenTypeClass classTemplate = (GenTypeClass) template;
-            if (classTemplate.rawName().equals(rawName())) {
+            if (classTemplate.classloaderName().equals(classloaderName())) {
                 if (params == null || classTemplate.params == null)
                     return;
-                Iterator i = params.iterator();
-                Iterator j = classTemplate.params.iterator();
+                Iterator<? extends GenTypeParameter> i = params.iterator();
+                Iterator<? extends GenTypeParameter> j = classTemplate.params.iterator();
 
                 // Handle case that this is an inner class
                 if (outer != null)
@@ -682,7 +688,7 @@ public class GenTypeClass extends GenTypeSolid {
                 // loop through each parameter
                 while (i.hasNext() && j.hasNext()) {
                     GenTypeSolid ip = (GenTypeSolid) i.next();
-                    GenTypeParameterizable jp = (GenTypeParameterizable) j.next();
+                    GenTypeParameter jp = j.next();
 
                     ip.getParamsFromTemplate(r, jp);
                 }
@@ -692,9 +698,9 @@ public class GenTypeClass extends GenTypeSolid {
         return;
     }
     
-    public void erasedSuperTypes(Set s)
+    public void erasedSuperTypes(Set<Reflective> s)
     {
-        Stack refs = new Stack();
+        Stack<Reflective> refs = new Stack<Reflective>();
         refs.push(reflective);
         
         while(! refs.empty()) {
@@ -711,5 +717,11 @@ public class GenTypeClass extends GenTypeSolid {
     public GenTypeClass [] getReferenceSupertypes()
     {
         return new GenTypeClass[] {this};
+    }
+    
+    @Override
+    public GenTypeClass getArray()
+    {
+        return new GenTypeArrayClass(reflective.getArrayOf(), this);
     }
 }

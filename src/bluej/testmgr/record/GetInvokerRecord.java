@@ -107,17 +107,10 @@ public class GetInvokerRecord extends InvokerRecord
     public String toExpression()
     {
         if(! objType.equals(fieldType)) {
-            return "((" + objType + ") " + parentIr.toExpression() + parentIr.getExpressionGlue() + fieldName + ")";
+            return "((" + objType + ") " + parentIr.toExpression() + "." + fieldName + ")";
         }
         else {
-            return parentIr.toExpression() + parentIr.getExpressionGlue() + fieldName;
+            return parentIr.toExpression() + "." + fieldName;
         }
     }
-
-    @Override
-    public String getExpressionGlue()
-    {
-        throw new RuntimeException("Method not implemented for this type.");
-    }    
-
 }

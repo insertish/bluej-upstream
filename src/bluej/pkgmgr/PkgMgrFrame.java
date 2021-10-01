@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2010  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -21,17 +21,66 @@
  */
 package bluej.pkgmgr;
 
-import java.awt.*;
-import java.awt.event.*;
+import java.awt.BorderLayout;
+import java.awt.Component;
+import java.awt.Container;
+import java.awt.Cursor;
+import java.awt.Dimension;
+import java.awt.EventQueue;
+import java.awt.Font;
+import java.awt.Frame;
+import java.awt.Insets;
+import java.awt.KeyboardFocusManager;
+import java.awt.Point;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
+import java.awt.event.FocusEvent;
+import java.awt.event.FocusListener;
+import java.awt.event.MouseEvent;
+import java.awt.event.MouseListener;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 import java.awt.print.PageFormat;
+import java.awt.print.Paper;
 import java.awt.print.PrinterJob;
-import java.io.*;
-import java.util.*;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
+import java.util.ListIterator;
+import java.util.Properties;
+import java.util.StringTokenizer;
 import java.util.jar.JarEntry;
 import java.util.jar.JarInputStream;
 
-import javax.swing.*;
+import javax.swing.AbstractButton;
+import javax.swing.Action;
+import javax.swing.BorderFactory;
+import javax.swing.Box;
+import javax.swing.BoxLayout;
+import javax.swing.ButtonModel;
+import javax.swing.JButton;
+import javax.swing.JCheckBoxMenuItem;
+import javax.swing.JComponent;
+import javax.swing.JDialog;
+import javax.swing.JFrame;
+import javax.swing.JLabel;
+import javax.swing.JMenu;
+import javax.swing.JMenuBar;
+import javax.swing.JMenuItem;
+import javax.swing.JOptionPane;
+import javax.swing.JPanel;
+import javax.swing.JScrollPane;
+import javax.swing.JSeparator;
+import javax.swing.JSplitPane;
+import javax.swing.JToggleButton;
+import javax.swing.KeyStroke;
+import javax.swing.SwingConstants;
 
 import bluej.BlueJEvent;
 import bluej.BlueJEventListener;
@@ -53,7 +102,49 @@ import bluej.extmgr.MenuManager;
 import bluej.groupwork.actions.CheckoutAction;
 import bluej.groupwork.actions.TeamActionGroup;
 import bluej.groupwork.ui.ActivityIndicator;
-import bluej.pkgmgr.actions.*;
+import bluej.pkgmgr.actions.AddClassAction;
+import bluej.pkgmgr.actions.CancelTestRecordAction;
+import bluej.pkgmgr.actions.CheckExtensionsAction;
+import bluej.pkgmgr.actions.CheckVersionAction;
+import bluej.pkgmgr.actions.CloseProjectAction;
+import bluej.pkgmgr.actions.CompileAction;
+import bluej.pkgmgr.actions.CompileSelectedAction;
+import bluej.pkgmgr.actions.DeployMIDletAction;
+import bluej.pkgmgr.actions.EndTestRecordAction;
+import bluej.pkgmgr.actions.ExportProjectAction;
+import bluej.pkgmgr.actions.GenerateDocsAction;
+import bluej.pkgmgr.actions.HelpAboutAction;
+import bluej.pkgmgr.actions.ImportProjectAction;
+import bluej.pkgmgr.actions.NewClassAction;
+import bluej.pkgmgr.actions.NewInheritsAction;
+import bluej.pkgmgr.actions.NewMEprojectAction;
+import bluej.pkgmgr.actions.NewPackageAction;
+import bluej.pkgmgr.actions.NewProjectAction;
+import bluej.pkgmgr.actions.NewUsesAction;
+import bluej.pkgmgr.actions.OpenNonBlueJAction;
+import bluej.pkgmgr.actions.OpenProjectAction;
+import bluej.pkgmgr.actions.PageSetupAction;
+import bluej.pkgmgr.actions.PkgMgrAction;
+import bluej.pkgmgr.actions.PreferencesAction;
+import bluej.pkgmgr.actions.PrintAction;
+import bluej.pkgmgr.actions.QuitAction;
+import bluej.pkgmgr.actions.RebuildAction;
+import bluej.pkgmgr.actions.RemoveAction;
+import bluej.pkgmgr.actions.RestartVMAction;
+import bluej.pkgmgr.actions.RunTestsAction;
+import bluej.pkgmgr.actions.SaveProjectAction;
+import bluej.pkgmgr.actions.SaveProjectAsAction;
+import bluej.pkgmgr.actions.ShowCopyrightAction;
+import bluej.pkgmgr.actions.ShowDebuggerAction;
+import bluej.pkgmgr.actions.ShowInheritsAction;
+import bluej.pkgmgr.actions.ShowTerminalAction;
+import bluej.pkgmgr.actions.ShowTestResultsAction;
+import bluej.pkgmgr.actions.ShowTextEvalAction;
+import bluej.pkgmgr.actions.ShowUsesAction;
+import bluej.pkgmgr.actions.StandardAPIHelpAction;
+import bluej.pkgmgr.actions.TutorialAction;
+import bluej.pkgmgr.actions.UseLibraryAction;
+import bluej.pkgmgr.actions.WebsiteAction;
 import bluej.pkgmgr.dependency.Dependency;
 import bluej.pkgmgr.target.ClassTarget;
 import bluej.pkgmgr.target.PackageTarget;
@@ -62,21 +153,21 @@ import bluej.pkgmgr.target.role.UnitTestClassRole;
 import bluej.prefmgr.PrefMgr;
 import bluej.prefmgr.PrefMgrDialog;
 import bluej.testmgr.TestDisplayFrame;
-import bluej.testmgr.record.GetInvokerRecord;
 import bluej.testmgr.record.InvokerRecord;
-import bluej.testmgr.record.MethodInvokerRecord;
 import bluej.utility.Debug;
 import bluej.utility.DialogManager;
 import bluej.utility.FileUtility;
+import bluej.utility.GradientFillPanel;
 import bluej.utility.JavaNames;
-import bluej.utility.Utility;
 import bluej.utility.SortedProperties;
+import bluej.utility.Utility;
 import bluej.views.CallableView;
 import bluej.views.ConstructorView;
 import bluej.views.MethodView;
 
 import com.apple.eawt.Application;
 import com.apple.eawt.ApplicationEvent;
+import java.awt.Image;
 
 /**
  * The main user interface frame which allows editing of packages
@@ -84,15 +175,10 @@ import com.apple.eawt.ApplicationEvent;
 public class PkgMgrFrame extends JFrame
     implements BlueJEventListener, MouseListener, PackageEditorListener, FocusListener
 {
-    public Font PkgMgrFont = PrefMgr.getStandardFont();
-
-//    public static final KeyStroke restartKey = KeyStroke.getKeyStroke(KeyEvent.VK_R, InputEvent.SHIFT_MASK
-//            | InputEvent.CTRL_MASK);
+    private static Font pkgMgrFont = PrefMgr.getStandardFont();
 
     static final int DEFAULT_WIDTH = 560;
     static final int DEFAULT_HEIGHT = 400;
-
-//    private static final int SHORTCUT_MASK = Toolkit.getDefaultToolkit().getMenuShortcutKeyMask();
 
     private static boolean testToolsShown = wantToSeeTestingTools();
     private static boolean teamToolsShown = wantToSeeTeamTools();
@@ -171,6 +257,7 @@ public class PkgMgrFrame extends JFrame
     private Action compileAction = new CompileAction();
     private Action compileSelectedAction = new CompileSelectedAction();
     private Action rebuildAction = new RebuildAction();
+    private Action restartVMAction = RestartVMAction.getInstance();
     private Action useLibraryAction = new UseLibraryAction();
     private Action generateDocsAction = new GenerateDocsAction();
     private PkgMgrAction showUsesAction = new ShowUsesAction();
@@ -216,42 +303,42 @@ public class PkgMgrFrame extends JFrame
 
     private static ExtensionsManager extMgr = ExtensionsManager.getInstance();
 
+    private ExportManager exporter;
     
     /**
      * Prepare MacOS specific behaviour (About menu, Preferences menu, Quit
      * menu)
      */
-    private static Application prepareMacOSApp()
+    private static void prepareMacOSApp()
     {
-        Application macApp = new Application();
-        macApp.setEnabledPreferencesMenu(true);
-        macApp.addApplicationListener(new com.apple.eawt.ApplicationAdapter() {
-            public void handleAbout(ApplicationEvent e)
-            {
-                HelpAboutAction.getInstance().actionPerformed(getMostRecent());
-                e.setHandled(true);
-            }
+        Application macApp = Application.getApplication();
+        if (macApp != null) {
+            macApp.setEnabledPreferencesMenu(true);
+            macApp.addApplicationListener(new com.apple.eawt.ApplicationAdapter() {
+                public void handleAbout(ApplicationEvent e)
+                {
+                    HelpAboutAction.getInstance().actionPerformed(getMostRecent());
+                    e.setHandled(true);
+                }
 
-            public void handlePreferences(ApplicationEvent e)
-            {
-                PreferencesAction.getInstance().actionPerformed(getMostRecent());
-                e.setHandled(true);
-            }
+                public void handlePreferences(ApplicationEvent e)
+                {
+                    PreferencesAction.getInstance().actionPerformed(getMostRecent());
+                    e.setHandled(true);
+                }
 
-            public void handleQuit(ApplicationEvent e)
-            {
-                QuitAction.getInstance().actionPerformed(getMostRecent());
-            }
-            
-            @SuppressWarnings("unused")
-            public void handleOpenFile(ApplicationEvent event) 
-            {                
-                String projectPath = event.getFilename();                
-                PkgMgrFrame.doOpen(new File(projectPath), null);                
-            }
-        });
+                public void handleQuit(ApplicationEvent e)
+                {
+                    QuitAction.getInstance().actionPerformed(getMostRecent());
+                }
 
-        return macApp;
+                public void handleOpenFile(ApplicationEvent event) 
+                {                
+                    String projectPath = event.getFilename();                
+                    PkgMgrFrame.doOpen(new File(projectPath), null);                
+                }
+            });
+        }
     }
     
     static { 
@@ -588,7 +675,7 @@ public class PkgMgrFrame extends JFrame
     {
         this.pkg = null;
         this.editor = null;
-        objbench = new ObjectBench();
+        objbench = new ObjectBench(this);
         if(!Config.isGreenfoot()) {
             teamActions = new TeamActionGroup(false);
             teamActions.setAllDisabled();
@@ -670,6 +757,8 @@ public class PkgMgrFrame extends JFrame
             enableFunctions(true); // changes menu items
             updateWindowTitle();
             setVisible(true);
+            
+            updateTextEvalBackground(isEmptyFrame());
                     
             this.menuManager.setAttachedObject(pkg);
             this.menuManager.addExtensionMenu(pkg.getProject());
@@ -757,6 +846,7 @@ public class PkgMgrFrame extends JFrame
             
             getObjectBench().removeAllObjects(getProject().getUniqueId());
             clearTextEval();
+            updateTextEvalBackground(true);
             showJavaMEcontrols(false);
             showTestingTools(wantToSeeTestingTools());
         }
@@ -1018,6 +1108,14 @@ public class PkgMgrFrame extends JFrame
                 break;
         }
     }
+    
+    /* (non-Javadoc)
+     * @see bluej.pkgmgr.PackageEditorListener#recordInteraction(bluej.testmgr.record.InvokerRecord)
+     */
+    public void recordInteraction(InvokerRecord ir)
+    {
+        getObjectBench().addInteraction(ir);
+    }
 
 
     // --- below are implementations of particular user actions ---
@@ -1033,7 +1131,6 @@ public class PkgMgrFrame extends JFrame
      * @param isJavaMEproject   Whether this is a Java Micro Edition project
      * @return     true if successful, false otherwise
      */
-    
     public boolean newProject(String dirName, boolean isJavaMEproject )
     {
         if (Project.createNewProject(dirName, isJavaMEproject)) {
@@ -1109,6 +1206,18 @@ public class PkgMgrFrame extends JFrame
         if (pkg.getTarget(name) != null) {
             DialogManager.showError(this, "duplicate-name");
             return false;
+        }
+
+        //check if there already exists a class in a library with that name 
+        String[] conflict=new String[1];
+        Class<?> c = pkg.loadClass(pkg.getQualifiedName(name));
+        if (c != null){
+            if (! Package.checkClassMatchesFile(c, new File(getPackage().getPath(), name + ".class"))) {
+                conflict[0]=Package.getResourcePath(c);
+                if (DialogManager.askQuestion(this, "class-library-conflict", conflict) == 0) {
+                    return false;
+                }
+            }
         }
 
         ClassTarget target = null;
@@ -1720,7 +1829,8 @@ public class PkgMgrFrame extends JFrame
      */
     public void doExport()
     {
-        ExportManager exporter = new ExportManager(this);
+    	if (exporter == null)
+    		exporter = new ExportManager(this);
         exporter.export();
     }
 
@@ -1732,21 +1842,7 @@ public class PkgMgrFrame extends JFrame
     {
         PrinterJob job = PrinterJob.getPrinterJob();
         PageFormat pfmt = job.pageDialog(getPageFormat());
-        //if(!pfmt.equals(pageFormat))
-        {
-            setPageFormat(pfmt);
-            //job.validatePage()
-            //            double x = pageFormat.getImageableX();
-            //            double y = pageFormat.getImageableY();
-            //            double width = pageFormat.getImageableWidth();
-            //            double height = pageFormat.getImageableHeight();
-            //            Config.putPropDouble("bluej.printer.paper.x", x);
-            //            Config.putPropDouble("bluej.printer.paper.y", y);
-            //            Config.putPropDouble("bluej.printer.paper.width", width);
-            //            Config.putPropDouble("bluej.printer.paper.height", height);
-            //            Debug.message("paper: " + x + ", " + y + ", " + width + ", " +
-            // height);
-        }
+        setPageFormat(pfmt);
     }
 
     /**
@@ -1761,6 +1857,18 @@ public class PkgMgrFrame extends JFrame
             pageFormat = PrinterJob.getPrinterJob().defaultPage();
 
         }
+        //Important that this is set before the margins:
+        int orientation = Config.getPropInteger("bluej.printer.paper.orientation", pageFormat.getOrientation());
+        pageFormat.setOrientation(orientation);
+        
+        Paper paper = pageFormat.getPaper();
+        int x = Config.getPropInteger("bluej.printer.paper.x", 72);
+        int y = Config.getPropInteger("bluej.printer.paper.y", 72);
+        int width = Config.getPropInteger("bluej.printer.paper.width", (int)paper.getWidth() - 72 - x);
+        int height = Config.getPropInteger("bluej.printer.paper.height", (int)paper.getHeight() - 72 - y);
+        paper.setImageableArea(x, y, width, height);
+        //paper is a copy of pageFormat's paper, so we must use set again to make the changes:
+        pageFormat.setPaper(paper);
         return pageFormat;
     }
 
@@ -1776,6 +1884,22 @@ public class PkgMgrFrame extends JFrame
     public static void setPageFormat(PageFormat page)
     {
         pageFormat = page;
+        // We must get the measurements from the paper (which ignores orientation)
+        // rather than page format (which takes it into account) because ultimately
+        // we will use paper.setImageableArea to load the dimensions again
+        Paper paper = pageFormat.getPaper();
+        double x = paper.getImageableX();
+        double y = paper.getImageableY();
+        double width = paper.getImageableWidth();
+        double height = paper.getImageableHeight();
+        //The sizes are in points, so saving them as an integer should be precise enough:
+        Config.putPropInteger("bluej.printer.paper.x", (int)x);
+        Config.putPropInteger("bluej.printer.paper.y", (int)y);
+        Config.putPropInteger("bluej.printer.paper.width", (int)width);
+        Config.putPropInteger("bluej.printer.paper.height", (int)height);
+        int orientation = pageFormat.getOrientation();
+        Config.putPropInteger("bluej.printer.paper.orientation", orientation);
+
     }
 
     /**
@@ -1796,7 +1920,7 @@ public class PkgMgrFrame extends JFrame
     /**
      * Preferences menu was chosen.
      */
-    public void showPreferences()
+    public void showPreferences( )
     {
         PrefMgrDialog.showDialog();
     }
@@ -1816,7 +1940,7 @@ public class PkgMgrFrame extends JFrame
     public void showCopyright()
     {
         JOptionPane.showMessageDialog(this, new String[]{
-                "BlueJ \u00a9 2000-2009 Michael K\u00F6lling, John Rosenberg.", " ",
+                "BlueJ \u00a9 2000-2010 Michael K\u00F6lling, John Rosenberg.", " ",
                 Config.getString("menu.help.copyright.line1"), Config.getString("menu.help.copyright.line2"),
                 Config.getString("menu.help.copyright.line3"), Config.getString("menu.help.copyright.line4"),}, Config
                 .getString("menu.help.copyright.title"), JOptionPane.INFORMATION_MESSAGE);
@@ -1981,19 +2105,12 @@ public class PkgMgrFrame extends JFrame
         if (!object.isNullObject()) {
             ObjectWrapper wrapper = ObjectWrapper.getWrapper(this, getObjectBench(), object, iType, newInstanceName);
             getObjectBench().addObject(wrapper); // might change name
+            newInstanceName = wrapper.getName();
 
             // load the object into runtime scope
-            getPackage().getDebugger().addObject(pkg.getId(), wrapper.getName(), object);
+            getPackage().getDebugger().addObject(pkg.getId(), newInstanceName, object);
 
-            if (ir instanceof MethodInvokerRecord) {
-                MethodInvokerRecord mir = (MethodInvokerRecord) ir;
-                mir.setBenchName(newInstanceName, wrapper.getObject().getGenClassName());
-            }
-            if(ir instanceof GetInvokerRecord) {
-                GetInvokerRecord gir = (GetInvokerRecord) ir;
-                gir.setBenchName(newInstanceName, wrapper.getObject().getGenClassName());
-                getObjectBench().addInteraction(gir);
-            }
+            ir.setBenchName(newInstanceName, wrapper.getObject().getGenClassName());
         }
     }
 
@@ -2369,6 +2486,31 @@ public class PkgMgrFrame extends JFrame
     }
 
     /**
+     * Check the debugger state is suitable for execution: that is, it is not already
+     * executing anything or stuck at a breakpoint.
+     * 
+     * <P>Returns true if the debugger is currently idle, or false if it is already
+     * executing, in which case an error dialog is also displayed and the debugger
+     * controls window is made visible.
+     */
+    public boolean checkDebuggerState()
+    {
+        Debugger debugger = getProject().getDebugger();
+        if (debugger.getStatus() == Debugger.SUSPENDED) {
+            setVisible(true);
+            DialogManager.showError(this, "stuck-at-breakpoint");
+            return false;
+        }
+        else if (debugger.getStatus() == Debugger.RUNNING) {
+            setVisible(true);
+            DialogManager.showError(this, "already-executing");
+            return false;
+        }
+        
+        return true;
+    }
+
+    /**
      * Show the debugger controls for the VM associated with this project.
      */
     public void showDebugger()
@@ -2411,11 +2553,6 @@ public class PkgMgrFrame extends JFrame
         return showExtendsMenuItem.isSelected();
     }
     
-   // public boolean includeLayout()
-   // {
-   //     return includeLayoutMenuItem.isSelected();
-   // }
-
     /**
      * Show or hide the testing tools.
      */
@@ -2498,6 +2635,17 @@ public class PkgMgrFrame extends JFrame
     {
         if (textEvaluator != null) {
             textEvaluator.clear();
+        }
+    }
+    
+    /**
+     * Updates the background of the text evaluation component (if it exists),
+     * when a project is opened/closed
+     */
+    public void updateTextEvalBackground(boolean emptyFrame)
+    {
+        if (textEvaluator != null) {
+            textEvaluator.updateBackground(emptyFrame);
         }
     }
 
@@ -2603,12 +2751,24 @@ public class PkgMgrFrame extends JFrame
 
     private void makeFrame()
     {
-        setFont(PkgMgrFont);
-        setIconImage(BlueJTheme.getIconImage());
+        setFont(pkgMgrFont);
+        Image icon = BlueJTheme.getIconImage();
+        if (icon != null) {
+            setIconImage(icon);
+        }
         testItems = new ArrayList<JComponent>();
         teamItems = new ArrayList<JComponent>();
 
         setupMenus();
+        
+        // To get a gradient fill for the frame, we need to override the content pane's
+        // paintComponent method to use a gradient fill (no other way to do it)
+        // Hence this code, that sets the content pane to be a standard JPanel with
+        // the same layout as before, but with paintComponent performing a gradient fill:
+        setContentPane(new GradientFillPanel(getContentPane().getLayout()));
+        // To let that gradient fill show through, all the other panes that sit
+        // on top of the frame must have setOpaque(false) called, hence all the calls
+        // of that type throughout the code below
 
         Container contentPane = getContentPane();
         ((JPanel) contentPane).setBorder(BlueJTheme.generalBorderWithStatusBar);
@@ -2616,6 +2776,7 @@ public class PkgMgrFrame extends JFrame
         // create the main panel holding the diagram and toolbar on the left
 
         JPanel mainPanel = new JPanel(new BorderLayout(5, 5));
+        mainPanel.setOpaque(false);
 
         // Install keystroke to restart the VM
         Action action = RestartVMAction.getInstance();
@@ -2625,8 +2786,10 @@ public class PkgMgrFrame extends JFrame
 
         // create the left hand side toolbar
         JPanel toolPanel = new JPanel();
+        toolPanel.setOpaque(false);
         {
             buttonPanel = new JPanel();
+            buttonPanel.setOpaque(false);
             {
                 buttonPanel.setLayout(new BoxLayout(buttonPanel, BoxLayout.Y_AXIS));
                 buttonPanel.setBorder(BorderFactory.createEmptyBorder(5, 5, 0, 5));
@@ -2651,6 +2814,7 @@ public class PkgMgrFrame extends JFrame
             }
 
             testPanel = new JPanel();
+            testPanel.setOpaque(false);
             {
                 testPanel.setLayout(new BoxLayout(testPanel, BoxLayout.Y_AXIS));
 
@@ -2663,8 +2827,8 @@ public class PkgMgrFrame extends JFrame
                 testPanel.add(Box.createVerticalStrut(8));
 
                 recordingLabel = new JLabel(Config.getString("pkgmgr.test.record"), Config
-                        .getImageAsIcon("image.test.recording"), SwingConstants.LEADING);
-                recordingLabel.setFont(PkgMgrFont);
+                        .getFixedImageAsIcon("record.gif"), SwingConstants.LEADING);
+                recordingLabel.setFont(pkgMgrFont);
                 recordingLabel.setEnabled(false);
                 recordingLabel.setAlignmentX(0.15f);
                 testPanel.add(recordingLabel);
@@ -2694,6 +2858,7 @@ public class PkgMgrFrame extends JFrame
             testItems.add(testPanel);
             
             teamPanel = new JPanel();
+            teamPanel.setOpaque(false);
             {
                 teamPanel.setLayout(new BoxLayout(teamPanel, BoxLayout.Y_AXIS));
 
@@ -2719,6 +2884,7 @@ public class PkgMgrFrame extends JFrame
             teamItems.add(teamPanel);
 
             javaMEPanel = new JPanel();
+            javaMEPanel.setOpaque(false);
             {
                 javaMEPanel.setLayout(new BoxLayout(javaMEPanel, BoxLayout.Y_AXIS));
 
@@ -2740,7 +2906,7 @@ public class PkgMgrFrame extends JFrame
                 javaMEPanel.add( button );
                 javaMEPanel.add( Box.createVerticalStrut( 4 ) );   
                 if(!Config.isMacOSLeopard()) javaMEPanel.add(Box.createVerticalStrut(3));
-                javaMEPanel.setAlignmentX(0.5f);
+                teamPanel.setAlignmentX(0.5f);
             }
             
             machineIcon = new MachineIcon();
@@ -2764,6 +2930,7 @@ public class PkgMgrFrame extends JFrame
         classScroller.setFocusable(false);
         classScroller.getVerticalScrollBar().setUnitIncrement(10);
         classScroller.getHorizontalScrollBar().setUnitIncrement(20);
+        classScroller.setOpaque(false);
         mainPanel.add(classScroller, BorderLayout.CENTER);
 
         itemsToDisable.add(objbench);
@@ -2772,20 +2939,22 @@ public class PkgMgrFrame extends JFrame
         splitPane.setBorder(null);
         splitPane.setResizeWeight(1.0);
         splitPane.setDividerSize(5);
+        splitPane.setOpaque(false);
         contentPane.add(splitPane, BorderLayout.CENTER);
 
         // create the bottom status area
 
         JPanel statusArea = new JPanel(new BorderLayout());
+        statusArea.setOpaque(false);
         {
             statusArea.setBorder(BorderFactory.createEmptyBorder(2, 0, 4, 6));
 
             statusbar = new JLabel(" ");
-            statusbar.setFont(PkgMgrFont);
+            statusbar.setFont(pkgMgrFont);
             statusArea.add(statusbar, BorderLayout.CENTER);
 
             testStatusMessage = new JLabel(" ");
-            testStatusMessage.setFont(PkgMgrFont);
+            testStatusMessage.setFont(pkgMgrFont);
             statusArea.add(testStatusMessage, BorderLayout.WEST);
             
             progressbar = new ActivityIndicator();
@@ -2840,11 +3009,12 @@ public class PkgMgrFrame extends JFrame
         classScroller.setPreferredSize(classScroller.getSize()); // memorize
                                                                  // current size
         if (textEvaluator == null) {
-            textEvaluator = new TextEvalArea(this, PkgMgrFont);
+            textEvaluator = new TextEvalArea(this, pkgMgrFont);
             objectBenchSplitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, objbench, textEvaluator);
             objectBenchSplitPane.setBorder(null);
             objectBenchSplitPane.setResizeWeight(1.0);
             objectBenchSplitPane.setDividerSize(5);
+            objectBenchSplitPane.setOpaque(false);
             itemsToDisable.add(textEvaluator);
         }
         else {
@@ -2891,7 +3061,7 @@ public class PkgMgrFrame extends JFrame
         else {
             button = new JButton(action);
         }
-        button.setFont(PkgMgrFont);
+        button.setFont(pkgMgrFont);
         Utility.changeToMacButton(button);
         button.setFocusable(false); // buttons shouldn't get focus
 
@@ -2968,6 +3138,7 @@ public class PkgMgrFrame extends JFrame
             createMenuItem(compileAction, menu);
             createMenuItem(compileSelectedAction, menu);
             createMenuItem(rebuildAction, menu);
+            createMenuItem(restartVMAction, menu);
             menu.addSeparator();
 
             createMenuItem(useLibraryAction, menu);
@@ -3141,6 +3312,7 @@ public class PkgMgrFrame extends JFrame
         actionsToDisable.add(compileAction);
         actionsToDisable.add(compileSelectedAction);
         actionsToDisable.add(rebuildAction);
+        actionsToDisable.add(restartVMAction);
         actionsToDisable.add(useLibraryAction);
         actionsToDisable.add(generateDocsAction);
         actionsToDisable.add(showUsesAction);

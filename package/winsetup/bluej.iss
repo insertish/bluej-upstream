@@ -3,8 +3,8 @@
 
 [Setup]
 AppName=BlueJ
-AppVerName=BlueJ 2.5.0
-AppPublisher=Deakin University
+AppVerName=BlueJ 3.0.0 preview
+AppPublisher=La Trobe University
 AppPublisherURL=http://www.bluej.org
 AppSupportURL=http://www.bluej.org
 AppUpdatesURL=http://www.bluej.org
@@ -12,8 +12,9 @@ UninstallFilesDir={app}\uninst
 DefaultDirName={sd}\BlueJ
 DefaultGroupName=BlueJ
 Compression=bzip/9
-OutputBaseFilename=BlueJ-windows-2.5.0
+OutputBaseFilename=BlueJ-windows-300 preview
 OutputDir=.
+PrivilegesRequired=none
 
 [Messages]
 SetupWindowTitle=BlueJ Installer
@@ -24,6 +25,7 @@ WelcomeLabel2=This installer will install [name/ver] on your computer.%n%nIt is 
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a &desktop icon"; GroupDescription: "Additional icons:"; MinVersion: 4,4
+Name: "associations"; Description: "Create file association (*.bluej)"; GroupDescription: "File associations"; MinVersion: 4,4
 
 [Icons]
 Name: "{group}\BlueJ"; Filename: "{app}\bluej.exe"; WorkingDir: "{app}"
@@ -31,11 +33,17 @@ Name: "{userdesktop}\BlueJ"; Filename: "{app}\bluej.exe"; WorkingDir: "{app}"; T
 Name: "{group}\Select VM"; Filename: "{app}\bluej.exe"; WorkingDir: "{app}"; Parameters: "/select"; IconIndex: 1
 Name: "{app}\Select VM"; Filename: "{app}\bluej.exe"; WorkingDir: "{app}"; Parameters: "/select"; IconIndex: 1
 
+[Registry]
+Root: HKCR; Subkey: ".bluej"; ValueType: string; ValueName: ""; ValueData: "BlueJProject"; Flags: uninsdeletevalue; Tasks: associations
+Root: HKCR; Subkey: "BlueJProject"; ValueType: string; ValueName: ""; ValueData: "BlueJ project file"; Flags: uninsdeletekey; Tasks: associations
+Root: HKCR; Subkey: "BlueJProject\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\bluej.exe,0"; Flags: uninsdeletekey; Tasks: associations
+Root: HKCR; Subkey: "BlueJProject\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\bluej.exe"" ""%1"""; Flags: uninsdeletekey; Tasks: associations
+
 [InstallDelete]
 Type: files; Name: "{app}\lib\extensions\submission.jar"
 
 [Files]
-Source: "..\install_tmp\*.*"; DestDir: "{app}"; CopyMode: alwaysoverwrite; Flags: recursesubdirs
+Source: "..\install_tmp\*.*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion
 Source: "..\winlaunch\bjlaunch.exe"; DestDir: "{app}"; DestName: "bluej.exe"
 Source: "..\winlaunch\README.TXT"; DestDir: "{app}"
 

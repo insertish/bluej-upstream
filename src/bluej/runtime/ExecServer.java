@@ -53,16 +53,16 @@ import junit.framework.TestSuite;
  *
  * @author  Michael Kolling
  * @author  Andrew Patterson
- * @version $Id: ExecServer.java 6703 2009-09-17 04:48:20Z davmac $
+ * @version $Id: ExecServer.java 6702 2009-09-17 04:42:20Z davmac $
  */
 public class ExecServer
 {
     // these fields will be fetched by VMReference
-        
+	
     // the initial thread that starts main()
     public static final String MAIN_THREAD_NAME = "mainThread";
     public static Thread mainThread = null;
-        
+	
     // a worker thread that we create
     public static final String WORKER_THREAD_NAME = "workerThread";
     public static Thread workerThread = null;
@@ -247,7 +247,7 @@ public class ExecServer
         // signal with a breakpoint that we have performed our VM
         // initialization, at the same time, create the initial server thread.
         newThread();
-                
+		
         // Set the worker thread in motion also. Give it maximum priority so that it can
         // be guarenteed to execute in a timely manner, and won't get starved by user code
         // executing in other threads.
@@ -351,7 +351,7 @@ public class ExecServer
      */
     public static Class<?> loadAndInitClass(String className)
     {
-        //Debug.message("[VM] loadClass: " + className);
+    	//Debug.message("[VM] loadClass: " + className);
         
         if (currentLoader == null) {
           // It does not make much sense to load something without a loader, better signal it immediatly.

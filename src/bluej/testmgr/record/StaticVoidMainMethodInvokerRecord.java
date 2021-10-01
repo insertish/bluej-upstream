@@ -30,7 +30,7 @@ package bluej.testmgr.record;
  * code being created.
  *
  * @author  Andrew Patterson
- * @version $Id: StaticVoidMainMethodInvokerRecord.java 6215 2009-03-30 13:28:25Z polle $
+ * @version $Id: StaticVoidMainMethodInvokerRecord.java 7517 2010-05-07 08:23:32Z davmac $
  */
 public class StaticVoidMainMethodInvokerRecord extends InvokerRecord
 {
@@ -55,12 +55,6 @@ public class StaticVoidMainMethodInvokerRecord extends InvokerRecord
 
     @Override
     public String toExpression()
-    {
-        throw new RuntimeException("Method not implemented for this type.");
-    }
-
-    @Override
-    public String getExpressionGlue()
     {
         throw new RuntimeException("Method not implemented for this type.");
     }

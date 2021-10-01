@@ -41,12 +41,13 @@ import bluej.pkgmgr.Package;
 import bluej.pkgmgr.PkgMgrFrame;
 import bluej.prefmgr.PrefMgr;
 import bluej.utility.Debug;
+import bluej.utility.Utility;
 
 /**
  * A sub package (or parent package)
  * 
  * @author Michael Cahill
- * @version $Id: PackageTarget.java 6215 2009-03-30 13:28:25Z polle $
+ * @version $Id: PackageTarget.java 7651 2010-05-20 14:02:51Z nccb $
  */
 public class PackageTarget extends Target
     implements Moveable

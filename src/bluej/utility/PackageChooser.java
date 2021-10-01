@@ -59,11 +59,11 @@ import bluej.utility.filefilter.JavaSourceFilter;
  */
 class PackageChooser extends JFileChooser
 {
-    static final Icon classIcon = Config.getImageAsIcon("image.filechooser.classIcon");
-    static final Icon packageIcon = Config.getImageAsIcon("image.filechooser.packageIcon");
+    static private final Icon classIcon = Config.getFixedImageAsIcon("class-icon.png");
+    static private final Icon packageIcon = Config.getFixedImageAsIcon("package-icon.png");
 
-    static final String previewLine1 = Config.getString("utility.packageChooser.previewPane1");
-    static final String previewLine2 = Config.getString("utility.packageChooser.previewPane2");
+    static private final String previewLine1 = Config.getString("utility.packageChooser.previewPane1");
+    static private final String previewLine2 = Config.getString("utility.packageChooser.previewPane2");
 
     private PackageDisplay displayPanel;
     private boolean allowNewFiles = true;
@@ -71,7 +71,7 @@ class PackageChooser extends JFileChooser
     /**
      * Create a new PackageChooser.
      * 
-     * @param startDirectory    the directory to start the package selection in.
+     * @param startDirectory 	the directory to start the package selection in.
      * @param preview           whether to show the package structure preview pane
      * @param showArchives      whether to allow choosing jar and zip files
      */
@@ -190,7 +190,9 @@ class PackageChooser extends JFileChooser
             setDisplayDirectory(displayDir);
         }
 
+        @Override
         protected void processMouseEvent(MouseEvent e) { }
+        @Override
         protected void processMouseMotionEvent(MouseEvent e) { }
 
         void setDisplayDirectory(File displayDir)

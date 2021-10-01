@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2010  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -21,16 +21,45 @@
  */
 package bluej.terminal;
 
-import java.awt.*;
-import java.awt.event.*;
-import java.io.*;
+import java.awt.BorderLayout;
+import java.awt.Color;
+import java.awt.Event;
+import java.awt.EventQueue;
+import java.awt.Font;
+import java.awt.Insets;
+import java.awt.Toolkit;
+import java.awt.Window;
+import java.awt.event.ActionEvent;
+import java.awt.event.ComponentAdapter;
+import java.awt.event.ComponentEvent;
+import java.awt.event.KeyEvent;
+import java.awt.event.KeyListener;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
+import java.awt.print.PrinterJob;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.io.Reader;
+import java.io.Writer;
 import java.lang.reflect.InvocationTargetException;
 
-import javax.swing.*;
+import javax.swing.AbstractAction;
+import javax.swing.Action;
+import javax.swing.JCheckBoxMenuItem;
+import javax.swing.JFrame;
+import javax.swing.JMenu;
+import javax.swing.JMenuBar;
+import javax.swing.JMenuItem;
+import javax.swing.JScrollPane;
+import javax.swing.JSeparator;
+import javax.swing.JSplitPane;
+import javax.swing.JTextArea;
+import javax.swing.KeyStroke;
 import javax.swing.text.BadLocationException;
 
 import bluej.BlueJEvent;
 import bluej.BlueJEventListener;
+import bluej.BlueJTheme;
 import bluej.Config;
 import bluej.debugger.Debugger;
 import bluej.debugger.DebuggerTerminal;
@@ -40,33 +69,42 @@ import bluej.utility.Debug;
 import bluej.utility.DialogManager;
 import bluej.utility.FileUtility;
 import bluej.utility.Utility;
+import java.awt.Image;
 
 /**
  * The Frame part of the Terminal window used for I/O when running programs
  * under BlueJ.
  *
- * @author  Michael Kolling
+ * @author  Michael Kolling, Philip Stevens
  */
 @SuppressWarnings("serial")
 public final class Terminal extends JFrame
     implements KeyListener, BlueJEventListener, DebuggerTerminal
 {
     private static final String WINDOWTITLE = Config.getApplicationName() + ": " + Config.getString("terminal.title");
-    private static final int windowHeight =
+    private static final int WINDOWHEIGHT =
         Config.getPropInteger("bluej.terminal.height", 22);
-    private static final int windowWidth =
+    private static final int WINDOWWIDTH =
         Config.getPropInteger("bluej.terminal.width", 80);
 
-    private static final Color fgColour = Color.black;
-    private static final Color errorColour = Color.red;
+    private static final Color FGCOLOUR = Color.black;
+    private static final Color ERRORCOLOUR = Color.red;
 
     private static final int SHORTCUT_MASK =
         Toolkit.getDefaultToolkit().getMenuShortcutKeyMask();
+    //private static final int ALT_SHORTCUT_MASK =
+    //        SHORTCUT_MASK == Event.CTRL_MASK ? Event.CTRL_MASK : Event.META_MASK;
 
-    static boolean enabled = true;
-
-    private static final String terminalFontPropertyName = "bluej.terminal.font";
-    private static final String terminalFontSizePropertyName = "bluej.terminal.fontsize";
+    private static final String TERMINALFONTPROPNAME = "bluej.terminal.font";
+    private static final String TERMINALFONTSIZEPROPNAME = "bluej.terminal.fontsize";
+    
+    private static final String RECORDMETHODCALLSPROPNAME = "bluej.terminal.recordcalls";
+    private static final String CLEARONMETHODCALLSPROPNAME = "bluej.terminal.clearscreen";
+    private static final String UNLIMITEDBUFFERINGCALLPROPNAME = "bluej.terminal.buffering";
+        
+    // initialise to config value or zero.
+    private static int terminalFontSize = Config.getPropInteger(
+            TERMINALFONTSIZEPROPNAME, PrefMgr.getEditorFontSize());
 
     // -- instance --
 
@@ -78,8 +116,12 @@ public final class Terminal extends JFrame
     private JScrollPane scrollPane;
     private JSplitPane splitPane;
     private boolean isActive = false;
-    private boolean recordMethodCalls = false;
-    private boolean clearOnMethodCall = false;
+    private static boolean recordMethodCalls =
+            Config.getPropBoolean(RECORDMETHODCALLSPROPNAME);
+    private static boolean clearOnMethodCall =
+            Config.getPropBoolean(CLEARONMETHODCALLSPROPNAME);
+    private static boolean unlimitedBufferingCall =
+            Config.getPropBoolean(UNLIMITEDBUFFERINGCALLPROPNAME);
     private boolean newMethodCall = true;
     private boolean errorShown = false;
     private InputBuffer buffer;
@@ -94,20 +136,7 @@ public final class Terminal extends JFrame
 
     /** Used for lazy initialisation  */
     private boolean initialised = false; 
-    
-    /**
-     * Get the terminal font
-     */
-    private static Font getTerminalFont()
-    {
-        int fontSize = Config.getPropInteger(terminalFontSizePropertyName, 0);
-        if (fontSize == 0) {
-            fontSize = PrefMgr.getEditorFontSize();
-        }
-         
-        return Config.getFont(terminalFontPropertyName, "Monospaced", fontSize); 
-    }
-    
+
     /**
      * Create a new terminal window with default specifications.
      */
@@ -118,6 +147,30 @@ public final class Terminal extends JFrame
         BlueJEvent.addListener(this);
     }
 
+    /**
+     * Get the terminal font
+     */
+    private static Font getTerminalFont()
+    {
+        return Config.getFont(
+                TERMINALFONTPROPNAME, "Monospaced", terminalFontSize);
+    }
+
+    /*
+     * Set the terminal font size to equal either the passed parameter, or the
+     * editor font size if the passed parameter is too low. Place the updated
+     * value into the configuration.
+     */
+    private static void setTerminalFontSize(int size)
+    {
+        if (size <= 6) {
+            terminalFontSize = PrefMgr.getEditorFontSize();
+        } else {
+            terminalFontSize = size;
+        }
+        Config.putPropInteger(TERMINALFONTSIZEPROPNAME, terminalFontSize);
+    }
+
     
     /**
      * Initialise the terminal; create the UI.
@@ -126,8 +179,9 @@ public final class Terminal extends JFrame
     {
         if(! initialised) {            
             buffer = new InputBuffer(256);
-            makeWindow(windowWidth, windowHeight);
+            makeWindow(WINDOWWIDTH, WINDOWHEIGHT);
             initialised = true;
+            text.setUnlimitedBuffering(unlimitedBufferingCall);
         }
     }
 
@@ -160,12 +214,23 @@ public final class Terminal extends JFrame
         if(active != isActive) {
             initialise();
             text.setEditable(active);
+            if (!active) {
+                text.getCaret().setVisible(false);
+            }
             //text.setEnabled(active);
             //text.setBackground(active ? activeBgColour : inactiveBgColour);
             isActive = active;
         }
     }
 
+    /**
+     * Check whether the terminal is active (accepting input).
+     */
+    public boolean checkActive()
+    {
+        return isActive;
+    }
+    
     /**
      * Reset the font according to preferences.
      */
@@ -214,12 +279,21 @@ public final class Terminal extends JFrame
             }
         }
     }
-
+    
+    public void print()
+    {
+        PrinterJob job = PrinterJob.getPrinterJob();
+        int printFontSize = Config.getPropInteger("bluej.fontsize.printText", 10);
+        Font font = new Font("Monospaced", Font.PLAIN, printFontSize);
+        if (job.printDialog()) {
+            TerminalPrinter.printTerminal(job, text, job.defaultPage(), font);
+        }
+    }
 
     /**
      * Write some text to the terminal.
      */
-    private void writeToTerminal(String s)
+    public void writeToTerminal(String s)
     {
         prepare();
         
@@ -340,14 +414,16 @@ public final class Terminal extends JFrame
 
     // ---- KeyListener interface ----
 
-    public void keyPressed(KeyEvent event) {
+    public void keyPressed(KeyEvent event)
+    {
         // Let menu commands and dead keys (if active) pass
         // Dead keys are passed because they wont work on Windows otherwise
         if(event.getModifiers() != SHORTCUT_MASK && !(Utility.isDeadKey(event) && isActive) )  
             event.consume();
     }
     
-    public void keyReleased(KeyEvent event) {
+    public void keyReleased(KeyEvent event)
+    {
         // Let menu commands and dead keys (if active) pass
         // Dead keys are passed because they wont work on Windows otherwise
         if(event.getModifiers() != SHORTCUT_MASK && !(Utility.isDeadKey(event) && isActive) )  
@@ -357,44 +433,72 @@ public final class Terminal extends JFrame
     public void keyTyped(KeyEvent event)
     {
         initialise();
-        if(isActive) {
-            char ch = event.getKeyChar();
-
-            switch(ch) {
-
-            case 4:   // CTRL-D (unix/Mac EOF)
-            case 26:  // CTRL-Z (DOS/Windows EOF)
-                buffer.signalEOF();
-                writeToTerminal("\n");
-                break;
-                
-            case '\b':  // backspace
-                if(buffer.backSpace()) {
-                    try {
-                        int length = text.getDocument().getLength();
-                        text.replaceRange("", length-1, length);
-                    }
-                    catch (Exception exc) {
-                        Debug.reportError("bad location " + exc);
-                    }
-                }
-                break;
-
-            case '\r':  // carriage return
-            case '\n':  // newline
-                if(buffer.putChar('\n')) {
-                    writeToTerminal(String.valueOf(ch));
-                    buffer.notifyReaders();
-                }
-                break;
-
-            default:
-                if(buffer.putChar(ch))
-                    writeToTerminal(String.valueOf(ch));
+        char ch = event.getKeyChar();
+        
+        switch (ch) {
+            
+        case KeyEvent.VK_EQUALS: // increase the font size
+        case KeyEvent.VK_PLUS: // increase the font size (non-uk keyboards)
+            if (event.getModifiers() == SHORTCUT_MASK) {
+                setTerminalFontSize(terminalFontSize + 1);
+                project.getTerminal().resetFont();
                 break;
             }
+
+        case KeyEvent.VK_MINUS: // decrease the font size
+            if (event.getModifiers() == SHORTCUT_MASK) {
+                setTerminalFontSize(terminalFontSize - 1);
+                project.getTerminal().resetFont();
+                break;
+            }
+
+        // VK_(EQUALS|PLUS|MINUS) all fall through to here if no shortcut mask.
+        default:
+            if ((event.getModifiers() & Event.META_MASK) != 0) {
+                return; // return without consuming the event
+            }
+            if (isActive) {
+                switch (ch) {
+
+                case 3: // CTRL-C (linux/Windows)
+                case 22: // CTRL-V (linux/Windows)
+                    break;
+
+                case 4:   // CTRL-D (unix/Mac EOF)
+                case 26:  // CTRL-Z (DOS/Windows EOF)
+                    buffer.signalEOF();
+                    writeToTerminal("\n");
+                    break;
+
+                case '\b':	// backspace
+                    if (buffer.backSpace()) {
+                        try {
+                            int length = text.getDocument().getLength();
+                            text.replaceRange("", length - 1, length);
+                        } catch (Exception exc) {
+                            Debug.reportError("bad location " + exc);
+                        }
+                    }
+                    break;
+
+                case '\r':	// carriage return
+                case '\n':	// newline
+                    if (buffer.putChar('\n')) {
+                        writeToTerminal(String.valueOf(ch));
+                        buffer.notifyReaders();
+                    }
+                    break;
+
+                default:
+                    if (buffer.putChar(ch)) {
+                        writeToTerminal(String.valueOf(ch));
+                    }
+                    break;
+                }
+            }
+            break;
         }
-        event.consume();        // make sure the text area doesn't handle this
+        event.consume();	// make sure the text area doesn't handle this
     }
 
 
@@ -425,13 +529,16 @@ public final class Terminal extends JFrame
      */
     private void makeWindow(int columns, int rows)
     {
-        setIconImage(Config.getImage("image.icon.terminal"));        
-        text = new TermTextArea(rows, columns);
+        Image icon = BlueJTheme.getIconImage();
+        if (icon != null) {
+            setIconImage(icon);
+        }
+        text = new TermTextArea(rows, columns, buffer, this);
         scrollPane = new JScrollPane(text);
         text.setFont(getTerminalFont());
-        text.setEditable(true);
+        text.setEditable(false);
         text.setLineWrap(false);
-        text.setForeground(fgColour);
+        text.setForeground(FGCOLOUR);
         text.setMargin(new Insets(6, 6, 6, 6));
         //text.setBackground(inactiveBgColour);
         text.addKeyListener(this);
@@ -442,6 +549,7 @@ public final class Terminal extends JFrame
 
         // Close Action when close button is pressed
         addWindowListener(new WindowAdapter() {
+            @Override
             public void windowClosing(WindowEvent event)
             {
                 Window win = (Window)event.getSource();
@@ -459,6 +567,7 @@ public final class Terminal extends JFrame
 
         // save position when window is moved
         addComponentListener(new ComponentAdapter() {
+            @Override
                 public void componentMoved(ComponentEvent event)
                 {
                     Config.putLocation("bluej.terminal", getLocation());
@@ -482,7 +591,7 @@ public final class Terminal extends JFrame
         errorText.setFont(getTerminalFont());
         errorText.setEditable(false);
         errorText.setLineWrap(false);
-        errorText.setForeground(errorColour);
+        errorText.setForeground(ERRORCOLOUR);
         errorText.setMargin(new Insets(6, 6, 6, 6));
 
         splitPane = new JSplitPane(JSplitPane.VERTICAL_SPLIT,
@@ -559,15 +668,19 @@ public final class Terminal extends JFrame
         item = menu.add(new SaveAction());
         item.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_S,
                                                    SHORTCUT_MASK));
+        menu.add(new PrintAction());
         menu.add(new JSeparator());
 
         autoClear = new JCheckBoxMenuItem(new AutoClearAction());
+        autoClear.setSelected(clearOnMethodCall);
         menu.add(autoClear);
 
         recordCalls = new JCheckBoxMenuItem(new RecordCallAction());
+        recordCalls.setSelected(recordMethodCalls);
         menu.add(recordCalls);
 
         unlimitedBuffering = new JCheckBoxMenuItem(new BufferAction());
+        unlimitedBuffering.setSelected(unlimitedBufferingCall);
         menu.add(unlimitedBuffering);
 
         menu.add(new JSeparator());
@@ -603,6 +716,18 @@ public final class Terminal extends JFrame
             save();
         }
     }
+    
+    private class PrintAction extends AbstractAction
+    {
+        public PrintAction()
+        {
+            super(Config.getString("terminal.print"));
+        }
+
+        public void actionPerformed(ActionEvent e) {
+            print();
+        }
+    }
 
     private class CloseAction extends AbstractAction
     {
@@ -635,6 +760,7 @@ public final class Terminal extends JFrame
 
         public void actionPerformed(ActionEvent e) {
             clearOnMethodCall = autoClear.isSelected();
+            Config.putPropBoolean(CLEARONMETHODCALLSPROPNAME, clearOnMethodCall);
         }
     }
 
@@ -647,6 +773,7 @@ public final class Terminal extends JFrame
 
         public void actionPerformed(ActionEvent e) {
             recordMethodCalls = recordCalls.isSelected();
+            Config.putPropBoolean(RECORDMETHODCALLSPROPNAME, recordMethodCalls);
         }
     }
 
@@ -658,7 +785,9 @@ public final class Terminal extends JFrame
         }
 
         public void actionPerformed(ActionEvent e) {
-            text.setUnlimitedBuffering(unlimitedBuffering.isSelected());
+            unlimitedBufferingCall = unlimitedBuffering.isSelected();
+            text.setUnlimitedBuffering(unlimitedBufferingCall);
+            Config.putPropBoolean(UNLIMITEDBUFFERINGCALLPROPNAME, unlimitedBufferingCall);
         }
     }
             
@@ -681,6 +810,7 @@ public final class Terminal extends JFrame
             return charsRead;
         }
 
+        @Override
         public boolean ready()
         {
             return ! buffer.isEmpty();
@@ -708,30 +838,28 @@ public final class Terminal extends JFrame
 
         public void write(final char[] cbuf, final int off, final int len)
         {
-            if (enabled) {
-                try {
-                    // We use invokeAndWait so that terminal output is limited to
-                    // the processing speed of the event queue. This means the UI
-                    // will still respond to user input even if the output is really
-                    // gushing.
-                    EventQueue.invokeAndWait(new Runnable() {
-                        public void run()
-                        {
-                            initialise();
-                            if(isErrorOut) {
-                                writeToErrorOut(new String(cbuf, off, len));
-                            }
-                            else {
-                                writeToTerminal(new String(cbuf, off, len));
-                            }
+            try {
+                // We use invokeAndWait so that terminal output is limited to
+                // the processing speed of the event queue. This means the UI
+                // will still respond to user input even if the output is really
+                // gushing.
+                EventQueue.invokeAndWait(new Runnable() {
+                    public void run()
+                    {
+                        initialise();
+                        if(isErrorOut) {
+                            writeToErrorOut(new String(cbuf, off, len));
                         }
-                    });
-                }
-                catch (InvocationTargetException ite) {
-                    ite.printStackTrace();
-                }
-                catch (InterruptedException ie) {}
+                        else {
+                            writeToTerminal(new String(cbuf, off, len));
+                        }
+                    }
+                });
             }
+            catch (InvocationTargetException ite) {
+                ite.printStackTrace();
+            }
+            catch (InterruptedException ie) {}
         }
 
         public void flush()

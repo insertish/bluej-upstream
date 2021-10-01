@@ -22,6 +22,7 @@
 package bluej.pkgmgr.target.role;
 
 import java.awt.Color;
+import java.awt.Paint;
 import java.awt.event.ActionEvent;
 import java.io.File;
 import java.io.IOException;
@@ -45,7 +46,6 @@ import bluej.pkgmgr.target.ClassTarget;
 import bluej.pkgmgr.target.Target;
 import bluej.utility.BlueJFileReader;
 import bluej.utility.Debug;
-import bluej.utility.DialogManager;
 import bluej.utility.FileUtility;
 import bluej.utility.Utility;
 
@@ -61,7 +61,7 @@ public class AppletClassRole extends StdClassRole
     
     private RunAppletDialog dialog;
 
-    private static final Color appletbg = Config.getItemColour("colour.class.bg.applet");
+    private static final Color appletbg = Config.getOptionalItemColour("colour.class.bg.applet");
     static final String runAppletStr = Config.getString("pkgmgr.classmenu.runApplet");
     static final String htmlComment = Config.getString("pkgmgr.runApplet.htmlComment");
 
@@ -98,9 +98,13 @@ public class AppletClassRole extends StdClassRole
     /**
      * Return the intended background colour for this type of target.
      */
-    public Color getBackgroundColour()
+    public Paint getBackgroundPaint(int width, int height)
     {
-        return appletbg;
+        if (appletbg != null) {
+            return appletbg;
+        } else {
+            return super.getBackgroundPaint(width, height);
+        }
     }
 
     /**
@@ -223,8 +227,9 @@ public class AppletClassRole extends StdClassRole
             if(execOption == RunAppletDialog.GENERATE_PAGE_ONLY) {
                 // generate HTML page for Applet using selected path and file name
                 File generatedFile = chooseWebPage(parent);
-                if(generatedFile != null)
+                if(generatedFile != null) {
                     createWebPage(generatedFile, name, pkg.getPath().getPath(), libs);
+                }
             }
             else {
                 String fname = name + HTML_EXTENSION;
@@ -299,11 +304,13 @@ public class AppletClassRole extends StdClassRole
                                 Config.getString("pkgmgr.chooseWebPage.buttonLabel"), 
                                 null, false);
 
-        if (fullFileName == null)
-            DialogManager.showError(frame, "error-no-name");
+        if (fullFileName == null) {
+            return null;
+        }
         
-        if(! fullFileName.endsWith(HTML_EXTENSION))
+        if(! fullFileName.endsWith(HTML_EXTENSION)) {
             fullFileName += HTML_EXTENSION;
+        }
 
         return new File(fullFileName);
     }

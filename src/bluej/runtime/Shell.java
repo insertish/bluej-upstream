@@ -30,7 +30,7 @@ package bluej.runtime;
  *
  * @author  Michael Cahill
  * @author  Michael Kolling
- * @version $Id: Shell.java 6703 2009-09-17 04:48:20Z davmac $
+ * @version $Id: Shell.java 6702 2009-09-17 04:42:20Z davmac $
  */
 public abstract class Shell
 {

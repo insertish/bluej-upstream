@@ -22,7 +22,11 @@
 
 package bluej.debugmgr.texteval;
 
-import java.awt.*;
+import java.awt.Cursor;
+import java.awt.Dimension;
+import java.awt.Event;
+import java.awt.Point;
+import java.awt.Rectangle;
 import java.awt.event.ActionEvent;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseEvent;
@@ -36,9 +40,13 @@ import javax.swing.Action;
 import javax.swing.JEditorPane;
 import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
-import javax.swing.text.*;
-
-import org.syntax.jedit.tokenmarker.JavaTokenMarker;
+import javax.swing.text.AbstractDocument;
+import javax.swing.text.BadLocationException;
+import javax.swing.text.Caret;
+import javax.swing.text.Element;
+import javax.swing.text.JTextComponent;
+import javax.swing.text.Keymap;
+import javax.swing.text.SimpleAttributeSet;
 
 import bluej.BlueJEvent;
 import bluej.Config;
@@ -49,10 +57,10 @@ import bluej.debugmgr.Invoker;
 import bluej.debugmgr.NamedValue;
 import bluej.debugmgr.ResultWatcher;
 import bluej.debugmgr.ValueCollection;
-import bluej.editor.moe.BlueJSyntaxView;
 import bluej.editor.moe.MoeSyntaxDocument;
 import bluej.editor.moe.MoeSyntaxEditorKit;
-import bluej.parser.TextParser;
+import bluej.parser.TextAnalyzer;
+import bluej.parser.entity.ClassLoaderResolver;
 import bluej.pkgmgr.PkgMgrFrame;
 import bluej.testmgr.record.InvokerRecord;
 import bluej.utility.Debug;
@@ -65,7 +73,7 @@ import bluej.utility.Utility;
  * account in size computations.
  * 
  * @author Michael Kolling
- * @version $Id: TextEvalPane.java 6215 2009-03-30 13:28:25Z polle $
+ * @version $Id: TextEvalPane.java 7256 2010-03-19 03:53:49Z davmac $
  */
 public class TextEvalPane extends JEditorPane 
     implements ValueCollection, ResultWatcher, MouseMotionListener
@@ -84,7 +92,7 @@ public class TextEvalPane extends JEditorPane
     private String currentCommand = "";
     private IndexHistory history;
     private Invoker invoker = null;
-    private TextParser textParser = null;
+    private TextAnalyzer textParser = null;
     private boolean firstTry;
     private boolean wrappedResult;
     private boolean mouseInTag = false;
@@ -92,17 +100,17 @@ public class TextEvalPane extends JEditorPane
     private boolean busy = false;
     private Action softReturnAction;
     
-    private List localVars = new ArrayList();
-    private List newlyDeclareds;
-    private List autoInitializedVars;
+    private List<CodepadVar> localVars = new ArrayList<CodepadVar>();
+    private List<CodepadVar> newlyDeclareds;
+    private List<String> autoInitializedVars;
 
     public TextEvalPane(PkgMgrFrame frame)
     {
         super();
         this.frame = frame;
-        setEditorKit(new MoeSyntaxEditorKit(true));
+        setEditorKit(new MoeSyntaxEditorKit(true, null));
         doc = (MoeSyntaxDocument) getDocument();
-        doc.setTokenMarker(new JavaTokenMarker());
+        doc.enableParser(true);
         defineKeymap();
         clear();
         history = new IndexHistory(20);
@@ -115,7 +123,7 @@ public class TextEvalPane extends JEditorPane
     public Dimension getPreferredSize() 
     {
         Dimension d = super.getPreferredSize();
-        d.width += BlueJSyntaxView.TAG_WIDTH + 8;  // bit of empty space looks nice
+        d.width += TextEvalSyntaxView.TAG_WIDTH + 8;  // bit of empty space looks nice
         return d;
     }
     
@@ -125,8 +133,8 @@ public class TextEvalPane extends JEditorPane
      */
     public void scrollRectToVisible(Rectangle rect)
     {
-        super.scrollRectToVisible(new Rectangle(rect.x - (BlueJSyntaxView.TAG_WIDTH + 4), rect.y,
-                rect.width + BlueJSyntaxView.TAG_WIDTH + 4, rect.height));
+        super.scrollRectToVisible(new Rectangle(rect.x - (TextEvalSyntaxView.TAG_WIDTH + 4), rect.y,
+                rect.width + TextEvalSyntaxView.TAG_WIDTH + 4, rect.height));
     }
     
     /**
@@ -177,7 +185,7 @@ public class TextEvalPane extends JEditorPane
     
     //   --- ValueCollection interface ---
     
-    public Iterator getValueIterator()
+    public Iterator<CodepadVar> getValueIterator()
     {
         return localVars.iterator();
     }
@@ -201,7 +209,7 @@ public class TextEvalPane extends JEditorPane
      */
     private NamedValue getLocalVar(String name)
     {
-        Iterator i = localVars.iterator();
+        Iterator<CodepadVar> i = localVars.iterator();
         while (i.hasNext()) {
             NamedValue nv = (NamedValue) i.next();
             if (nv.getName().equals(name))
@@ -225,7 +233,7 @@ public class TextEvalPane extends JEditorPane
         
         // Newly declared variables are now initialized
         if (newlyDeclareds != null) {
-            Iterator i = newlyDeclareds.iterator();
+            Iterator<CodepadVar> i = newlyDeclareds.iterator();
             while (i.hasNext()) {
                 CodepadVar cpv = (CodepadVar) i.next();
                 cpv.setInitialized();
@@ -356,7 +364,7 @@ public class TextEvalPane extends JEditorPane
     private void removeNewlyDeclareds()
     {
         if (newlyDeclareds != null) {
-            Iterator i = newlyDeclareds.iterator();
+            Iterator<CodepadVar> i = newlyDeclareds.iterator();
             while (i.hasNext()) {
                 localVars.remove(i.next());
             }
@@ -660,7 +668,7 @@ public class TextEvalPane extends JEditorPane
         int y = evt.getY();
         
         if(mouseInTag) {
-            if(x > BlueJSyntaxView.TAG_WIDTH) {    // moved out of tag area
+            if(x > TextEvalSyntaxView.TAG_WIDTH) {    // moved out of tag area
                 setCursor(textCursor);
                 mouseInTag = false;
             }
@@ -668,7 +676,7 @@ public class TextEvalPane extends JEditorPane
                 setTagAreaCursor(x, y);
         }
         else {
-            if(x <= BlueJSyntaxView.TAG_WIDTH) {   // moved into tag area
+            if(x <= TextEvalSyntaxView.TAG_WIDTH) {   // moved into tag area
                 setCursor(defaultCursor);
                 mouseOverObject = false;
                 setTagAreaCursor(x, y);
@@ -794,26 +802,28 @@ public class TextEvalPane extends JEditorPane
                 firstTry = true;
                 setEditable(false);    // don't allow input while we're thinking
                 busy = true;
-                if (textParser == null)
-                    textParser = new TextParser(frame.getProject().getClassLoader(), frame.getPackage().getQualifiedName(), TextEvalPane.this);
+                if (textParser == null) {
+                    textParser = new TextAnalyzer(new ClassLoaderResolver(frame.getProject().getClassLoader()),
+                            frame.getPackage().getQualifiedName(), TextEvalPane.this);
+                }
                 String retType = textParser.parseCommand(currentCommand);
                 wrappedResult = (retType != null && retType.length() != 0);
                 
                 // see if any variables were declared
                 if (retType == null) {
                     currentCommand = textParser.getAmendedCommand();
-                    List declaredVars = textParser.getDeclaredVars();
+                    List<DeclaredVar> declaredVars = textParser.getDeclaredVars();
                     if (declaredVars != null) {
-                        Iterator i = textParser.getDeclaredVars().iterator();
+                        Iterator<DeclaredVar> i = declaredVars.iterator();
                         while (i.hasNext()) {
                             if (newlyDeclareds == null) {
-                                newlyDeclareds = new ArrayList();
+                                newlyDeclareds = new ArrayList<CodepadVar>();
                             }
                             if (autoInitializedVars == null) {
-                                autoInitializedVars = new ArrayList();
+                                autoInitializedVars = new ArrayList<String>();
                             }
                             
-                            TextParser.DeclaredVar dv = (TextParser.DeclaredVar) i.next();
+                            DeclaredVar dv = i.next();
                             String declaredName = dv.getName();
                             
                             if (getLocalVar(declaredName) != null) {
@@ -825,14 +835,14 @@ public class TextEvalPane extends JEditorPane
                                 return;
                             }
                             
-                            CodepadVar cpv = new CodepadVar(dv.getName(), dv.getDeclaredVarType(), dv.checkFinal());
+                            CodepadVar cpv = new CodepadVar(dv.getName(), dv.getDeclaredType(), dv.isFinal());
                             newlyDeclareds.add(cpv);
                             localVars.add(cpv);
 
                             // If the variable was declared but not initialized, the codepad
                             // auto-initializes it. We add to a list so that we can display
                             // a warning to that effect, once the command has completed.
-                            if (! dv.checkVarInit()) {
+                            if (! dv.isInitialized()) {
                                 autoInitializedVars.add(dv.getName());
                             }
                         }

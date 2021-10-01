@@ -19,6 +19,7 @@
  This file is subject to the Classpath exception as provided in the  
  LICENSE.txt file that accompanied this code.
  */
+
 #define UNICODE
 
 #include <windows.h>
@@ -160,6 +161,19 @@ static char * wideToUTF8(std::basic_string<WCHAR> s)
 	return outputUTF8;
 }
 
+// convert a UTF16 string to a string in the windows system codepage
+static char * wideToACP(std::basic_string<WCHAR> s)
+{
+	// Assume max of 4 UTF8 bytes to represent a WCHAR
+	int inputChars = s.length();
+	int outputUTF8size = inputChars * 4 + 1;
+	
+	char *outputUTF8 = new char[outputUTF8size];
+	WideCharToMultiByte(CP_ACP, 0, s.c_str(), inputChars + 1,
+			outputUTF8, outputUTF8size, NULL, NULL);
+	
+	return outputUTF8;
+}
 
 // Escape (quote) a command line parameter if necessary.
 // Windows uses a really stupid escaping system - any number of backslashes not followed
@@ -332,17 +346,17 @@ bool launchVM(string jdkLocation)
 	// another VM and have two loaded at once. That might cause problems.
 	externalLaunch = true;
 	
-	// Make real classpath string. Needs to be UTF-8?
+	// Make real classpath string. Needs to be Ansi (system codepage)
 	
-	char * bjDirUTF8 = wideToUTF8(bluejPath);
-	char * jdkLocUTF8 = wideToUTF8(jdkLocation);
+	char * bjDirACP = wideToACP(bluejPath);
+	char * jdkLocACP = wideToACP(jdkLocation);
 	
 	std::string classPathOpt = "-Djava.class.path=";
-	(classPathOpt += bjDirUTF8) += "\\lib\\bluej.jar;";
-	(classPathOpt += jdkLocUTF8) += "\\lib\\tools.jar";
+	(classPathOpt += bjDirACP) += "\\lib\\bluej.jar;";
+	(classPathOpt += jdkLocACP) += "\\lib\\tools.jar";
 	
-	delete [] bjDirUTF8;
-	delete [] jdkLocUTF8;
+	delete [] bjDirACP;
+	delete [] jdkLocACP;
 	
 	char *classPathOptArr = new char[classPathOpt.length() + 1];
 	strcpy(classPathOptArr, classPathOpt.c_str());
@@ -442,10 +456,10 @@ bool launchVM(string jdkLocation)
 
 
 // Find VMs under a VM provider key eg (sun, ibm)
-static void findRegistryVMs(string providerKey)
+static void findRegistryVMs(string providerKey, int extraFlags)
 {
 	HKEY regKey;
-	LONG rval = RegOpenKeyEx(HKEY_LOCAL_MACHINE, providerKey.c_str(), 0, KEY_READ, &regKey);
+	LONG rval = RegOpenKeyEx(HKEY_LOCAL_MACHINE, providerKey.c_str(), 0, KEY_READ | extraFlags, &regKey);
 	
 	TCHAR buffer[1024];
 	
@@ -456,7 +470,7 @@ static void findRegistryVMs(string providerKey)
 			rval = RegEnumKeyEx(regKey, dwIndex, buffer, &bufSize, NULL, NULL, NULL, NULL);
 			if (rval == ERROR_SUCCESS) {
 				HKEY subKey;
-				LONG vval = RegOpenKeyEx(regKey, buffer, 0, KEY_QUERY_VALUE, &subKey);
+				LONG vval = RegOpenKeyEx(regKey, buffer, 0, KEY_QUERY_VALUE | extraFlags, &subKey);
 				if (vval == ERROR_SUCCESS) {
 					if (lstrcmp(buffer, TEXT(REQUIREDJAVA)) > 0) {
 						// Ok - suitable version
@@ -474,11 +488,17 @@ static void findRegistryVMs(string providerKey)
 	}
 }
 
+#ifndef KEY_WOW64_64KEY
+#define KEY_WOW64_64KEY 0x100
+#endif
+
 // Find VMs from the registry
 static void findRegistryVMs()
 {
-	findRegistryVMs(TEXT("Software\\JavaSoft\\Java Development Kit"));
-	findRegistryVMs(TEXT("Software\\IBM\\Java Development Kit"));
+	findRegistryVMs(TEXT("Software\\JavaSoft\\Java Development Kit"), 0);
+	findRegistryVMs(TEXT("Software\\JavaSoft\\Java Development Kit"), KEY_WOW64_64KEY);
+	findRegistryVMs(TEXT("Software\\IBM\\Java Development Kit"), 0);
+	findRegistryVMs(TEXT("Software\\IBM\\Java Development Kit"), KEY_WOW64_64KEY);
 }
 
 

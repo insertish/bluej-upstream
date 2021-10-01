@@ -22,7 +22,6 @@
 package bluej.testmgr.record;
 
 import bluej.debugger.DebuggerObject;
-import bluej.debugger.gentype.GenTypeArray;
 import bluej.debugger.gentype.JavaType;
 import bluej.debugmgr.objectbench.ObjectBench;
 import bluej.debugmgr.objectbench.ObjectWrapper;
@@ -36,7 +35,7 @@ import bluej.utility.JavaNames;
  * This record is for method calls that return a result.
  *
  * @author  Andrew Patterson
- * @version $Id: MethodInvokerRecord.java 6312 2009-05-07 04:44:13Z davmac $
+ * @version $Id: MethodInvokerRecord.java 7517 2010-05-07 08:23:32Z davmac $
  */
 public class MethodInvokerRecord extends VoidMethodInvokerRecord
 {
@@ -76,57 +75,57 @@ public class MethodInvokerRecord extends VoidMethodInvokerRecord
      * @param name
      * @param type
      */
-	public void setBenchName(String name, String type)
-	{
-		benchName = name;
-		benchType = type;
-	}
-	
-	/**
-	 * Construct a declaration for any objects constructed
-	 * by this invoker record.
-	 * 
-	 * @return a String representing the object declaration
-	 *         src or null if there is none.
-	 */    
+    public void setBenchName(String name, String type)
+    {
+        benchName = name;
+        benchType = type;
+    }
+
+    /**
+     * Construct a declaration for any objects constructed
+     * by this invoker record.
+     * 
+     * @return a String representing the object declaration
+     *         src or null if there is none.
+     */    
     public String toFixtureDeclaration()
     {
-		// if it hasn't been assigned a name there is nothing to do for
-		// fixture declaration
-		if (benchName == null)
-			return null;
+        // if it hasn't been assigned a name there is nothing to do for
+        // fixture declaration
+        if (benchName == null)
+            return null;
 
-		// declare the variable		
-		StringBuffer sb = new StringBuffer();
-		sb.append(fieldDeclarationStart);
-		sb.append(benchDeclaration());
-		sb.append(benchName);
-		sb.append(statementEnd);
+        // declare the variable		
+        StringBuffer sb = new StringBuffer();
+        sb.append(fieldDeclarationStart);
+        sb.append(benchDeclaration());
+        sb.append(benchName);
+        sb.append(statementEnd);
 
-		return sb.toString();
+        return sb.toString();
     }
     
-	/**
-	 * Construct a portion of an initialisation method for
-	 * this invoker record.
-	 *  
-	 * @return a String reprenting the object initialisation
-	 *         src or null if there is none. 
-	 */    
+    /**
+     * Construct a portion of an initialisation method for
+     * this invoker record.
+     *  
+     * @return a String reprenting the object initialisation
+     *         src or null if there is none. 
+     */    
     public String toFixtureSetup()
     {
-		if (benchName == null) {
-			return secondIndent + command + statementEnd;
-		}
-		
-		StringBuffer sb = new StringBuffer();
-		sb.append(secondIndent);
-		sb.append(benchAssignmentTypecast());
+        if (benchName == null) {
+            return secondIndent + command + statementEnd;
+        }
+
+        StringBuffer sb = new StringBuffer();
+        sb.append(secondIndent);
+        sb.append(benchAssignmentTypecast());
         sb.append(statementEnd);
-		
-		return sb.toString();
+
+        return sb.toString();
     }
-    
+
     /**
      * Construct a portion of a test method for this invoker record.
      * 
@@ -136,20 +135,20 @@ public class MethodInvokerRecord extends VoidMethodInvokerRecord
     {
         StringBuffer sb = new StringBuffer();
         sb.append(toTestMethodInit());
-    	
+
         String resultRef = toExpression();
 
         // with no uses of the result, just invoke the method.
         if (getUsageCount() == 0) {
-        	sb.append(secondIndent + resultRef + statementEnd);
+            sb.append(secondIndent + resultRef + statementEnd);
         }
         else {
-        	// here are all the assertions
-        	for (int i = 0; i < getAssertionCount(); i++) {
-        		sb.append(secondIndent);
-        		sb.append(insertCommandIntoAssertionStatement(getAssertion(i), resultRef));
-        		sb.append(statementEnd);
-        	}
+            // here are all the assertions
+            for (int i = 0; i < getAssertionCount(); i++) {
+                sb.append(secondIndent);
+                sb.append(insertCommandIntoAssertionStatement(getAssertion(i), resultRef));
+                sb.append(statementEnd);
+            }
         }
 
         return sb.toString();
@@ -178,7 +177,7 @@ public class MethodInvokerRecord extends VoidMethodInvokerRecord
                 assert (result != null);
                 ObjectBench bench = pkgMgrFrame.getObjectBench();
                 ObjectWrapper wrapper = ObjectWrapper.getWrapper(pkgMgrFrame, bench, result, result.getGenType(),
-                        "result");
+                "result");
                 bench.addObject(wrapper); // might change name
                 benchName = wrapper.getName();            
             }
@@ -191,7 +190,7 @@ public class MethodInvokerRecord extends VoidMethodInvokerRecord
             // We used "Get" on the result, so increase usage count.
             incUsageCount();
         }
-        
+
         assert (benchName != null);
         methodCallInited = true;
         // assign result to a local variable with the given benchName.
@@ -216,49 +215,39 @@ public class MethodInvokerRecord extends VoidMethodInvokerRecord
         }
         return benchName;
     }
-	
-    @Override
-    public String getExpressionGlue()
-    {
-        if(returnType instanceof GenTypeArray) {
-            return "";
-        } else {
-            return ".";
-        }
-    }
 
     /**
      * @return A string representing the type name of an object
      */
-	private String benchDeclaration()
-	{
-		return JavaNames.typeName(benchType) + " ";
-	}
-	
+    private String benchDeclaration()
+    {
+        return JavaNames.typeName(benchType) + " ";
+    }
+
     /**
      * @return A string representing the assignment statement
      *         with an optional typecast to get the type correct
      */
-	protected String benchAssignmentTypecast()
-	{
-		StringBuffer sb = new StringBuffer();
-		
-		sb.append(benchName);
-		sb.append(" = ");
+    protected String benchAssignmentTypecast()
+    {
+        StringBuffer sb = new StringBuffer();
 
-		// check if a typecast is required
-		if (!benchType.equals(returnType.toString(false))) {
-			sb.append("(");
-			sb.append(benchType);
-			sb.append(")");
-		}
+        sb.append(benchName);
+        sb.append(" = ");
 
-		sb.append(command);
+        // check if a typecast is required
+        if (!benchType.equals(returnType.toString(false))) {
+            sb.append("(");
+            sb.append(benchType);
+            sb.append(")");
+        }
 
-		return sb.toString();
-	}
+        sb.append(command);
 
-	@Override
+        return sb.toString();
+    }
+
+    @Override
     public void addAssertion(String assertion)
     {
         super.addAssertion(assertion);

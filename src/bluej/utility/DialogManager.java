@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2010  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -21,14 +21,17 @@
  */
 package bluej.utility;
 
+import java.awt.Component;
+import java.awt.Point;
+import java.awt.Window;
+import java.io.File;
+
+import javax.swing.JButton;
+import javax.swing.JDialog;
+import javax.swing.JOptionPane;
+import javax.swing.JPanel;
+
 import bluej.Config;
-
-import java.awt.*;
-import java.io.*;
-import java.util.HashMap;
-import java.util.Map;
-
-import javax.swing.*;
 
 /**
  * The dialog manager is a utility class to simplyfy communication with 
@@ -37,7 +40,6 @@ import javax.swing.*;
  * internationalised, using BlueJ's langauage library system.
  *
  * @author Michael Kolling
- * @version $Id: DialogManager.java 6353 2009-05-27 04:26:36Z marionz $
  */
 public class DialogManager
 {
@@ -58,7 +60,6 @@ public class DialogManager
                                           JOptionPane.INFORMATION_MESSAGE);
     }
 
-
     /**
      * Show an information dialog with message and "OK" button. The
      * message itself is identified by a message ID (a short string)
@@ -72,6 +73,39 @@ public class DialogManager
         String message = getMessage(msgID);
         if(message != null)
             JOptionPane.showMessageDialog(parent, message + "\n" + text);
+    }
+    
+    /**
+     * Show an information dialog with message and "OK" button. The
+     * message itself is identified by a message ID (a short string)
+     * which is looked up in the language specific dialogue text file
+     * (eg. "dialogues.english"). A text (given in a parameter) is appended
+     * as a prefix to the message. Use showMessageWithText in order to
+     * append to the suffix of the message
+     */
+    public static void showMessageWithPrefixText(Component parent, String msgID,
+                                           String text)
+    {
+        String message = getMessage(msgID);
+        if(message != null)
+            JOptionPane.showMessageDialog(parent, text+ "\n"+message);
+    }
+    
+    /**
+     * Show an information dialog with message and "OK" button. The
+     * message itself is identified by a message ID (a short string)
+     * which is looked up in the language specific dialogue text file
+     * (eg. "dialogues.english"). A text (given in a parameter) is appended
+     * as a prefix to the message. Some text (given as a parameter -
+     * innerText) is inserted within the message itself. 
+     */
+    public static void showMessageWithPrefixText(Component parent, String msgID,
+                                           String text, String innerText)
+    {
+        String message = getMessage(msgID);
+        String messageDialog=Utility.mergeStrings(message, innerText);
+        if(message != null)
+            JOptionPane.showMessageDialog(parent, text+ "\n"+messageDialog);
     }
 
 
@@ -354,4 +388,15 @@ public class DialogManager
         }
         return 0;
     }
+
+    public static void addOKCancelButtons(JPanel panel, JButton okButton, JButton cancelButton) {
+        if (Config.isMacOS()) {
+            panel.add(cancelButton);
+            panel.add(okButton);
+        } else {
+            panel.add(okButton);
+            panel.add(cancelButton);
+        }
+    }
+
 }

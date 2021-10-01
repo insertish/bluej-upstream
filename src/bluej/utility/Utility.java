@@ -43,6 +43,7 @@ import java.util.Set;
 
 import javax.swing.AbstractButton;
 import javax.swing.border.Border;
+import javax.swing.text.TabExpander;
 
 import bluej.Config;
 
@@ -51,7 +52,7 @@ import bluej.Config;
  * 
  * @author Michael Cahill
  * @author Michael Kolling
- * @version $Id: Utility.java 6689 2009-09-16 14:18:42Z davmac $
+ * @version $Id: Utility.java 7645 2010-05-20 10:54:49Z nccb $
  */
 public class Utility
 {
@@ -67,6 +68,15 @@ public class Utility
     {
         for (int i = 0; i < thickness; i++)
             g.drawRect(x + i, y + i, width - 2 * i, height - 2 * i);
+    }
+    
+    /**
+     * Draw a thick rounded rectangle - another of the things missing from the AWT
+     */
+    public static void drawThickRoundRect(Graphics g, int x, int y, int width, int height, int arc, int thickness)
+    {
+        for (int i = 0; i < thickness; i++)
+            g.drawRoundRect(x + i, y + i, width - 2 * i, height - 2 * i, arc, arc);
     }
 
     /**
@@ -116,7 +126,9 @@ public class Utility
         if (xOffset < 0) {
             xOffset = 0;
         }
-        int yOffset = (height + fm.getAscent()) / 2;
+        // This is the space left around the text, divided by 2 (equal gap above and below)
+        // to get the top of the text, plus the ascent to get the baseline 
+        int yOffset = fm.getAscent() + ((height - fm.getAscent() - fm.getDescent()) / 2);
         g.drawString(str, x + xOffset, y + yOffset);
         g.setClip(oldClip);
     }
@@ -621,6 +633,73 @@ public class Utility
         else
             return originalString;
     }
+    
+    /**
+     * Calculates how many spaces each tab in the given string turns into.
+     * 
+     * If there is a tab at character index N, the array entry N in the
+     * returned array will indicate how many spaces the tab converts into.
+     * The value of all other entries is undefined.
+     */
+    public static int[] calculateTabSpaces(String line, int tabSize)
+    {
+        // Bigger array than necessary, but we're only doing one line at a time:
+        int[] tabSpaces = new int[line.length()];
+        int curPos = 0;
+        for (int i = 0; i < line.length(); i++) {
+            if (line.charAt(i) == '\t') {
+                // calculate how many spaces to add
+                int numberOfSpaces = tabSize - (curPos % tabSize);
+                tabSpaces[i] = numberOfSpaces;
+                curPos += numberOfSpaces;
+            }
+            else {
+                curPos += 1;
+            }
+        }
+        return tabSpaces;
+    }
+    
+    /**
+     * Makes a TabExpander object that will turn tabs into the appropriate
+     * white-space, based on the original String.  This means that the tabs
+     * will get aligned to the correct tab-stops rather than just being
+     * converted into a set number of spaces.  Thus, the TabExpander will match
+     * the behaviour of the editor.
+     */
+    public static TabExpander makeTabExpander(String line, int tabSize, final FontMetrics fontMetrics)
+    {
+        final int[] tabSpaces = Utility.calculateTabSpaces(line, tabSize);
+        
+        return new TabExpander() {
+            public float nextTabStop(float x, int tabOffset) {
+                return x + tabSpaces[tabOffset] * fontMetrics.charWidth(' ');
+            }
+        };
+    }
+    
+    /**
+     * Given a String and an index into it, along with the pre-calculated tabSpaces array,
+     * advances the index by the given number of character widths.
+     * 
+     * If the String contains to tabs, this effectively adds advanceBy to index.
+     * 
+     * If the String does contain tabs, their width is taken into account
+     * as the index is advanced through the array.
+     * 
+     */
+    public static int advanceChars(String line, int[] tabSpaces, int index, int advanceBy)
+    {
+        while (advanceBy > 0 && index < line.length())
+        {
+            int width = (line.charAt(index) == '\t') ? tabSpaces[index] : 1;	
+            advanceBy -= width;
+            index += 1;
+        }
+        return index;
+    }
+    
+    
 
     /**
      * Check if this is the first time a particular event (identified by the
@@ -720,5 +799,23 @@ public class Utility
                 return true;                
         }
         return false;
+    }
+    
+    /**
+     * Takes a list of lines and forms them into a multiline tool-tip.
+     * 
+     * The way to do this is to use HTML; see http://www.jguru.com/faq/view.jsp?EID=10653
+     */
+    public static String multilineTooltip(String... lines)
+    {
+        StringBuilder str = new StringBuilder("<html>");
+        for (int i = 0; i < lines.length; i++) {
+            str.append(lines[i]);
+            if (i != lines.length - 1) {
+                str.append("<br>");
+            }
+        }
+        str.append("</html>");
+        return str.toString();
     }
 }

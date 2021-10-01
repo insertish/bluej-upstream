@@ -22,6 +22,8 @@
 package bluej.pkgmgr.target.role;
 
 import java.awt.Color;
+import java.awt.Paint;
+
 import javax.swing.JPopupMenu;
 import bluej.Config;
 import bluej.pkgmgr.target.ClassTarget;
@@ -31,12 +33,12 @@ import bluej.prefmgr.PrefMgr;
  * A role object to represent the behaviour of enums.
  * 
  * @author Poul Henriksen <polle@mip.sdu.dk>
- * @version $Id: EnumClassRole.java 6215 2009-03-30 13:28:25Z polle $
+ * @version $Id: EnumClassRole.java 7594 2010-05-18 14:39:08Z nccb $
  */
 public class EnumClassRole extends ClassRole
 {
     public final static String ENUM_ROLE_NAME = "EnumTarget";
-    private static final Color enumbg = Config.getItemColour("colour.class.bg.enum");
+    private static final Color enumbg = Config.getOptionalItemColour("colour.class.bg.enum");
     
     /**
      * Create the enum class role.
@@ -58,9 +60,13 @@ public class EnumClassRole extends ClassRole
     /**
      * Return the intended background colour for this type of target.
      */
-    public Color getBackgroundColour()
+    public Paint getBackgroundPaint(int width, int height)
     {
-        return enumbg;
+        if (enumbg != null) {
+            return enumbg;
+        } else {
+            return super.getBackgroundPaint(width, height);
+        }
     }
 
     /**
@@ -96,4 +102,6 @@ public class EnumClassRole extends ClassRole
         }
         return true;
     }
+    
+    
 }

@@ -23,6 +23,7 @@ package bluej.parser.symtab;
 
 import java.util.*;
 
+import bluej.utility.JavaUtils;
 import bluej.utility.SortedProperties;
 
 /**
@@ -46,11 +47,11 @@ import bluej.utility.SortedProperties;
  */
 public final class ClassInfo
 {
-    private static final String[] appletClasses = { "Applet", "JApplet" };
-    private static final String[] unitTestClasses = { "TestCase", "junit.framework.TestCase" };
-    private static final String[] midletClasses = { "MIDlet", "javax.microedition.midlet.MIDlet" }; 
+    private static final String[] appletClasses = { "java.applet.Applet", "javax.swing.JApplet" };
+    private static final String[] unitTestClasses = { "junit.framework.TestCase" };
+    private static final String[] midletClasses = { "javax.microedition.midlet.MIDlet" }; 
 
-    private boolean foundClass = false, foundPublicClass = false;
+    private boolean foundPublicClass = false;
 
     private String name;
     private String superclass;
@@ -62,6 +63,17 @@ public final class ClassInfo
     
     private List<String> typeParameterTexts;
     private Selection typeParametersSelection;
+    private Selection extendsReplaceSelection;
+
+    // how we would replace the superclass name in a class
+    private Selection superReplaceSelection;
+
+    private boolean isInterface = false;
+    private boolean isAbstract = false;
+    private boolean isApplet = false;
+    private boolean isUnitTest = false;
+    private boolean isEnum = false;
+    private boolean isMIDlet = false;
 
     private class SavedComment
     {
@@ -95,18 +107,6 @@ public final class ClassInfo
         }
     }
 
-    private boolean isInterface = false;
-    private boolean isAbstract = false;
-    private boolean isApplet = false;
-    private boolean isUnitTest = false;
-    private boolean isEnum = false;
-    private boolean isMIDlet = false;
-
-    public boolean foundClass()
-    {
-        return foundClass;
-    }
-
     public boolean foundPublicClass()
     {
         return foundPublicClass;
@@ -119,10 +119,9 @@ public final class ClassInfo
     {
         this.name = name;
 
-        foundClass = true;
-
-        if(pub)
+        if(pub) {
             foundPublicClass = true;
+        }
     }
 
     public void setSuperclass(String name)
@@ -150,7 +149,8 @@ public final class ClassInfo
         }
     }
     
-    public void setEnum(boolean isEnum) {
+    public void setEnum(boolean isEnum)
+    {
         this.isEnum = isEnum;
     }
 
@@ -190,14 +190,10 @@ public final class ClassInfo
             used.add(name);
     }
 
-    public void addComment(String target, String comment)
-    {
-        addComment(target, comment, null);
-    }
-
     /**
-     * Add a javadoc comment to this class. The target specifies the method or constructor
-     * which the comment applies to. It takes the form:<p>
+     * Add a method/constructor description (with optional javadoc comment) to this
+     * class. The target specifies the method or constructor which the comment applies
+     * to. It takes the form:<p>
      * 
      *  <code>&lt;type-pars&gt; return_type method_name(arg_type_1,arg_type2,arg_type3)</code>
      * 
@@ -210,37 +206,17 @@ public final class ClassInfo
      * <li>method_name is the name of the method (or the class name for a constructor)
      * <li>arg_type_X is the generic parameter type, followed by "[]" if an array type
      *     (eg. List&lt;Thread&gt;[][]), followed by " ..." for a vararg parameter.
+     * </ul>
      * 
      * @param target  The method/constructor the comment applies to (see description above)
-     * @param comment   The comment text
+     * @param comment   The comment text (may be null)
      * @param paramnames  The parameter names from the method definition, as a space-seperated
      *                    list. May be null if there are no parameter names.
      */
     public void addComment(String target, String comment, String paramnames)
     {
         // remove asterisks (*) from beginning of comment
-
-        // a valid comment must being with /* and end with */ so we have
-        // at least 4 characters
-
-        if(comment != null && comment.length() > 4) {
-            comment = comment.substring(2, comment.length()-2);
-
-            StringBuffer finalComment = new StringBuffer(comment.length());
-            StringTokenizer tokenizer = new StringTokenizer(comment,"\n\r\f");
-
-            while(tokenizer.hasMoreTokens()) {
-                StringBuffer line = new StringBuffer(tokenizer.nextToken());
-                char ch = (line.length() > 0 ? line.charAt(0) : 'x');
-                while(ch == ' ' || ch == '\t' || ch == '*') {
-                    line.deleteCharAt(0);
-                    ch = (line.length() > 0 ? line.charAt(0) : 'x');
-                }
-                finalComment.append(line.toString());
-                finalComment.append('\n');
-            }
-            comment = finalComment.toString();
-        }
+        comment = JavaUtils.javadocToString(comment);
         comments.add(new SavedComment(target, comment, paramnames));
     }
 
@@ -261,8 +237,8 @@ public final class ClassInfo
 
     /**
      * Record where we would insert the string "extends" in a class or interface.
-     * For a class/interface which already extends other classes/interfaces, records
-     * where to insert an additional class/interface (after the existing ones). 
+     * For a class/interface which already extends other classes/interfaces, should
+     * be set to null.
      *
      * @param s the Selection object which records a location to
      *          insert the "extends" keyword or additional interface
@@ -275,7 +251,7 @@ public final class ClassInfo
     /**
      * Returns where we would insert the string "extends" in a class/interface.
      * For a class/interface which already extends other classes/interfaces, returns
-     * where to insert an additional class/interface (after the existing ones). 
+     * null. 
      *
      * @returns s the Selection object which records a location to
      *          insert the "extends" keyword
@@ -334,12 +310,6 @@ public final class ClassInfo
         return extendsReplaceSelection;
     }
 
-    private Selection extendsReplaceSelection;
-
-
-    // how we would replace the superclass name in a class
-    private Selection superReplaceSelection;
-
     public void setSuperReplaceSelection(Selection s)
     {
         superReplaceSelection = s;
@@ -369,26 +339,15 @@ public final class ClassInfo
         interfaceSelections = selections;
     }
     
-    public void setTypeParameterTexts(List<String> newTexts)
-    {
-        typeParameterTexts = newTexts;
-    }
-    
     public List<String> getTypeParameterTexts()
     {
         return typeParameterTexts;
     }
 
-
     public List<Selection> getInterfaceSelections()
     {
         return interfaceSelections;
     }
-
-//    public List getInterfaceTexts()
-//    {
-//        return interfaceTexts;
-//    }
 
     public boolean hasInterfaceSelections()
     {
@@ -460,6 +419,9 @@ public final class ClassInfo
 
     // accessors:
 
+    /**
+     * Get the (fully-qualified) name of the superclass of the represented class.
+     */
     public String getSuperclass()
     {
         return superclass;
@@ -470,6 +432,10 @@ public final class ClassInfo
         return name;
     }
 
+    /**
+     * Get a list of the (fully-qualified) interface names that the represented
+     * class implements.
+     */
     public List<String> getImplements()
     {
         return implemented;
@@ -483,11 +449,6 @@ public final class ClassInfo
     public boolean hasTypeParameter()
     {
         return (typeParametersSelection != null);
-    }
-    
-    public Selection getTypeParametersSelection()
-    {
-        return typeParametersSelection;
     }
     
     /**

@@ -48,7 +48,7 @@ public class GenTypeTpar extends GenTypeSolid
     {
         return name;
     }
-    
+        
     public String toTypeArgString(NameTransform nt)
     {
         return name;
@@ -65,30 +65,30 @@ public class GenTypeTpar extends GenTypeSolid
         return false;
     }
     
-    public boolean equals(GenTypeParameterizable other)
+    public boolean equals(JavaType other)
     {
         // For tpars to be equal, they must be the *same* tpar.
         return other == this;
     }
     
-    public JavaType mapTparsToTypes(Map tparams)
+    public GenTypeSolid mapTparsToTypes(Map<String, ? extends GenTypeParameter> tparams)
     {
         if (tparams == null)
             return this;
         
-        GenTypeParameterizable newType = (GenTypeParameterizable)tparams.get(name);
+        GenTypeParameter newType = (GenTypeParameter)tparams.get(name);
         if( newType == null )
             return this;
         else
-            return newType;
+            return newType.getCapture().asClass();
     }
     
-    public void getParamsFromTemplate(Map map, GenTypeParameterizable template)
+    public void getParamsFromTemplate(Map<String,GenTypeParameter> map, GenTypeParameter template)
     {
         // If a mapping already exists, precisify it against the template.
         // Otherwise, create a new mapping to the template.
         
-        GenTypeParameterizable x = (GenTypeSolid) map.get(name);
+        GenTypeParameter x = map.get(name);
         if (x != null)
             x = x.precisify(template);
         else
@@ -96,7 +96,7 @@ public class GenTypeTpar extends GenTypeSolid
         map.put(name, x);
     }
     
-    public GenTypeParameterizable precisify(GenTypeParameterizable other)
+    public GenTypeParameter precisify(GenTypeParameter other)
     {
         // shouldn't get called.
         return other;
@@ -113,8 +113,8 @@ public class GenTypeTpar extends GenTypeSolid
             return true;
         
         // If the other type has an upper bound which is this tpar, it's assignable
-        if (t instanceof GenTypeParameterizable) {
-            GenTypeParameterizable tp = (GenTypeParameterizable) t;
+        if (t instanceof GenTypeParameter) {
+            GenTypeParameter tp = (GenTypeParameter) t;
             GenTypeSolid [] ubounds = tp.getUpperBounds();
             for (int i = 0; i < ubounds.length; i++) {
                 if (ubounds[i] == this)
@@ -137,7 +137,7 @@ public class GenTypeTpar extends GenTypeSolid
         throw new UnsupportedOperationException();
     }
     
-    public void erasedSuperTypes(Set s)
+    public void erasedSuperTypes(Set<Reflective> s)
     {
         throw new UnsupportedOperationException();
     }
@@ -147,8 +147,15 @@ public class GenTypeTpar extends GenTypeSolid
         throw new UnsupportedOperationException();
     }
     
-    public boolean contains(GenTypeParameterizable other)
+    @Override
+    public GenTypeArray getArray()
     {
-        return other == this;
+        return new GenTypeArray(this);
+    }
+    
+    @Override
+    public JavaType getCapture()
+    {
+        return this;
     }
 }
