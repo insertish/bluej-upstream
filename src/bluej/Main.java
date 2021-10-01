@@ -23,8 +23,8 @@ package bluej;
 
 import bluej.collect.DataCollector;
 import bluej.extensions.event.ApplicationEvent;
-import bluej.extmgr.ExtensionsManager;
 import bluej.extmgr.ExtensionWrapper;
+import bluej.extmgr.ExtensionsManager;
 import bluej.pkgmgr.Package;
 import bluej.pkgmgr.PkgMgrFrame;
 import bluej.pkgmgr.Project;
@@ -34,13 +34,19 @@ import bluej.utility.Debug;
 import bluej.utility.DialogManager;
 import bluej.utility.javafx.FXPlatformRunnable;
 import bluej.utility.javafx.JavaFXUtil;
-
 import com.apple.eawt.AppEvent;
 import com.apple.eawt.Application;
 import com.apple.eawt.QuitResponse;
-import de.codecentric.centerdevice.dialogs.about.AboutStageBuilder;
 import de.codecentric.centerdevice.MenuToolkit;
+import de.codecentric.centerdevice.dialogs.about.AboutStageBuilder;
+import javafx.application.Platform;
+import javafx.fxml.FXMLLoader;
+import javafx.scene.control.Menu;
+import javafx.scene.control.MenuItem;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 
+import javax.swing.*;
 import java.io.File;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
@@ -50,14 +56,6 @@ import java.net.URLEncoder;
 import java.util.List;
 import java.util.Properties;
 import java.util.UUID;
-import javafx.application.Platform;
-import javafx.fxml.FXMLLoader;
-import javafx.scene.control.Menu;
-import javafx.scene.control.MenuItem;
-import javax.swing.SwingUtilities;
-
-import threadchecker.OnThread;
-import threadchecker.Tag;
 
 /**
  * BlueJ starts here. The Boot class, which is responsible for dealing with
@@ -247,9 +245,16 @@ public class Main
         initialProjects = Boot.getMacInitialProjects();
         Application macApp = Application.getApplication();
 
+        // Even though BlueJ is JavaFX, the open-files handling still goes
+        // through the com.eawt.*/AppleJavaExtensions handling, once it is loaded
+        // So we must do the handler set up for AWT/Swing even though we're running
+        // in JavaFX.  May need revisiting in Java 9 or whenever they fix the Mac
+        // open files handling issue:
+        prepareMacOSMenuSwing(macApp);
+
         // We are using the NSMenuFX library to fix Mac Application menu
         // only when it is a FX menu. This is now only needed for BlueJ,
-        // as Greenffot still on Swing. When Greenfoot menu is moved to FX,
+        // as Greenfoot is still on Swing. When Greenfoot menu is moved to FX,
         // both should use the workaround in prepareMacOSMenuFX().
         // But when the JDK APIs (i.e. handleAbout() etc) are fixed,
         // both should go back to the way as in prepareMacOSMenuSwing().
@@ -257,9 +262,6 @@ public class Main
             if (macApp != null) {
                 prepareMacOSMenuFX();
             }
-        }
-        else {
-            prepareMacOSMenuSwing(macApp);
         }
 
         // This is not included in the above condition to avoid future bugs,
@@ -304,7 +306,9 @@ public class Main
             // Preferences
             // It has been added without a separator due to a bug in the library used
             MenuItem preferences = new MenuItem(Config.getString("menu.tools.preferences"));
-            preferences.setAccelerator(Config.getAcceleratorKeyFX("menu.tools.preferences"));
+            if (Config.hasAcceleratorKey("menu.tools.preferences")) {
+                preferences.setAccelerator(Config.getAcceleratorKeyFX("menu.tools.preferences"));
+            }
             preferences.setOnAction(event -> SwingUtilities.invokeLater(() -> PkgMgrFrame.handlePreferences()));
             defaultApplicationMenu.getItems().add(1, preferences);
 
@@ -536,25 +540,22 @@ public class Main
         String systemID = getOperatingSystem();
 
         String editorStats = "";
-        if (Config.isGreenfoot())
+        int javaEditors = Config.getEditorCount(Config.SourceType.Java);
+        int strideEditors = Config.getEditorCount(Config.SourceType.Stride);
+        try
         {
-            int javaEditors = Config.getEditorCount(Config.SourceType.Java);
-            int strideEditors = Config.getEditorCount(Config.SourceType.Stride);
-            try
+            if (javaEditors != -1 && strideEditors != -1)
             {
-                if (javaEditors != -1 && strideEditors != -1)
-                {
-                    editorStats = "&javaeditors=" + URLEncoder.encode(Integer.toString(javaEditors), "UTF-8")
-                        + "&strideeditors=" + URLEncoder.encode(Integer.toString(strideEditors), "UTF-8");
-                }
+                editorStats = "&javaeditors=" + URLEncoder.encode(Integer.toString(javaEditors), "UTF-8")
+                    + "&strideeditors=" + URLEncoder.encode(Integer.toString(strideEditors), "UTF-8");
             }
-            catch (UnsupportedEncodingException ex)
-            {
-                Debug.reportError(ex);
-            }
-            
-            Config.resetEditorsCount();
         }
+        catch (UnsupportedEncodingException ex)
+        {
+            Debug.reportError(ex);
+        }
+
+        Config.resetEditorsCount();
         
         // User uid. Use the one already stored in the Property if it exists,
         // otherwise generate one and store it for next time.

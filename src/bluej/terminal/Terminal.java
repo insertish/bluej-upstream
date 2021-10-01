@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2013,2014,2015,2016  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2013,2014,2015,2016,2017  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -479,6 +479,14 @@ public final class Terminal
     public void keyPressed(KeyEvent event)
     {
         handleFontsizeKeys(event, event.getKeyCode());
+        // On Mac OS, backspace only appears as key pressed, not as key-typed
+        if (Config.isMacOS())
+        {
+            if (event.getKeyCode() == KeyEvent.VK_BACK_SPACE)
+            {
+                backspace();
+            }
+        }
     }
     
     @Override
@@ -543,14 +551,7 @@ public final class Terminal
                 break;
 
             case '\b':  // backspace
-                if (buffer.backSpace()) {
-                    try {
-                        int length = text.getDocument().getLength();
-                        text.replaceRange("", length - 1, length);
-                    } catch (Exception exc) {
-                        Debug.reportError("bad location " + exc);
-                    }
-                }
+                backspace();
                 event.consume();
                 break;
 
@@ -573,6 +574,18 @@ public final class Terminal
                     event.consume();
                 }
                 break;
+            }
+        }
+    }
+
+    private void backspace()
+    {
+        if (buffer.backSpace()) {
+            try {
+                int length = text.getDocument().getLength();
+                text.replaceRange("", length - 1, length);
+            } catch (Exception exc) {
+                Debug.reportError("bad location " + exc);
             }
         }
     }
@@ -695,7 +708,7 @@ public final class Terminal
                 });
             });
 
-            Config.rememberPosition(window, "bluej.terminal");
+            Config.rememberPositionAndSize(window, "bluej.terminal");
         });
     }
 

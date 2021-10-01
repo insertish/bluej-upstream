@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2016  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2016,2017  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -21,11 +21,9 @@
  */
 package bluej.pkgmgr.target.role;
 
-import javax.swing.*;
-import java.awt.*;
-
+import java.awt.Color;
+import java.awt.Paint;
 import javafx.collections.ObservableList;
-import javafx.scene.control.*;
 
 import bluej.Config;
 import bluej.pkgmgr.target.*;
@@ -59,18 +57,6 @@ public class AbstractClassRole extends ClassRole
     public String getStereotypeLabel()
     {
         return "abstract";
-    }
-
-    /**
-     * Return the intended background colour for this type of target.
-     */
-    public Paint getBackgroundPaint(int width, int height)
-    {
-        if (abstractbg != null) {
-            return abstractbg;
-        } else {
-            return super.getBackgroundPaint(width, height);
-        }
     }
 
     /**

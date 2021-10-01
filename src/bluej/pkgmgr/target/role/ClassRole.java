@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2011,2014,2016  Michael Kolling and John Rosenberg
+ Copyright (C) 1999-2009,2011,2014,2016,2017  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -28,18 +28,20 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.charset.Charset;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Hashtable;
 import java.util.List;
 import java.util.Properties;
+
+import javafx.collections.ObservableList;
+import javafx.scene.control.Menu;
+import javafx.scene.control.MenuItem;
 
 import javax.swing.Action;
 import javax.swing.JMenuItem;
 import javax.swing.JPopupMenu;
 import javax.swing.SwingUtilities;
 
-import bluej.pkgmgr.target.DependentTarget.State;
-import javafx.collections.ObservableList;
-import javafx.scene.control.MenuItem;
 
 import bluej.Config;
 import bluej.debugmgr.ConstructAction;
@@ -48,6 +50,7 @@ import bluej.debugmgr.objectbench.InvokeListener;
 import bluej.pkgmgr.Package;
 import bluej.pkgmgr.PkgMgrFrame;
 import bluej.pkgmgr.target.ClassTarget;
+import bluej.pkgmgr.target.DependentTarget.State;
 import bluej.prefmgr.PrefMgr;
 import bluej.utility.BlueJFileReader;
 import bluej.utility.Debug;
@@ -110,30 +113,6 @@ public abstract class ClassRole
     }
 
     /**
-     * Return the default background colour for targets that don't want to
-     * define their own colour.
-     * @param width Width of total area to paint
-     * @param height Height of total area to paint
-     */
-    public Paint getBackgroundPaint(int width, int height)
-    {
-        if (defaultbg != null) {
-            return defaultbg;
-        } else {
-            Paint result;
-            if (!Config.isRaspberryPi()){
-                result = new GradientPaint(
-                    0, 0, new Color(246,221,192),
-                    0, height, new Color(245,204,155)); 
-            }else{
-                //return the average colour.
-                result = new Color(246, 233, 174);
-            }
-            return result;
-        }
-    }
-
-    /**
      * Get the "stereotype label" for this class role. This will be displayed
      * on classes in the UML diagram along with the class name. It may return
      * null if there is no stereotype label.
@@ -159,7 +138,7 @@ public abstract class ClassRole
      */
     public boolean generateSkeleton(String template, Package pkg, String name, String sourceFile)
     {
-        Hashtable<String,String> translations = new Hashtable<String,String>();
+        Hashtable<String,String> translations = new Hashtable<>();
         translations.put("CLASSNAME", name);
 
         if (pkg.isUnnamedPackage()) {
@@ -275,13 +254,16 @@ public abstract class ClassRole
      * @return  true if any items were created
      */
     @OnThread(Tag.FXPlatform)
-    private static boolean createMenuItems(ObservableList<MenuItem> menu, CallableView[] members, ViewFilter filter, int first, int last,
-            String prefix, InvokeListener il)
+    private static boolean createMenuItems(ObservableList<MenuItem> menu, CallableView[] members, ViewFilter filter,
+                                           int first, int last, String prefix, InvokeListener il)
     {
-        // Debug.message("Inside ClassTarget.createMenuItems\n first = " + first
-        // + " last = " + last);
         boolean hasEntries = false;
-        JMenuItem item;
+
+        // If we have a lot of items, we should create a submenu to fold some items in
+        // 28 is a wild guess for now. It was 19 but with higher resolution screens, it became insufficient.
+        int itemHeight = 28;
+        int itemsOnScreen = (int)Config.screenBounds.getHeight() / itemHeight;
+        int sizeLimit = itemsOnScreen / 2;
 
         for (int i = first; i < last; i++) {
             try {
@@ -290,24 +272,31 @@ public abstract class ClassRole
                     continue;
                 // Debug.message("createSubMenu - creating MenuItem");
 
-                Action callAction = null;
                 if (m instanceof MethodView)
                 {
                     MenuItem menuItem = new MenuItem(prefix + m.getLongDesc());
-                    menu.add(menuItem);
                     menuItem.setOnAction(e -> SwingUtilities.invokeLater(() ->
-                    {
-                        new InvokeAction((MethodView)m, il, prefix + m.getLongDesc()).actionPerformed(null);
-                    }));
+                        new InvokeAction((MethodView)m, il, prefix + m.getLongDesc()).actionPerformed(null)
+                    ));
+
+                    // check whether it's time for a submenu
+                    int itemCount = menu.size();
+                    if(itemCount >= sizeLimit) {
+                        Menu subMenu = new Menu(Config.getString("pkgmgr.classmenu.moreMethods"));
+                        menu.add(subMenu);
+                        menu = subMenu.getItems();
+                    }
+
+                    menu.add(menuItem);
                     hasEntries = true;
                 }
                 else if (m instanceof ConstructorView)
                 {
                     MenuItem menuItem = new MenuItem(prefix + m.getLongDesc());
                     menu.add(menuItem);
-                    menuItem.setOnAction(e -> SwingUtilities.invokeLater(() -> {
-                        new ConstructAction((ConstructorView) m, il, prefix + m.getLongDesc()).actionPerformed(null);
-                    }));
+                    menuItem.setOnAction(e -> SwingUtilities.invokeLater(() ->
+                        new ConstructAction((ConstructorView) m, il, prefix + m.getLongDesc()).actionPerformed(null)
+                    ));
                     hasEntries = true;
                 }
             }
@@ -365,7 +354,7 @@ public abstract class ClassRole
     public List<File> getAllFiles(ClassTarget ct)
     {
         // .frame (if available), .java, .class, .ctxt, and doc (.html)
-        List<File> rlist = new ArrayList<File>();
+        List<File> rlist = new ArrayList<>();
         
         rlist.add(ct.getClassFile());
         rlist.addAll(Utility.mapList(ct.getAllSourceFilesJavaLast(), sf -> sf.file));
@@ -373,9 +362,7 @@ public abstract class ClassRole
         rlist.add(ct.getDocumentationFile());
         
         File [] innerClasses = ct.getInnerClassFiles();
-        for (int i = 0; i < innerClasses.length; i++) {
-            rlist.add(innerClasses[i]);
-        }
+        Collections.addAll(rlist, innerClasses);
         
         return rlist;
     }

@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2015,2016  Michael Kolling and John Rosenberg
+ Copyright (C) 1999-2015,2016,2017  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -123,12 +123,6 @@ public class ObjectWrapper extends StackPane implements InvokeListener, NamedVal
     @OnThread(Tag.Any)
     static final Color envOpColour = Config.ENV_COLOUR;
     
-    // vertical offset between instance and class name
-    public static final int WORD_GAP = 20;
-    public static final int SHADOW_SIZE = 5;
-    
-    protected static final int HGAP = 5;    // horiz. gap between objects (left of each object)
-    protected static final int VGAP = 6;    // vert. gap between objects (above and below of each object)
     public static final int WIDTH = 100;    // width including gap
     public static final int HEIGHT = 70;   // height including gap
     public static final double CORNER_SIZE = 10.0;
@@ -136,7 +130,9 @@ public class ObjectWrapper extends StackPane implements InvokeListener, NamedVal
     public static final double UNFOCUSED_BORDER = 2.0;
     public static final double SHADOW_RADIUS = 3.0;
 
-    private static int itemHeight = 19;   // wild guess until we find out
+    // wild guess until we find out.
+    // It was 19 but with higher resolution screens, it became insufficient.
+    private static int itemHeight = 28;
     private static boolean itemHeightKnown = false;
     @OnThread(Tag.Any)
     private static int itemsOnScreen;
@@ -161,8 +157,6 @@ public class ObjectWrapper extends StackPane implements InvokeListener, NamedVal
     private final PkgMgrFrame pmf;
     private final ObjectBench ob;
 
-    private boolean isSelected = false;
-
     private static final String MENU_STYLE_INBUILT = "object-action-inbuilt";
     
     /**
@@ -174,7 +168,7 @@ public class ObjectWrapper extends StackPane implements InvokeListener, NamedVal
      * @param iType   The static type of the object, used as a fallback if
      *                the runtime type is inaccessible
      * @param instanceName  The name for the object reference
-     * @return
+     * @return A new object wrapper for the user's object
      */
     @OnThread(Tag.Swing)
     static public ObjectWrapper getWrapper(PkgMgrFrame pmf, ObjectBench ob,
@@ -237,7 +231,7 @@ public class ObjectWrapper extends StackPane implements InvokeListener, NamedVal
             JavaFXUtil.addFocusListener(this, focused -> {
                 if (focused)
                     ob.objectGotFocus(this);
-                else if (!focused && ob.getSelectedObject() == this)
+                else if (ob.getSelectedObject() == this)
                     ob.setSelectedObject(null);
             });
             
@@ -350,13 +344,8 @@ public class ObjectWrapper extends StackPane implements InvokeListener, NamedVal
     {
         int clMods = cl.getModifiers();
         String classPackage = JavaNames.getPrefix(cl.getName());
-        if (Modifier.isProtected(clMods) && ! pkg.getQualifiedName().equals(classPackage)
-                || Modifier.isPrivate(clMods)) {
-            return false;
-        }
-        else {
-            return true;
-        }
+        return !(Modifier.isProtected(clMods) && !pkg.getQualifiedName().equals(classPackage)
+                || Modifier.isPrivate(clMods));
     }
     
     /**
@@ -420,7 +409,7 @@ public class ObjectWrapper extends StackPane implements InvokeListener, NamedVal
         item.setOnAction(e -> removeObject());
 
         FXMenuManager menuManager = new FXMenuManager(menu, extMgr, new ObjectExtensionMenu(this));
-        SwingUtilities.invokeLater(() -> {menuManager.addExtensionMenu(pkg.getProject());});
+        SwingUtilities.invokeLater(() -> menuManager.addExtensionMenu(pkg.getProject()));
     }
     
     /**
@@ -437,7 +426,7 @@ public class ObjectWrapper extends StackPane implements InvokeListener, NamedVal
      * @param showObjectMethods Whether to show the submenu with methods from java.lang.Object
      */
     public static void createMethodMenuItems(ObservableList<MenuItem> menu, Class<?> cl, InvokeListener il, DebuggerObject obj,
-            String currentPackageName, boolean showObjectMethods)
+                                             String currentPackageName, boolean showObjectMethods)
     {
         GenTypeClass gt = new GenTypeClass(new JavaReflective(cl));
         createMethodMenuItems(menu, cl, gt, il, obj, currentPackageName, showObjectMethods);
@@ -469,7 +458,7 @@ public class ObjectWrapper extends StackPane implements InvokeListener, NamedVal
     {
         if (cl != null) {
             View view = View.getView(cl);
-            Hashtable<String, String> methodsUsed = new Hashtable<String, String>();
+            Hashtable<String, String> methodsUsed = new Hashtable<>();
             List<Class<?>> classes = getClassHierarchy(cl);
 
             // define two view filters for different package visibility
@@ -546,7 +535,7 @@ public class ObjectWrapper extends StackPane implements InvokeListener, NamedVal
     {
         if (cl != null) {
             View view = View.getView(cl);
-            Hashtable<String, String> methodsUsed = new Hashtable<String, String>();
+            Hashtable<String, String> methodsUsed = new Hashtable<>();
             List<Class<?>> classes = getClassHierarchy(cl);
 
             // define two view filters for different package visibility
@@ -623,17 +612,15 @@ public class ObjectWrapper extends StackPane implements InvokeListener, NamedVal
      * creates the individual menu items for an object's popup menu.
      * The method checks for previously defined methods with the same signature
      * and appends information referring to this.
-     *  @param menu      the menu that the items are to be created for
-     * @param methods   the methods for which menu items should be created
-     * @param il the listener to be notified when a method should be called
- *            interactively
-     * @param filter    the filter which decides on which methods should be shown
-     * @param sizeLimit the limit to which the menu should grow before openeing
-*                  submenus
-     * @param genericParams the mapping of generic type parameter names to their
-*            corresponding types in the object instance (a map of String ->
-*            GenType).
-     * @param methodsUsed
+     *
+     * @param menu          the menu that the items are to be created for
+     * @param methods       the methods for which menu items should be created
+     * @param il            the listener to be notified when a method should be called interactively
+     * @param filter        the filter which decides on which methods should be shown
+     * @param sizeLimit     the limit to which the menu should grow before openeing submenus
+     * @param genericParams the mapping of generic type parameter names to their corresponding
+     *                      types in the object instance (a map of String -> GenType).
+     * @param methodsUsed   the table to store the methods that already been ddealt
      */
     private static void createMenuItems(List<MenuItem> menu, MethodView[] methods, InvokeListener il, ViewFilter filter,
                                         int sizeLimit, Map<String, GenTypeParameter> genericParams, Hashtable<String, String> methodsUsed)
@@ -642,18 +629,17 @@ public class ObjectWrapper extends StackPane implements InvokeListener, NamedVal
         boolean menuEmpty = true;
 
         Arrays.sort(methods);
-        for(int i = 0; i < methods.length; i++) {
+        for (MethodView method : methods) {
             try {
-                MethodView m = methods[i];
-                if(!filter.accept(m))
+                if (!filter.accept(method))
                     continue;
 
                 menuEmpty = false;
-                String methodSignature = m.getCallSignature();   // uses types for params
-                String methodDescription = m.getLongDesc(genericParams); // uses names for params
+                String methodSignature = method.getCallSignature();   // uses types for params
+                String methodDescription = method.getLongDesc(genericParams); // uses names for params
 
                 // check if method signature has already been added to a menu
-                if(methodsUsed.containsKey(methodSignature)) {
+                if (methodsUsed.containsKey(methodSignature)) {
                     methodDescription = methodDescription
                              + "   [ " + redefinedIn + " "
                              + JavaNames.stripPrefix(
@@ -661,25 +647,23 @@ public class ObjectWrapper extends StackPane implements InvokeListener, NamedVal
                              + " ]";
                 }
                 else {
-                    methodsUsed.put(methodSignature, m.getClassName());
+                    methodsUsed.put(methodSignature, method.getClassName());
                 }
 
                 item = new MenuItem(methodDescription);
-                item.setOnAction(e -> SwingUtilities.invokeLater(() -> {
-                    il.executeMethod(m);
-                }));
-               
-                // check whether it's time for a submenu
+                item.setOnAction(e -> SwingUtilities.invokeLater(() -> il.executeMethod(method)));
 
+                // check whether it's time for a submenu
                 int itemCount = menu.size();
-                if(itemCount >= sizeLimit) {
+                if (itemCount >= sizeLimit) {
                     Menu subMenu = new Menu(Config.getString("debugger.objectwrapper.moreMethods"));
                     menu.add(subMenu);
                     menu = subMenu.getItems();
                     sizeLimit = itemsOnScreen / 2;
                 }
+
                 menu.add(item);
-            } catch(Exception e) {
+            } catch (Exception e) {
                 Debug.reportError(methodException + e);
                 e.printStackTrace();
             }
@@ -701,18 +685,17 @@ public class ObjectWrapper extends StackPane implements InvokeListener, NamedVal
         boolean menuEmpty = true;
 
         Arrays.sort(methods);
-        for(int i = 0; i < methods.length; i++) {
+        for (MethodView method : methods) {
             try {
-                MethodView m = methods[i];
-                if(!filter.accept(m))
+                if (!filter.accept(method))
                     continue;
 
                 menuEmpty = false;
-                String methodSignature = m.getCallSignature();   // uses types for params
-                String methodDescription = m.getLongDesc(genericParams); // uses names for params
+                String methodSignature = method.getCallSignature();   // uses types for params
+                String methodDescription = method.getLongDesc(genericParams); // uses names for params
 
                 // check if method signature has already been added to a menu
-                if(methodsUsed.containsKey(methodSignature)) {
+                if (methodsUsed.containsKey(methodSignature)) {
                     methodDescription = methodDescription
                         + "   [ " + redefinedIn + " "
                         + JavaNames.stripPrefix(
@@ -720,10 +703,10 @@ public class ObjectWrapper extends StackPane implements InvokeListener, NamedVal
                         + " ]";
                 }
                 else {
-                    methodsUsed.put(methodSignature, m.getClassName());
+                    methodsUsed.put(methodSignature, method.getClassName());
                 }
 
-                Action a = new InvokeAction(m, il, methodDescription);
+                Action a = new InvokeAction(method, il, methodDescription);
                 item = new JMenuItem(a);
 
                 item.setFont(PrefMgr.getPopupMenuFont());
@@ -731,11 +714,11 @@ public class ObjectWrapper extends StackPane implements InvokeListener, NamedVal
                 // check whether it's time for a submenu
 
                 int itemCount;
-                if(jmenu instanceof JMenu)
-                    itemCount =((JMenu)jmenu).getMenuComponentCount();
+                if (jmenu instanceof JMenu)
+                    itemCount = ((JMenu) jmenu).getMenuComponentCount();
                 else
                     itemCount = jmenu.getComponentCount();
-                if(itemCount >= sizeLimit) {
+                if (itemCount >= sizeLimit) {
                     JMenu subMenu = new JMenu(Config.getString("debugger.objectwrapper.moreMethods"));
                     subMenu.setFont(PrefMgr.getStandoutMenuFont());
                     subMenu.setForeground(envOpColour);
@@ -744,7 +727,7 @@ public class ObjectWrapper extends StackPane implements InvokeListener, NamedVal
                     sizeLimit = itemsOnScreen / 2;
                 }
                 jmenu.add(item);
-            } catch(Exception e) {
+            } catch (Exception e) {
                 Debug.reportError(methodException + e);
                 e.printStackTrace();
             }
@@ -771,7 +754,7 @@ public class ObjectWrapper extends StackPane implements InvokeListener, NamedVal
     private static List<Class<?>> getClassHierarchy(Class<?> derivedClass)
     {
         Class<?> currentClass = derivedClass;
-        List<Class<?>> classVector = new ArrayList<Class<?>>();
+        List<Class<?>> classVector = new ArrayList<>();
         while(currentClass != null) {
             classVector.add(currentClass);
             currentClass = currentClass.getSuperclass();
@@ -950,10 +933,8 @@ public class ObjectWrapper extends StackPane implements InvokeListener, NamedVal
      */
     public void setSelected(boolean isSelected) 
     {
-        this.isSelected = isSelected;
         if(isSelected) {
             pmf.setStatus(getName() + " : " + displayClassName);
-            //scrollRectToVisible(new Rectangle(0, 0, WIDTH, HEIGHT));
         }
     }
 

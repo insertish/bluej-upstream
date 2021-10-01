@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2015,2016  Michael Kolling and John Rosenberg
+ Copyright (C) 1999-2015,2016,2017  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -29,19 +29,22 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import javafx.application.Platform;
-import javafx.collections.FXCollections;
+import javafx.collections.ListChangeListener;
 import javafx.collections.ObservableList;
 import javafx.event.ActionEvent;
 import javafx.geometry.Pos;
+import javafx.geometry.VPos;
 import javafx.scene.Cursor;
 import javafx.scene.Node;
-import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.Dialog;
 import javafx.scene.control.Label;
 import javafx.scene.control.Separator;
 import javafx.scene.control.TextField;
+import javafx.scene.layout.ColumnConstraints;
+import javafx.scene.layout.GridPane;
 import javafx.scene.layout.Pane;
+import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 import javafx.stage.Modality;
 import javafx.stage.Stage;
@@ -55,9 +58,7 @@ import bluej.debugger.gentype.TextType;
 import bluej.debugmgr.objectbench.ObjectBenchEvent;
 import bluej.debugmgr.objectbench.ObjectBenchInterface;
 import bluej.debugmgr.objectbench.ObjectBenchListener;
-import bluej.utility.javafx.HangingFlowPane;
 import bluej.utility.javafx.JavaFXUtil;
-import bluej.utility.javafx.binding.ConcatListBinding;
 import bluej.utility.javafx.dialog.DialogPaneAnimateError;
 import bluej.views.CallableView;
 import bluej.views.TypeParamView;
@@ -203,43 +204,77 @@ public abstract class CallDialog extends Dialog<Void>
      * @param startString The string prepended before the first parameter. Typically something like ( or <
      * @param endString The string appended after the last parameter. Typically something like ) or >
      * @param parameterList A list containing the components for the parameter panel
-     * @return
+     * @return A pane containing the method signature's nodes, where the parameters are input boxes.
      */
-    protected HangingFlowPane createParameterPanel(String startString, String endString,
-            ParameterList parameterList)
+    protected Pane createParameterPanel(String startString, String endString, ParameterList parameterList)
     {
-        ObservableList<ObservableList<? extends Node>> contents = FXCollections.observableArrayList();
-        
+        GridPane parameterPanel = new GridPane();
+        parameterPanel.getStyleClass().add("grid");
+
         Label startParenthesis = new Label(startString); // TODO increase font size?
         startParenthesis.setAlignment(Pos.BASELINE_LEFT);
-        contents.add(FXCollections.observableArrayList(startParenthesis));
-        
+        parameterPanel.add(startParenthesis, 0, 0);
+
         for (int i = 0; i < parameterList.formalCount(); i++) {
             ObservableList<? extends Node> components = parameterList.getNodesForFormal(i);
-            contents.add(components);
-            
-            Label type = new Label("");
-            type.setAlignment(Pos.BASELINE_LEFT);
-            HangingFlowPane.setBreakBefore(type, false);
-            if (i == (parameterList.formalCount() - 1)) {
-                Label eol = new Label(endString);
-                eol.setAlignment(Pos.BASELINE_LEFT);
-                HangingFlowPane.setBreakBefore(eol, false);
-                contents.add(FXCollections.observableArrayList(type, eol));
-            }                      
-            else
-            {
-                type.setText(type.getText() + ",");
-                contents.add(FXCollections.observableArrayList(type));
+
+            if (components.size() == 1) { // One component means it is not Varargs.
+                Node child = components.get(0);
+                parameterPanel.add(child, 1, i + 1);
             }
+            else { // Varargs.
+                GridPane varargsPane = new GridPane();
+                varargsPane.getStyleClass().add("grid");
+                varargsPane.setAlignment(Pos.BASELINE_LEFT);
+                arrangeVarargsComponents(varargsPane, components);
+                components.addListener((ListChangeListener<Node>) c -> arrangeVarargsComponents(varargsPane, c.getList()));
+
+                // Second column gets any extra width
+                ColumnConstraints column2 = new ColumnConstraints();
+                column2.setHgrow(Priority.ALWAYS);
+                varargsPane.getColumnConstraints().addAll(new ColumnConstraints(), column2, new ColumnConstraints(), new ColumnConstraints() );
+
+                parameterPanel.add(varargsPane, 1, i + 1);
+            }
+
+            Label type = new Label( (i == (parameterList.formalCount() - 1)) ? endString : ",");
+            type.setAlignment(Pos.BOTTOM_LEFT);
+            parameterPanel.add(type, 2, i + 1);
+            GridPane.setValignment(type, VPos.BOTTOM);
         }
-        HangingFlowPane tmpPanel = new HangingFlowPane();
-        tmpPanel.setAlignment(Pos.BASELINE_LEFT);
-        tmpPanel.hangingIndentProperty().bind(startParenthesis.widthProperty());
-        ConcatListBinding.bind(tmpPanel.getChildren(), contents);
-        return tmpPanel;
+
+        // Second column gets any extra width 
+        ColumnConstraints column2 = new ColumnConstraints();
+        column2.setHgrow(Priority.ALWAYS);
+        parameterPanel.getColumnConstraints().addAll(new ColumnConstraints(), column2, new ColumnConstraints());
+
+        return parameterPanel;
     }
-    
+
+    /**
+     * Arranges the varags components on a grid pane.
+     * Each row has the components of one parameter:
+     *      '+' to add another one before,
+     *      combobox as a field to enter values and
+     *      'x' to delete it,
+     * The last row will have an extra component:
+     *      '+' to add another one after.
+     *
+     * Only the second column should be resizable.
+     *
+     * @param varargsPane The grid pane containing the components
+     * @param components  The parameters' components
+     */
+    private void arrangeVarargsComponents(GridPane varargsPane, ObservableList<? extends Node> components)
+    {
+        varargsPane.getChildren().clear();
+        int lastComponentIndex = components.size() - 1;
+        for (int j = 0; j < lastComponentIndex; j++) {
+            varargsPane.add(components.get(j), j % 3, j / 3);
+        }
+        varargsPane.add(components.get(lastComponentIndex), 3, (lastComponentIndex - 1) / 3);
+    }
+
     /**
      * getArgTypes - Get an array with the classes of the parameters for this
      * method. "null" if there are no parameters. <br>
@@ -393,8 +428,7 @@ public abstract class CallDialog extends Dialog<Void>
             Class<?>[] paramClasses = getArgTypes(true);
             //First we add all the current items into the historylist
             for (int i = 0; i < parameterList.actualCount(); i++) {
-                history.addCall(paramClasses[i], (String) parameterList.getActualParameter(i).getEditor()
-                    .getText());
+                history.addCall(paramClasses[i], parameterList.getActualParameter(i).getEditor().getText());
             }
         }
 
@@ -450,8 +484,6 @@ public abstract class CallDialog extends Dialog<Void>
      * 
      * @param varArgsExpanded
      *            if set to true, varargs will be expanded.
-     * @param raw
-     *            if true, raw types will be returned
      */
     public JavaType[] getArgGenTypes(boolean varArgsExpanded)
     {
@@ -462,7 +494,7 @@ public abstract class CallDialog extends Dialog<Void>
         // type parameters from the declaring class, but also those from this
         // particular call
         Map<String,GenTypeParameter> typeParameterMap = getTargetTypeArgs();
-        Map<String,GenTypeParameter> typeMap = new HashMap<String,GenTypeParameter>();
+        Map<String,GenTypeParameter> typeMap = new HashMap<>();
         if (typeParameterMap != null) {
             typeMap.putAll(typeParameterMap);
         }
