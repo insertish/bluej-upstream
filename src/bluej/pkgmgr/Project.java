@@ -36,6 +36,7 @@ import bluej.debugger.DebuggerListener;
 import bluej.debugger.DebuggerObject;
 import bluej.debugger.DebuggerThread;
 import bluej.debugger.DebuggerThreadListener;
+import bluej.debugger.RunOnThread;
 import bluej.debugmgr.ExecControls;
 import bluej.debugmgr.ExpressionInformation;
 import bluej.debugmgr.inspector.ClassInspector;
@@ -126,6 +127,7 @@ public class Project implements DebuggerListener, DebuggerThreadListener, Inspec
     /** Property specifying location of JDK source */
     private static final String JDK_SOURCE_PATH_PROPERTY = "bluej.jdk.source";
     private static final String PROJECT_CHARSET_PROP = "project.charset";
+    public static final String RUN_ON_THREAD_PROP = "project.invoke.thread";
     /**
      * Collection of all open projects. The canonical name of the project
      * directory (as a File object) is used as the key.
@@ -232,6 +234,8 @@ public class Project implements DebuggerListener, DebuggerThreadListener, Inspec
     private final FrameShelfStorage shelfStorage;
     private final BooleanProperty terminalShowing = new SimpleBooleanProperty(false);
     private final BooleanProperty debuggerShowing = new SimpleBooleanProperty(false);
+    // Which thread to run on.  null means we have never asked the user about it.
+    private RunOnThread runOnThread;
 
     /* ------------------- end of field declarations ------------------- */
 
@@ -297,6 +301,8 @@ public class Project implements DebuggerListener, DebuggerThreadListener, Inspec
         debugger.setUserLibraries(libraryUrls.toArray(new URL[libraryUrls.size()]));
         debugger.newClassLoader(getClassLoader());
         debugger.addDebuggerListener(this);
+        // Note: this line must come after setProjectProperties (currently above):
+        debugger.setRunOnThread(getRunOnThread() == null ? RunOnThread.DEFAULT : getRunOnThread());
         debugger.launch();
 
         // Check whether this is a shared project
@@ -762,11 +768,13 @@ public class Project implements DebuggerListener, DebuggerThreadListener, Inspec
     /**
      * Get the project properties to be written to storage when the project is saved.
      */
-    @OnThread(Tag.Any)
+    @OnThread(Tag.FXPlatform)
     public synchronized Properties getProjectProperties()
     {
         Properties p = new Properties();
         p.put(PROJECT_CHARSET_PROP, characterSet.name());
+        if (runOnThread != null)
+            p.put(RUN_ON_THREAD_PROP, runOnThread.name());
         return p;
     }
 
@@ -791,6 +799,10 @@ public class Project implements DebuggerListener, DebuggerThreadListener, Inspec
             characterSet = Charset.defaultCharset();
             props.put(PROJECT_CHARSET_PROP, characterSet.name());
         }
+
+        String runOnThreadProp = props.getProperty(RUN_ON_THREAD_PROP);
+        // It matters whether it was found or not, so store null if not found:
+        runOnThread = runOnThreadProp == null || runOnThreadProp.isEmpty() ? null : RunOnThread.valueOf(runOnThreadProp);
     }
 
     /**
@@ -1107,7 +1119,7 @@ public class Project implements DebuggerListener, DebuggerThreadListener, Inspec
             shared = isSharedProject.orElse(false);
         }
         if (shared) {
-            return getTeamSettingsController().trytoEstablishRepository(true).getRepository();
+            return getTeamSettingsController().trytoEstablishRepository(true);
         }
         else {
             return null;
@@ -2049,8 +2061,8 @@ public class Project implements DebuggerListener, DebuggerThreadListener, Inspec
                                       boolean includeDirs)
     {
         TeamSettingsController teamSettingsController = getTeamSettingsController();
-        File[] files = dir.listFiles(teamSettingsController == null ? null : teamSettingsController.getFileFilter(includePkgFiles));
-        if (files==null){
+        File[] files = dir.listFiles(teamSettingsController == null ? null : teamSettingsController.getFileFilter(includePkgFiles, true));
+        if (files == null) {
             return;
         }
         for(int i=0; i< files.length; i++ ){
@@ -2507,23 +2519,45 @@ public class Project implements DebuggerListener, DebuggerThreadListener, Inspec
     }
 
     /**
+     * Gets the setting for this project as to which thread constructor/method invocations will run on.
+     */
+    public RunOnThread getRunOnThread()
+    {
+        return runOnThread;
+    }
+
+    /**
+     * Sets the setting for this project as to which thread constructor/method invocations will run on.
+     * This is communicated to the currently running debug VM, and will also be remembered if the debug
+     * VM is restarted (and will be saved to the project properties on exit, for next load).
+     */
+    public void setRunOnThread(RunOnThread runOnThread)
+    {
+        this.runOnThread = runOnThread;
+        debugger.setRunOnThread(runOnThread == null ? RunOnThread.DEFAULT : runOnThread);
+    }
+
+    /**
      * We fetch the display details on the debugger thread,
-     * not from the FX thread.  Although toString may
-     * be thread-safe, the GUI doesn't update the item's
-     * text anyway unless you swap the item out, so we
-     * may as well make the display text constant for
-     * the item so that the GUI updates coherently.
+     * not from the FX thread, and this object allows us to capture some
+     * of the thread details at one point in time and keep
+     * the snapshot: namely the suspended state and the
+     * display string.  This prevents us seeing "future" updates
+     * which have happened in the debugger but not yet made
+     * their way to the GUI.
      */
     public static class DebuggerThreadDetails
     {
         private final DebuggerThread debuggerThread;
         private final String debuggerThreadDisplay;
+        private final boolean suspended;
 
         @OnThread(Tag.Any)
         public DebuggerThreadDetails(DebuggerThread dt)
         {
             this.debuggerThread = dt;
             this.debuggerThreadDisplay = dt.toString();
+            this.suspended = dt.isSuspended();
         }
 
         // Equality is solely dependent on the thread, not the display:
@@ -2556,9 +2590,23 @@ public class Project implements DebuggerListener, DebuggerThreadListener, Inspec
             return debuggerThread.equals(dt);
         }
 
+        /**
+         * Gets whether the thread was suspended when this DebuggerThreadDetails
+         * object was created.  Should be used in preference to getThread().isSuspended()
+         * because it is set once and will not change, whereas getThread().isSuspended()
+         * is live and may return in effect a "future" value (i.e. one which has
+         * occurred in the debugger but not yet reached the GUI, and is queued
+         * to be processed after this event).
+         */
+        public boolean isSuspended()
+        {
+            return suspended;
+        }
+
         public DebuggerThread getThread()
         {
             return debuggerThread;
         }
     }
+
 }

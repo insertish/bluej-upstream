@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 2015,2016  Michael Kolling and John Rosenberg
+ Copyright (C) 2015,2016,2017  Michael Kolling and John Rosenberg
 
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -21,29 +21,23 @@
  */
 package bluej.editor.stride;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Map;
-
 import bluej.Config;
+import bluej.stride.generic.Frame;
 import bluej.stride.generic.Frame.View;
+import bluej.stride.slots.EditableSlot;
 import bluej.stride.slots.EditableSlot.MenuItemOrder;
 import bluej.stride.slots.EditableSlot.SortedMenuItem;
-
-import javafx.beans.InvalidationListener;
-import javafx.beans.binding.Bindings;
+import bluej.utility.DialogManager;
+import bluej.utility.Utility;
+import bluej.utility.javafx.FXPlatformConsumer;
+import bluej.utility.javafx.FXRunnable;
+import bluej.utility.javafx.JavaFXUtil;
 import javafx.beans.binding.StringBinding;
-import javafx.beans.binding.StringExpression;
-import javafx.beans.binding.When;
 import javafx.beans.property.BooleanProperty;
-import javafx.beans.property.ReadOnlyStringWrapper;
 import javafx.beans.property.SimpleBooleanProperty;
-import javafx.beans.value.ChangeListener;
-import javafx.beans.value.ObservableBooleanValue;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
-import javafx.scene.control.ContextMenu;
+import javafx.print.PrinterJob;
 import javafx.scene.control.Menu;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.SeparatorMenuItem;
@@ -51,13 +45,12 @@ import javafx.scene.input.KeyCharacterCombination;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyCodeCombination;
 import javafx.scene.input.KeyCombination;
-
-import bluej.stride.slots.EditableSlot;
-import bluej.utility.Utility;
-import bluej.utility.javafx.FXRunnable;
-import bluej.utility.javafx.JavaFXUtil;
 import threadchecker.OnThread;
 import threadchecker.Tag;
+
+import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
 
 /**
  * A class to manage the menus for a frame editor.
@@ -94,8 +87,8 @@ class FrameMenuManager extends TabMenuManager
         this.javaPreviewShowing = new SimpleBooleanProperty(editor.getView() == View.JAVA_PREVIEW);
         // I don't think this will cause a loop with notifyView because it converges (second listener sets property to current value):
         JavaFXUtil.addChangeListener(javaPreviewShowing, b -> {
-            if (b) JavaFXUtil.runNowOrLater(editor::enableJavaPreview);
-            else JavaFXUtil.runNowOrLater(editor::disableJavaPreview);
+            if (b) JavaFXUtil.runNowOrLater(() -> editor.enableJavaPreview(Frame.ViewChangeReason.MENU_OR_SHORTCUT));
+            else JavaFXUtil.runNowOrLater(() -> editor.disableJavaPreview(Frame.ViewChangeReason.MENU_OR_SHORTCUT));
         });
 
         defaultEditItems = Arrays.asList(
@@ -138,11 +131,13 @@ class FrameMenuManager extends TabMenuManager
                     }
                 }
             });
-            
+
+            FXPlatformConsumer<? super Boolean> frameCatalogueShownListener = newValue ->
+                    editor.recordShowHideFrameCatalogue(newValue, FrameCatalogue.ShowReason.MENU_OR_SHORTCUT);
             ObservableList<MenuItem> standardViewMenuItems = FXCollections.observableArrayList(
                     JavaFXUtil.makeMenuItem(Config.getString("frame.viewmenu.nextError"), editor::nextError, new KeyCharacterCombination("k", KeyCombination.SHORTCUT_DOWN))
                     ,new SeparatorMenuItem()
-                    ,JavaFXUtil.makeCheckMenuItem(Config.getString("frame.viewmenu.cheatsheet"), editor.cheatSheetShowingProperty(), new KeyCodeCombination(KeyCode.F1))
+                    ,JavaFXUtil.makeCheckMenuItem(Config.getString("frame.viewmenu.cheatsheet"), editor.cheatSheetShowingProperty(), new KeyCodeCombination(KeyCode.F1), frameCatalogueShownListener)
                     ,birdsEyeItem
                     ,JavaFXUtil.makeCheckMenuItem(Config.getString("frame.viewmenu.java"), javaPreviewShowing, new KeyCharacterCombination("j", KeyCombination.SHORTCUT_DOWN))
                     ,new SeparatorMenuItem()
@@ -162,7 +157,7 @@ class FrameMenuManager extends TabMenuManager
             menus = Arrays.asList(
                     JavaFXUtil.makeMenu(Config.getString("frame.classmenu.title")
                             , mainMoveMenu
-                            , JavaFXUtil.makeMenuItem(Config.getString("frame.classmenu.print"), () -> editor.getFrameEditor().printTo(null,false,false), new KeyCodeCombination(KeyCode.P, KeyCombination.SHORTCUT_DOWN))
+                            , JavaFXUtil.makeMenuItem(Config.getString("frame.classmenu.print"), () -> print(), new KeyCodeCombination(KeyCode.P, KeyCombination.SHORTCUT_DOWN))
                             , JavaFXUtil.makeMenuItem(Config.getString("frame.classmenu.close"), () -> editor.getParent().close(editor), new KeyCodeCombination(KeyCode.W, KeyCombination.SHORTCUT_DOWN))
                     ),
                     editMenu,
@@ -174,6 +169,33 @@ class FrameMenuManager extends TabMenuManager
             updateMoveMenus();
         }
         return menus;
+    }
+
+    /**
+     * Print the Stride class of the associated editor.
+     */
+    @OnThread(Tag.FXPlatform)
+    private void print()
+    {
+        PrinterJob job = JavaFXUtil.createPrinterJob();
+        if (job == null)
+        {
+            DialogManager.showErrorFX(editor.getParent().getWindow(),"print-no-printers");
+        }
+        else if (job.showPrintDialog(editor.getParent().getWindow()))
+        {
+            FXRunnable printAction = editor.getFrameEditor().printTo(job, false, false);
+            new Thread()
+            {
+                @Override
+                @OnThread(value = Tag.FX, ignoreParent = true)
+                public void run()
+                {
+                    printAction.run();
+                    job.endJob();
+                }
+            }.start();
+        }
     }
 
     // Updates our menu items using binding.

@@ -26,6 +26,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map.Entry;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
@@ -93,6 +94,11 @@ import bluej.utility.javafx.ScalableHeightLabel;
  */
 public class SuggestionList
 {
+    // The next available SuggestionList ID; must be static to be unique across all instances:
+    private static final AtomicInteger nextSuggListId = new AtomicInteger(1);
+    // The SuggestionList ID for this item, used for data recording purposes:
+    private final int suggestionListId;
+
     private final SuggestionListListener listener;
 
     private static class SuggestionListView extends ListView<SuggestionListItem>
@@ -430,7 +436,8 @@ public class SuggestionList
     {
         if (listener == null)
             throw new IllegalArgumentException("SuggestionListListener cannot be null");
-        
+
+        this.suggestionListId = nextSuggListId.getAndIncrement();
         this.choices = FXCollections.observableArrayList(choices);
         this.shownState.set(startShown);
         this.listener = listener;
@@ -447,7 +454,7 @@ public class SuggestionList
             int highlighted = getHighlighted();
             if (highlighted != -1)
             {
-                listener.suggestionListChoiceClicked(highlighted);
+                listener.suggestionListChoiceClicked(this, highlighted);
                 expectingToLoseFocus = true;
                 hiding = true;
                 window.hide();
@@ -467,7 +474,6 @@ public class SuggestionList
         docPane.setMinWidth(400.0);
         docPane.setMaxHeight(300.0);
         docPane.setBackground(null);
-        docPane.setMouseTransparent(true);
         
         BorderPane listAndDocBorderPane = new BorderPane();
         JavaFXUtil.addStyleClass(listAndDocBorderPane, "suggestion-top-level");
@@ -571,24 +577,8 @@ public class SuggestionList
                 });
             }
         });
-        
-        // On Mac, we have to check for Ctrl-Space in KEY_PRESSED, not KEY_TYPED:
-        listBox.addEventFilter(KeyEvent.KEY_PRESSED, e -> {
-            if (e.getCode() == KeyCode.SPACE && e.isControlDown())
-            {
-                // Consume either way, because otherwise we get an invalid character:
-                e.consume();
 
-                if (shownState.get() == SuggestionShown.COMMON)
-                {
-                    shownState.set(SuggestionShown.RARE);
-                    calculateEligible(lastPrefix, lastAllowSimilar, false);
-                    updateVisual(lastPrefix);
-                }
-            }
-        });
-
-        listBox.addEventFilter(KeyEvent.KEY_TYPED, e -> {
+        listAndDocBorderPane.addEventFilter(KeyEvent.KEY_TYPED, e -> {
             if (e.getCharacter().equals(" ") && e.isControlDown())
             {
                 if (shownState.get() == SuggestionShown.COMMON)
@@ -608,7 +598,12 @@ public class SuggestionList
             }
             e.consume();
         });
-        listBox.addEventFilter(KeyEvent.KEY_PRESSED, e -> {
+        // Add listener to listAndDocBorderPane not listBox, so that
+        // keypresses when the doc pane scroll is focused are still used
+        // to move the list, not the scroll bar.  Otherwise, once you click on
+        // the doc scroll bar, there's no obvious way to make up/down change
+        // back to scrolling the list (which is what the user expects in this window):
+        listAndDocBorderPane.addEventFilter(KeyEvent.KEY_PRESSED, e -> {
             switch (e.getCode())
             {
                 case UP:
@@ -629,11 +624,27 @@ public class SuggestionList
                 case END:
                     end();
                     break;
+                case SPACE:
+                    // On Mac, we have to check for Ctrl-Space in KEY_PRESSED, not KEY_TYPED:
+                    if (e.isControlDown())
+                    {
+                        // Consume either way, because otherwise we get an invalid character:
+                        e.consume();
+
+                        if (shownState.get() == SuggestionShown.COMMON)
+                        {
+                            shownState.set(SuggestionShown.RARE);
+                            calculateEligible(lastPrefix, lastAllowSimilar, false);
+                            updateVisual(lastPrefix);
+                        }
+                        break;
+                    }
+                    // Otherwise, fall through:
                 default:
                     int selected = getHighlighted();
                     if (selected == -1 && eligibleCount() == 1)
                         selected = getFirstEligible() % choices.size();
-                    if (listener.suggestionListKeyPressed(e, selected) == SuggestionListListener.Response.DISMISS)
+                    if (listener.suggestionListKeyPressed(this, e, selected) == SuggestionListListener.Response.DISMISS)
                     {
                         expectingToLoseFocus = true;
                         hiding = true;
@@ -676,7 +687,7 @@ public class SuggestionList
                     JavaFXUtil.runAfterCurrent(() ->
                     {
                         listener.hidden();
-                        listener.suggestionListChoiceClicked(choice);
+                        listener.suggestionListChoiceClicked(this, choice);
                     });
                     return;
                 }
@@ -1010,14 +1021,33 @@ public class SuggestionList
          *                    outside a suggestion
          */
         @OnThread(Tag.FXPlatform)
-        void suggestionListChoiceClicked(int highlighted);
+        void suggestionListChoiceClicked(SuggestionList suggestionList, int highlighted);
 
+        /**
+         * A key typed event was been received by the suggestion list window.  Listeners
+         * will usually insert the given key into the source code document.
+         *
+         * @param suggestionList The originating suggestion list.
+         * @param event The key event received.
+         * @param highlighted The index of the currently highlighted item.
+         * @return Whether to now close the code completion dialog, or continue showing it
+         */
         @OnThread(Tag.FXPlatform)
         Response suggestionListKeyTyped(SuggestionList suggestionList, KeyEvent event, int highlighted);
 
-        // Note: UP, DOWN are automatically handled, but not ESCAPE, ENTER, etc
+        /**
+         * A key pressed event was been received by the suggestion list window.  Listeners
+         * will usually listen for keys like ENTER, TAB, ESCAPE to act on them.  Note that
+         * UP and DOWN are handled automatically by SuggestionList itself to move up and down
+         * the list, but all other key handling is up to the listener.
+         *
+         * @param suggestionList The originating suggestion list.
+         * @param event The key event received.
+         * @param highlighted The index of the currently highlighted item.
+         * @return Whether to now close the code completion dialog, or continue showing it
+         */
         @OnThread(Tag.FXPlatform)
-        Response suggestionListKeyPressed(KeyEvent event, int highlighted);
+        Response suggestionListKeyPressed(SuggestionList suggestionList, KeyEvent event, int highlighted);
 
         // Called when focus was lost and we are hiding, but not because choiceClicked() or keyTyped returned DISMISS
         @OnThread(Tag.FXPlatform)
@@ -1104,6 +1134,13 @@ public class SuggestionList
     private void hideDocDisplay()
     {
         docPane.getChildren().clear();
+    }
+
+    // Gets the ID for this code completion for the purposes of data collection.
+    // Unique and constant per SuggestionList instance
+    public int getRecordingId()
+    {
+        return suggestionListId;
     }
 
     public static interface SuggestionListParent

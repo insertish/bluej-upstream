@@ -1115,8 +1115,6 @@ public class PkgMgrFrame
 
             aPkg.getProject().scheduleCompilation(true, CompileReason.LOADED, Config.isGreenfoot() ? CompileType.INDIRECT_USER_COMPILE : CompileType.ERROR_CHECK_ONLY, aPkg);
         }
-        
-        DataCollector.packageOpened(aPkg);
 
         extMgr.packageOpened(aPkg);
     }
@@ -1187,6 +1185,7 @@ public class PkgMgrFrame
         }
 
         getPackage().closeAllEditors();
+        getPackage().setEditor(null);
         
         DataCollector.packageClosed(thePkg);
 
@@ -1964,7 +1963,7 @@ public class PkgMgrFrame
      */
     public void showPreferences()
     {
-        PrefMgrDialog.showDialog();
+        PrefMgrDialog.showDialog(getProject());
     }
 
     /**

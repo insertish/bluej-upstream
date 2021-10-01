@@ -42,6 +42,7 @@ import java.util.Properties;
 import java.util.Set;
 import java.util.TreeSet;
 
+import bluej.extensions.event.DependencyEvent;
 import javafx.application.Platform;
 
 import bluej.compiler.CompileInputFile;
@@ -147,9 +148,10 @@ public final class Package
     public static final int CLASS_EXISTS = 4;
     /** error code */
     public static final int CREATE_ERROR = 5;
-    private final List<Dependency> pendingDeps = new ArrayList<>();
     @OnThread(value = Tag.Any, requireSynchronized = true)
     private final List<Target> targetsToPlace = new ArrayList<>();
+    // Has this package been sent for data recording yet?
+    private boolean recorded = false;
 
     /** Reason code for displaying source line */
     private enum ShowSourceReason
@@ -215,6 +217,24 @@ public final class Package
     
     @OnThread(value = Tag.Any, requireSynchronized = true)
     private PackageEditor editor;
+
+    //package-visible
+    List<UsesDependency> getUsesArrows()
+    {
+        return usesArrows;
+    }
+
+    //package-visible
+    List<Dependency> getExtendsArrows()
+    {
+        return extendsArrows;
+    }
+
+    @OnThread(value = Tag.FXPlatform)
+    private final List<UsesDependency> usesArrows = new ArrayList<>();
+
+    @OnThread(value = Tag.FXPlatform)
+    private final List<Dependency> extendsArrows = new ArrayList<>();
     
     /** True if we currently have a compile queued up waiting for debugger to become idle */
     @OnThread(Tag.FXPlatform)
@@ -493,28 +513,40 @@ public final class Package
         PkgMgrFrame.displayMessage(this, msg);
     }
 
+    /**
+     * Sets the PackageEditor for this package.
+     * @param ed The PackageEditor.  Non-null when opening, null when
+     *           closing.
+     */
     void setEditor(PackageEditor ed)
     {
         synchronized (this)
         {
             this.editor = ed;
         }
-        for (Dependency d : pendingDeps)
-            ed.addDependency(d, d instanceof UsesDependency);
-        pendingDeps.clear();
-        synchronized (this)
+
+        // Note we use ed here, not editor, as editor needs synchronized access
+        if (ed != null)
         {
-            for (Target t : targets)
-                if (t instanceof ParentPackageTarget)
+            synchronized (this)
+            {
+                for (Target t : targets)
+                {
+                    if (t instanceof ParentPackageTarget)
+                    {
+                        ed.findSpaceForVertex(t);
+                    }
+                }
+                // Find an empty spot for any targets which didn't already have
+                // a position
+                for (Target t : targetsToPlace)
+                {
                     ed.findSpaceForVertex(t);
-            // Find an empty spot for any targets which didn't already have
-            // a position
-            for (Target t : targetsToPlace) {
-                ed.findSpaceForVertex(t);
+                }
+                targetsToPlace.clear();
             }
-            targetsToPlace.clear();
+            ed.graphChanged();
         }
-        ed.graphChanged();
     }
     
     @OnThread(Tag.Any)
@@ -759,6 +791,13 @@ public final class Package
             addTarget(target);
         }
 
+        if (!recorded)
+        {
+            DataCollector.packageOpened(this);
+            recorded = true;
+        }
+
+
         List<Target> targetsCopy;
         synchronized (this)
         {
@@ -813,7 +852,7 @@ public final class Package
                 DependentTarget dt = dependent.getFrom();
                 if (dt instanceof ClassTarget) {
                     ClassTarget dep = (ClassTarget) dt;
-                    if (dep.isCompiled()) {
+                    if (dep.isCompiled() && dep.hasSourceCode()) {
                         dep.setState(State.NEEDS_COMPILE);
                         invalidated.add(dep);
                     }
@@ -1091,16 +1130,6 @@ public final class Package
         props.putAll(frameProperties);
 
         // save targets and dependencies in package
-        List<Dependency> usesArrows;
-        if (editor != null)
-            usesArrows = editor.getUsesArrows();
-        else
-        {
-            usesArrows = new ArrayList<>();
-            // Just add outbound dependencies to make sure we don't duplicate:
-            for (ClassTarget ct : getClassTargets())
-                usesArrows.addAll(ct.usesDependencies());
-        }
         props.put("package.numDependencies", String.valueOf(usesArrows.size()));
 
         int t_count = 0;
@@ -1313,7 +1342,7 @@ public final class Package
             }
             else {
                 if (compObserver != null) {
-                    compObserver.endCompile(new CompileInputFile[0], true, type);
+                    compObserver.endCompile(new CompileInputFile[0], true, type, -1);
                 }
             }
         }
@@ -1324,7 +1353,7 @@ public final class Package
                 ct.setQueued(false);
             }
             if (compObserver != null) {
-                compObserver.endCompile(new CompileInputFile[0], false, type);
+                compObserver.endCompile(new CompileInputFile[0], false, type, -1);
             }
         }
     }
@@ -1345,9 +1374,9 @@ public final class Package
                     @Override
                     public void compilerMessage(Diagnostic diagnostic, CompileType type) {  }
                     @Override
-                    public void startCompile(CompileInputFile[] sources, CompileReason reason, CompileType type) { }
+                    public void startCompile(CompileInputFile[] sources, CompileReason reason, CompileType type, int compilationSequence) { }
                     @Override
-                    public void endCompile(CompileInputFile[] sources, boolean succesful, CompileType type2)
+                    public void endCompile(CompileInputFile[] sources, boolean succesful, CompileType type2, int compilationSequence)
                     {
                         // This will be called on the Swing thread.
                         currentlyCompiling = false;
@@ -2082,6 +2111,8 @@ public final class Package
     /**
      * A thread has hit a breakpoint, done a step or selected a frame in the debugger. Display the source
      * code with the relevant line highlighted.
+     *
+     * Note: source name is the unqualified name of the file (no path attached)
      */
     private boolean showSource(DebuggerThread thread, String sourcename, int lineNo, ShowSourceReason reason, String msg)
     {
@@ -2089,7 +2120,7 @@ public final class Package
         lastSourceName = sourcename;
 
         // showEditorMessage:
-        Editor targetEditor = editorForTarget(sourcename, bringToFront);
+        Editor targetEditor = editorForTarget(new File(getPath(), sourcename).getAbsolutePath(), bringToFront);
         if (targetEditor != null) {
             targetEditor.setStepMark(lineNo, msg, reason.isSuspension(), thread);
             return targetEditor instanceof FrameEditor;
@@ -2153,7 +2184,7 @@ public final class Package
      * currently visible. If the source file is in another package, a package editor frame will be
      * opened for that package.
      * 
-     * @param filename   The source file name
+     * @param filename   The source file name, which should be a full absolute path
      * @param bringToFront  True if the editor should be brought to the front of the window z-order
      * @return  The editor for the given source file, or null if there is no editor.
      */
@@ -2481,7 +2512,7 @@ public final class Package
             this.chainObserver = chainObserver;
         }
         
-        private void markAsCompiling(CompileInputFile[] sources, boolean clearErrorState)
+        private void markAsCompiling(CompileInputFile[] sources, boolean clearErrorState, int compilationSequence)
         {
             for (int i = 0; i < sources.length; i++) {
                 String fileName = sources[i].getJavaCompileInputFile().getPath();
@@ -2492,7 +2523,7 @@ public final class Package
 
                     if (t instanceof ClassTarget) {
                         ClassTarget ct = (ClassTarget) t;
-                        ct.markCompiling(clearErrorState);
+                        ct.markCompiling(clearErrorState, compilationSequence);
                     }
                 }
             }
@@ -2519,7 +2550,7 @@ public final class Package
          * currently compiled.
          */
         @Override
-        public void startCompile(CompileInputFile[] sources, CompileReason reason, CompileType type)
+        public void startCompile(CompileInputFile[] sources, CompileReason reason, CompileType type, int compilationSequence)
         {
             // Send a compilation starting event to extensions.
             CompileEvent aCompileEvent = new CompileEvent(CompileEvent.COMPILE_START_EVENT, type.keepClasses(), Utility.mapList(Arrays.asList(sources), CompileInputFile::getJavaCompileInputFile).toArray(new File[0]));
@@ -2532,7 +2563,7 @@ public final class Package
             }
 
             // Change view of source classes.
-            markAsCompiling(sources, true);
+            markAsCompiling(sources, true, compilationSequence);
         }
 
         @Override
@@ -2569,7 +2600,7 @@ public final class Package
          * again.
          */
         @Override
-        public void endCompile(CompileInputFile[] sources, boolean successful, CompileType type)
+        public void endCompile(CompileInputFile[] sources, boolean successful, CompileType type, int compilationSequence)
         {
             for (int i = 0; i < sources.length; i++) {
                 String filename = sources[i].getJavaCompileInputFile().getPath();
@@ -2650,7 +2681,7 @@ public final class Package
             ExtensionsManager.getInstance().delegateEvent(aCompileEvent);
             
             if (chainObserver != null) {
-                chainObserver.endCompile(sources, successful, type);
+                chainObserver.endCompile(sources, successful, type, compilationSequence);
             }
         }
     }
@@ -2778,10 +2809,10 @@ public final class Package
         }
         
         @Override
-        public void startCompile(CompileInputFile[] sources, CompileReason reason, CompileType type)
+        public void startCompile(CompileInputFile[] sources, CompileReason reason, CompileType type, int compilationSequence)
         {
             numErrors = 0;
-            super.startCompile(sources, reason, type);
+            super.startCompile(sources, reason, type, compilationSequence);
         }
         
         @Override
@@ -2913,25 +2944,69 @@ public final class Package
         addDependency(dependency, dependency instanceof UsesDependency);
     }
 
-    public void addDependency(Dependency dependency, boolean recalc)
+    public void addDependency(Dependency d, boolean recalc)
     {
-        PackageEditor ed = getEditor();
-        if (ed != null)
-            ed.addDependency(dependency, recalc);
-        else if (Config.isGreenfoot())
-            PackageEditor.addDependencyHeadless(dependency, recalc, this);
+        DependentTarget from = d.getFrom();
+        DependentTarget to = d.getTo();
+
+        if (from == null || to == null)
+        {
+            // Debug.reportError("Found invalid dependency - ignored.");
+            return;
+        }
+
+        if (d instanceof UsesDependency)
+        {
+            if (usesArrows.contains(d))
+            {
+                return;
+            }
+            else
+            {
+                usesArrows.add((UsesDependency) d);
+            }
+        }
         else
-            pendingDeps.add(dependency);
+        {
+            if (extendsArrows.contains(d))
+            {
+                return;
+            }
+            else
+            {
+                extendsArrows.add(d);
+            }
+        }
+
+        DependentTarget from1 = d.getFrom();
+        DependentTarget to1 = d.getTo();
+        from1.addDependencyOut(d, recalc);
+        to1.addDependencyIn(d, recalc);
+
+        // Inform all listeners about the added dependency
+        DependencyEvent event = new DependencyEvent(d, this, DependencyEvent.Type.DEPENDENCY_ADDED);
+        ExtensionsManager.getInstance().delegateEvent(event);
     }
     
     public void removeDependency(Dependency dependency, boolean recalc)
     {
-        PackageEditor ed = getEditor();
-        if (ed != null)
-            ed.removeDependency(dependency, recalc);
-        else if (Config.isGreenfoot())
-            PackageEditor.removeDependencyHeadless(dependency, recalc, this);
-        else if (!pendingDeps.remove(dependency))
-            Debug.printCallStack("Error: trying to remove non-existent dependency with no package editor available: " + dependency);
+        if (dependency instanceof UsesDependency)
+        {
+            usesArrows.remove(dependency);
+        }
+        else
+        {
+            extendsArrows.remove(dependency);
+        }
+
+        DependentTarget from = dependency.getFrom();
+        DependentTarget to = dependency.getTo();
+
+        from.removeDependencyOut(dependency, recalc);
+        to.removeDependencyIn(dependency, recalc);
+
+        // Inform all listeners about the removed dependency
+        DependencyEvent event = new DependencyEvent(dependency, this, DependencyEvent.Type.DEPENDENCY_REMOVED);
+        ExtensionsManager.getInstance().delegateEvent(event);
     }
 }

@@ -164,6 +164,15 @@ public class BlueJSyntaxView
     private final Map<ParsedNode,Integer> nodeIndents = new HashMap<ParsedNode,Integer>();
 
     /**
+      * Are we in the middle of an update which comes from the RichTextFX stream of changes?
+      * If so, we must not ask for character bounds because the offset calculations
+      * are all wrong, and a layout may be forced resulting in inconsistent state in
+      * RichTextFX (and an exception being thrown: catching the exception is not enough
+      * to avoid the incorrect state).
+    */
+    private boolean duringUpdate;
+
+    /**
      * Creates a new BlueJSyntaxView.
      */
     public BlueJSyntaxView(MoeSyntaxDocument document, ScopeColors scopeColors)
@@ -198,6 +207,17 @@ public class BlueJSyntaxView
             });
         });
     }
+
+    /**
+     * Mark the syntax view as being during an update.  Don't forget
+     * to match every true call with a later false call.
+     * @param duringUpdate
+     */
+    public void setDuringUpdate(boolean duringUpdate)
+    {
+        this.duringUpdate = duringUpdate;
+    }
+
 
     /**
      * Gets the syntax token styles for a given line of code.
@@ -521,7 +541,8 @@ public class BlueJSyntaxView
 
             while (curLine <= lastLine) {
 
-                ScopeInfo scope = new ScopeInfo(EnumSet.noneOf(ParagraphAttribute.class));
+                // curLine is zero-based, but getParagraphAttributes is one-based:
+                ScopeInfo scope = new ScopeInfo(getParagraphAttributes(curLine + 1));
                 scopes.add(scope);
 
                 if (prevScopeStack.isEmpty()) {
@@ -708,6 +729,10 @@ public class BlueJSyntaxView
 
     /**
      * Gets the left edge of the character at the given offset into the document, if we can calculate it.
+     *
+     * @param startOffset The offset into the document of the character we want the left edge for
+     * @return If available, Optional.of(left-edge-X-in-pixels-in-local-coords).  If it is not available
+     *         (which is very possible: *always* check for Optional.empty), then Optional.empty will be returned.
      */
     private OptionalInt getLeftEdge(int startOffset)
     {
@@ -761,7 +786,11 @@ public class BlueJSyntaxView
             while (numberOfSpaces >= cachedSpaceSizes.size())
             {
                 // We have more spaces than the cache; we must update it if we can
-                Optional<Bounds> screenBounds = editorPane.getCharacterBoundsOnScreen(startOffset - numberOfSpaces + cachedSpaceSizes.size(), startOffset - numberOfSpaces + cachedSpaceSizes.size() + 1);
+                Optional<Bounds> screenBounds = Optional.empty();
+                if (!duringUpdate)
+                {
+                    screenBounds = editorPane.getCharacterBoundsOnScreen(startOffset - numberOfSpaces + cachedSpaceSizes.size(), startOffset - numberOfSpaces + cachedSpaceSizes.size() + 1);
+                }
                 // If the character isn't on screen, we're not going to be able to calculate indent,
                 // and we know we haven't got a cached indent, so give up:
                 if (!screenBounds.isPresent())
@@ -784,7 +813,12 @@ public class BlueJSyntaxView
         {
             try
             {
-                Optional<Bounds> screenBounds = startOffset + 1 < editorPane.getLength() ? editorPane.getCharacterBoundsOnScreen(startOffset, startOffset + 1) : Optional.empty();
+                Optional<Bounds> screenBounds = Optional.empty();
+                if (!duringUpdate && startOffset + 1 < editorPane.getLength())
+                {
+                    screenBounds = editorPane.getCharacterBoundsOnScreen(startOffset, startOffset + 1);
+                }
+
                 if (screenBounds.isPresent())
                 {
                     // Minus 24 to allow for the left-hand margin:
@@ -1038,7 +1072,7 @@ public class BlueJSyntaxView
         // hope that the editor is now visible:
         if (indent == null || indent <= 0) {
             // No point trying to re-calculate the indent if the line isn't on screen:
-            if (editorPane.visibleLines.get(doc.offsetToPosition(lineEl.getStartOffset()).getMajor()))
+            if (editorPane != null && editorPane.visibleLines.get(doc.offsetToPosition(lineEl.getStartOffset()).getMajor()))
             {
                 indent = getNodeIndent(doc, nap);
                 nodeIndents.put(nap.getNode(), indent);
@@ -1577,6 +1611,7 @@ public class BlueJSyntaxView
         if (changes == null) {
             // Width has changed, so do it all:
             nodeIndents.clear();
+            imageCache.clear();
             document.recalculateAllScopes();
             return;
         }
@@ -1695,7 +1730,13 @@ public class BlueJSyntaxView
         label.setOnMouseClicked(e -> {
             if (e.getClickCount() == 1 && e.getButton() == MouseButton.PRIMARY)
             {
-                editorPane.getEditor().toggleBreakpoint(editorPane.getDocument().getAbsolutePosition(lineNumberFinal - 1, 0));
+                MoeEditor editor = editorPane.getEditor();
+                // Shouldn't be null because that's only for off-screen copies
+                // and we are in a click handler, but in case of future change:
+                if (editor != null)
+                {
+                    editor.toggleBreakpoint(editorPane.getDocument().getAbsolutePosition(lineNumberFinal - 1, 0));
+                }
             }
             e.consume();
         });
@@ -1780,7 +1821,7 @@ public class BlueJSyntaxView
      */
     public Map<Integer, EnumSet<ParagraphAttribute>> setParagraphAttributes(int lineNumber, Map<ParagraphAttribute, Boolean> alterAttr)
     {
-        EnumSet<ParagraphAttribute> attr = getParaAttr(lineNumber);
+        EnumSet<ParagraphAttribute> attr = getParagraphAttributes(lineNumber);
         boolean changed = false;
         for (Entry<ParagraphAttribute, Boolean> alter : alterAttr.entrySet())
         {
@@ -1838,18 +1879,12 @@ public class BlueJSyntaxView
     /**
      * Gets the paragraph attributes for a particular line.  If none found, returns the empty set.
      * The set is the live set in the map, so updating it will affect the stored attributes for the line.
+     *
+     * First line is one.
      */
-    private EnumSet<ParagraphAttribute> getParaAttr(int lineNumber)
+    EnumSet<ParagraphAttribute> getParagraphAttributes(int lineNumber)
     {
         return paragraphAttributes.computeIfAbsent(lineNumber, k -> EnumSet.noneOf(ParagraphAttribute.class));
-    }
-
-    /**
-     * First line is one
-     */
-    public EnumSet<ParagraphAttribute> getParagraphAttributes(int lineNo)
-    {
-        return paragraphAttributes.getOrDefault(lineNo, EnumSet.noneOf(ParagraphAttribute.class));
     }
 
     /**
@@ -1943,6 +1978,7 @@ public class BlueJSyntaxView
 
         private final List<SingleNestedScope> nestedScopes = new ArrayList<>();
         private final EnumSet<ParagraphAttribute> attributes;
+        // If a scope needs repainting later, we mark as incomplete:
         private boolean incomplete = false;
 
         public ScopeInfo(EnumSet<ParagraphAttribute> attributes)
@@ -2024,6 +2060,17 @@ public class BlueJSyntaxView
             result = 31 * result + attributes.hashCode();
             result += isIncomplete() ? 1 : 0;
             return result;
+        }
+
+        // Mainly for debugging
+        @Override
+        public String toString()
+        {
+            return "ScopeInfo{" +
+                    "nestedScopes=" + nestedScopes +
+                    ", attributes=" + attributes +
+                    ", incomplete=" + incomplete +
+                    '}';
         }
     }
 

@@ -114,7 +114,7 @@ public final class MoeActions
     {
         this.editor = editor;
         // sort out modifier keys...
-        createActionTable(editor);
+        createActionTable();
         if (!load())
             setDefaultKeyBindings();
         lastActionWasCut = false;
@@ -130,6 +130,13 @@ public final class MoeActions
             builtInKeymap.put(new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.META_DOWN), actions.get(DefaultEditorKit.endLineAction));
             builtInKeymap.put(new KeyCodeCombination(KeyCode.LEFT, KeyCombination.META_DOWN, KeyCombination.SHIFT_DOWN), actions.get(DefaultEditorKit.selectionBeginLineAction));
             builtInKeymap.put(new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.META_DOWN, KeyCombination.SHIFT_DOWN), actions.get(DefaultEditorKit.selectionEndLineAction));
+        }
+        else
+        {
+            builtInKeymap.put(new KeyCodeCombination(KeyCode.LEFT, KeyCombination.CONTROL_DOWN), actions.get(DefaultEditorKit.previousWordAction));
+            builtInKeymap.put(new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.CONTROL_DOWN), actions.get(DefaultEditorKit.nextWordAction));
+            builtInKeymap.put(new KeyCodeCombination(KeyCode.LEFT, KeyCombination.CONTROL_DOWN, KeyCombination.SHIFT_DOWN), actions.get(DefaultEditorKit.selectionPreviousWordAction));
+            builtInKeymap.put(new KeyCodeCombination(KeyCode.RIGHT, KeyCombination.CONTROL_DOWN, KeyCombination.SHIFT_DOWN), actions.get(DefaultEditorKit.selectionNextWordAction));
         }
 
         // RichTextFX has some default bindings for actions which we have on menu accelerators
@@ -666,7 +673,16 @@ public final class MoeActions
             modifiers.add(KeyCombination.META_DOWN);
         if ((swing.getModifiers() & Event.ALT_MASK) != 0)
             modifiers.add(KeyCombination.ALT_DOWN);
-        return new KeyCodeCombination(JavaFXUtil.awtKeyCodeToFX(swing.getKeyCode()), modifiers.toArray(new Modifier[0]));
+
+        KeyCode code = JavaFXUtil.awtKeyCodeToFX(swing.getKeyCode());
+        if (code != null)
+        {
+            return new KeyCodeCombination(code, modifiers.toArray(new Modifier[0]));
+        }
+        else
+        {
+            return null;
+        }
     }
 
     // --------------------------------------------------------------------
@@ -945,7 +961,7 @@ public final class MoeActions
     /**
      * Create the table of action supported by this editor
      */
-    private void createActionTable(MoeEditor editor)
+    private void createActionTable()
     {
         compileOrNextErrorAction = compileOrNextErrorAction();
 
@@ -1889,12 +1905,12 @@ public final class MoeActions
 
     private MoeAbstractAction keyBindingsAction()
     {
-        return action("key-bindings", Category.MISC, () -> PrefMgrDialog.showDialog(1)); // 1 is the index of the key bindings pane in the pref dialog
+        return action("key-bindings", Category.MISC, () -> editor.showPreferences(1)); // 1 is the index of the key bindings pane in the pref dialog
     }
 
     private MoeAbstractAction preferencesAction()
     {
-        return action("preferences", Category.MISC, () -> PrefMgrDialog.showDialog(0)); // 0 is the index of the editor pane in the pref dialog
+        return action("preferences", Category.MISC, () -> editor.showPreferences(0)); // 0 is the index of the editor pane in the pref dialog
     }
 
     private MoeAbstractAction goToLineAction()

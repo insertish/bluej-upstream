@@ -37,7 +37,6 @@ import com.google.common.collect.ImmutableSet;
 import javafx.beans.binding.BooleanExpression;
 import org.fxmisc.richtext.model.*;
 import org.fxmisc.richtext.model.TwoDimensional.Bias;
-import org.fxmisc.richtext.model.TwoDimensional.Position;
 import org.reactfx.Subscription;
 import org.reactfx.collection.LiveList;
 import threadchecker.OnThread;
@@ -96,7 +95,6 @@ public class MoeSyntaxDocument
     private final Map<Integer, ScopeInfo> pendingScopeBackgrounds = new HashMap<>();
     private boolean applyingScopeBackgrounds = false;
 
-    protected boolean inNotification = false;
     // Can be null if we are not being used for an editor pane:
     private final BlueJSyntaxView syntaxView;
     private boolean hasFindHighlights = false;
@@ -107,6 +105,11 @@ public class MoeSyntaxDocument
     private int[] lineStarts = null;
     // package-visible:
     boolean notYetShown = true;
+
+    /**
+     * Is this pane an off-screen item just for printing?
+     */
+    private boolean thisDocIsForPrinting = false;
 
 
     public Position createPosition(int initialPos)
@@ -246,6 +249,16 @@ public class MoeSyntaxDocument
         }
     }
 
+    /**
+     * Marks this document as an off-screen copy for printing.  Note: you must call this before
+     * altering the content of the document, or else the run-later we are suppressing with this flag
+     * will already have been run.
+     */
+    public void markAsForPrinting()
+    {
+        thisDocIsForPrinting = true;
+    }
+
     @OnThread(Tag.Any)
     private static class EditEvent
     {
@@ -300,13 +313,18 @@ public class MoeSyntaxDocument
             {
                 fireInsertUpdate(c.getPosition(), c.getInsertionEnd() - c.getPosition());
             }
-            // Apply backgrounds from simple update, as it may not even
-            // trigger a reparse.  This must be done later, after the document has finished
-            // doing all the updates to the content, before we can mess with paragraph styles:
-            JavaFXUtil.runAfterCurrent(() -> {
-                invalidateCache();
-                applyPendingScopeBackgrounds();
-            });
+            // Don't attempt a run-later when printing as we'll be on a different thread, and we don't
+            // print the scopes anyway:
+            if (!thisDocIsForPrinting)
+            {
+                // Apply backgrounds from simple update, as it may not even
+                // trigger a reparse.  This must be done later, after the document has finished
+                // doing all the updates to the content, before we can mess with paragraph styles:
+                JavaFXUtil.runAfterCurrent(() -> {
+                    invalidateCache();
+                    applyPendingScopeBackgrounds();
+                });
+            }
         });
     }
 
@@ -599,6 +617,9 @@ public class MoeSyntaxDocument
         // purge that layout request by executing it, before we restore the scroll Y:
         syntaxView.editorPane.layout();
         syntaxView.editorPane.setEstimatedScrollY(scrollY);
+        // Setting the estimated scroll Y requests a layout but does not perform it.  This seemed
+        // to lead to occasional scroll jumps, I think involving delayed layout passes.  So although
+        // it is getting silly, we enforce another layout to *actually* set the scroll position:
         syntaxView.editorPane.layout();
 
         applyingScopeBackgrounds = false;
@@ -778,7 +799,10 @@ public class MoeSyntaxDocument
      */
     protected void fireInsertUpdate(int offset, int length)
     {
-        inNotification = true;
+        if (syntaxView != null)
+        {
+            syntaxView.setDuringUpdate(true);
+        }
         if (reparseRecordTree != null) {
             NodeAndPosition<ReparseRecord> napRr = reparseRecordTree.findNodeAtOrAfter(offset);
             if (napRr != null) {
@@ -812,7 +836,10 @@ public class MoeSyntaxDocument
         int startLine = document.offsetToPosition(offset, Bias.Forward).getMajor();
         int endLine = document.offsetToPosition(offset + length, Bias.Forward).getMajor();
         recalculateScopesForLinesInRange(startLine, endLine);
-        inNotification = false;
+        if (syntaxView != null)
+        {
+            syntaxView.setDuringUpdate(false);
+        }
     }
     
     
@@ -821,7 +848,10 @@ public class MoeSyntaxDocument
      */
     protected void fireRemoveUpdate(int offset, int length)
     {
-        inNotification = true;
+        if (syntaxView != null)
+        {
+            syntaxView.setDuringUpdate(true);
+        }
         NodeAndPosition<ReparseRecord> napRr = (reparseRecordTree != null) ?
                 reparseRecordTree.findNodeAtOrAfter(offset) :
                     null;
@@ -903,7 +933,10 @@ public class MoeSyntaxDocument
         fireChangedUpdate(mse);
         int line = document.offsetToPosition(offset, Bias.Forward).getMajor();
         recalculateScopesForLinesInRange(line, line);
-        inNotification = false;
+        if (syntaxView != null)
+        {
+            syntaxView.setDuringUpdate(false);
+        }
     }
 
     /**

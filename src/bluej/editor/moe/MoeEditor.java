@@ -37,7 +37,6 @@ import bluej.editor.moe.PrintDialog.PrintChoices;
 import bluej.editor.stride.FXTabbedEditor;
 import bluej.editor.stride.FrameEditor;
 import bluej.editor.stride.MoeFXTab;
-import bluej.extensions.SourceType;
 import bluej.extensions.editor.Editor;
 import bluej.parser.AssistContent;
 import bluej.parser.AssistContent.ParamInfo;
@@ -134,6 +133,8 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.function.UnaryOperator;
@@ -641,7 +642,14 @@ public final class MoeEditor extends ScopeColorsBorderPane
                 JavaFXUtil.runAfter(Duration.millis(200), () -> {
                     sourceDocument.notYetShown = false;
                     sourceDocument.recalculateAllScopes();
+                    // Must be called after the editor is actually visible for first time:
+                    sourcePane.requestFollowCaret();
                 });
+            }
+            else
+            {
+                // Make sure caret is visible after open:
+                sourcePane.requestFollowCaret();
             }
         }
     }
@@ -825,6 +833,10 @@ public final class MoeEditor extends ScopeColorsBorderPane
         // highlight the line
         sourceDocument.showStepLine(lineNumber);
 
+        // Scroll to the line:
+        sourcePane.setCaretPosition(getOffsetFromLineColumn(new SourceLocation(lineNumber, 1)));
+        sourcePane.requestFollowCaret();
+
         // display the message
 
         if (message != null) {
@@ -841,7 +853,7 @@ public final class MoeEditor extends ScopeColorsBorderPane
         int spos = line.getStartOffset();
         int epos = line.getEndOffset();
         int testPos = Math.min(epos - spos - 1, column - 1);
-        if (testPos == 0) {
+        if (testPos <= 0) {
             return spos;
         }
 
@@ -1599,6 +1611,9 @@ public final class MoeEditor extends ScopeColorsBorderPane
     public FXRunnable printTo(PrinterJob printerJob, boolean printLineNumbers, boolean printBackground)
     {
         MoeSyntaxDocument doc = new MoeSyntaxDocument(new ScopeColorsBorderPane());
+        // Note: very important we make this call before copyFrom, as copyFrom is what triggers
+        // the run-later that marking as printing suppresses:
+        doc.markAsForPrinting();
         doc.copyFrom(sourceDocument);
         MoeEditorPane editorPane = doc.makeEditorPane(null, null);
         Scene scene = new Scene(editorPane);
@@ -1648,8 +1663,20 @@ public final class MoeEditor extends ScopeColorsBorderPane
         {
             // Scroll to make topLine actually at the top:
             virtualFlow.showAsFirst(topLine);
+
             // Take a copy to avoid any update problems:
             List<C> visibleCells = new ArrayList<>(virtualFlow.visibleCells());
+
+            // Previously, we had a problem where a run-later task could race us and alter
+            // the scrolling which caused us to try to print an empty page.  That shouldn't happen
+            // any more, but we still guard against this just in case; better to handle it gracefully
+            // than risk running into an exception or infinite loop:
+            if (visibleCells.isEmpty())
+            {
+                // If visible cells empty, just give up gracefully rather than encounter an exception:
+                return;
+            }
+
             C lastCell = visibleCells.get(visibleCells.size() - 1);
             // Last page if we can see the last editor line:
             lastPage = virtualFlow.getCellIfVisible(editorLines - 1).isPresent();
@@ -1823,6 +1850,16 @@ public final class MoeEditor extends ScopeColorsBorderPane
         return found;
     }
 
+    /**
+     * Shows the preferences pane, and makes the given pane index (i.e. given tab index
+     * in the preferences) the active showing tab.  0 is general, 1 is key bindings, and so on.
+     * If in doubt, pass 0.
+     */
+    public void showPreferences(int paneIndex)
+    {
+        watcher.showPreferences(paneIndex);
+    }
+
 
     /**
      * An interface for dealing with search results.
@@ -1884,6 +1921,9 @@ public final class MoeEditor extends ScopeColorsBorderPane
     FindNavigator doFind(String searchFor, boolean ignoreCase)
     {
         removeSearchHighlights();
+        // Deselect existing selection in case it's no longer a valid search result.
+        // Move back to beginning of selection:
+        sourcePane.moveTo(Math.min(sourcePane.getAnchor(), sourcePane.getCaretPosition()));
         lastSearchString = searchFor;
         String content = sourcePane.getText();
 
@@ -1926,6 +1966,11 @@ public final class MoeEditor extends ScopeColorsBorderPane
                 int pos = sourcePane.getSelection().getStart();
                 sourceDocument.replace(pos, searchFor.length(), replacement);
                 sourcePane.setCaretPosition(pos + searchFor.length());
+                // For some reason, after a replacement, the request to follow caret doesn't
+                // work.  I think it's because the document content has changed.  A simple
+                // runAfterCurrent doesn't work either.  So although it's hacky, we use a delayed
+                // action.  We can queue it up now:
+                JavaFXUtil.runAfter(Duration.millis(200), () -> sourcePane.requestFollowCaret());
                 return doFind(searchFor, ignoreCase);
             }
 
@@ -2058,8 +2103,13 @@ public final class MoeEditor extends ScopeColorsBorderPane
                     watcher.generateDoc();
                 }
             }
+            else
+            {
+                // Only bother to refresh if we're not about to generate
+                // (if we do generate, we will refresh once completed)
+                refreshHtmlDisplay();
+            }
 
-            refreshHtmlDisplay();
             interfaceToggle.getSelectionModel().selectLast();
             viewingHTML.set(true);
             watcher.showingInterface(true);
@@ -2096,6 +2146,22 @@ public final class MoeEditor extends ScopeColorsBorderPane
         FileInputStream fis = null;
         try {
             File urlFile = new File(getDocPath());
+
+            // Check if docs file exists before attempting to load it.  There is a JDK behaviour where
+            // if you load a non-existent file in a webview, all future attempts to reload the page will
+            // fail even once the file exists.  So the file must be present before we attempt to load.
+            //
+            // There is an seeming timing hazard here where we could be called just at the moment the file
+            // is created but before it is finished.  In fact, we are called in one of two cases:
+            //  - One is where the interface is being switched to.  This method is called only if the
+            //    docs won't be regenerated, so no race hazard there.
+            //  - The other case is when the doc generation has definitely finished, so again we won't be in a
+            //    race with the generation:
+            if (!urlFile.exists())
+            {
+                return;
+            }
+
             URL myURL = urlFile.toURI().toURL();
 
             // We must use reload here if applicable, as that forces reloading the stylesheet.css asset
@@ -2529,8 +2595,10 @@ public final class MoeEditor extends ScopeColorsBorderPane
             doBracketMatch();
         }
         actions.userAction();
-        
-        if (oldCaretLineNumber != getLineNumberAt(caretPos))
+
+        // Only send caret moved event if we are open; caret moves while loading
+        // but we don't want to send an edit event because of that:
+        if (oldCaretLineNumber != getLineNumberAt(caretPos) && isOpen())
         {
             recordEdit(true);
 
@@ -3243,11 +3311,11 @@ public final class MoeEditor extends ScopeColorsBorderPane
             }, new SuggestionListListener()
             {
                 @Override
-                public @OnThread(Tag.FXPlatform) void suggestionListChoiceClicked(int highlighted)
+                public @OnThread(Tag.FXPlatform) void suggestionListChoiceClicked(SuggestionList suggestionList, int highlighted)
                 {
                     if (highlighted != -1)
                     {
-                        codeComplete(possibleCompletions[highlighted], originalPosition, sourcePane.getCaretPosition());
+                        codeComplete(possibleCompletions[highlighted], originalPosition, sourcePane.getCaretPosition(), suggestionList);
                     }
                 }
 
@@ -3260,7 +3328,7 @@ public final class MoeEditor extends ScopeColorsBorderPane
                     }
                     else if (event.getCharacter().equals("\n"))
                     {
-                        suggestionListChoiceClicked(highlighted);
+                        suggestionListChoiceClicked(suggestionList, highlighted);
                         return Response.DISMISS;
                     }
                     else
@@ -3275,7 +3343,7 @@ public final class MoeEditor extends ScopeColorsBorderPane
                 }
 
                 @Override
-                public @OnThread(Tag.FXPlatform) SuggestionList.SuggestionListListener.Response suggestionListKeyPressed(KeyEvent event, int highlighted)
+                public @OnThread(Tag.FXPlatform) SuggestionList.SuggestionListListener.Response suggestionListKeyPressed(SuggestionList suggestionList, KeyEvent event, int highlighted)
                 {
                     switch (event.getCode())
                     {
@@ -3283,7 +3351,7 @@ public final class MoeEditor extends ScopeColorsBorderPane
                             return Response.DISMISS;
                         case ENTER:
                         case TAB:
-                            suggestionListChoiceClicked(highlighted);
+                            suggestionListChoiceClicked(suggestionList, highlighted);
                             return Response.DISMISS;
                         case BACK_SPACE:
                             sourcePane.deletePreviousChar();
@@ -3306,6 +3374,8 @@ public final class MoeEditor extends ScopeColorsBorderPane
             suggestionList.updateVisual(prefix);
             suggestionList.highlightFirstEligible();
             suggestionList.show(sourcePane, spLoc);
+            Position pos = sourcePane.offsetToPosition(originalPosition, Bias.Forward);
+            watcher.recordCodeCompletionStarted(pos.getMajor() + 1, pos.getMinor() + 1, null, null, prefix, suggestionList.getRecordingId());
 
         } else {
             /*
@@ -3322,7 +3392,7 @@ public final class MoeEditor extends ScopeColorsBorderPane
     /**
      * codeComplete prints the selected text in the editor
      */
-    private void codeComplete(AssistContent selected, int prefixBegin, int prefixEnd)
+    private void codeComplete(AssistContent selected, int prefixBegin, int prefixEnd, SuggestionList suggestionList)
     {
         String start = selected.getName();
         List<ParamInfo> params = selected.getParams();
@@ -3355,7 +3425,7 @@ public final class MoeEditor extends ScopeColorsBorderPane
                 sourcePane.select(selLoc, selLoc + params.get(0).getDummyName().length());
         }
         Position prefixBeginPos = sourcePane.offsetToPosition(prefixBegin, Bias.Forward);
-        watcher.recordCodeCompletionEnded(prefixBeginPos.getMajor() + 1, prefixBeginPos.getMinor() + 1, null, null, prefix, inserted);
+        watcher.recordCodeCompletionEnded(prefixBeginPos.getMajor() + 1, prefixBeginPos.getMinor() + 1, null, null, prefix, inserted, suggestionList.getRecordingId());
         try
         {
             save();
@@ -3425,7 +3495,7 @@ public final class MoeEditor extends ScopeColorsBorderPane
     {
         if (watcher != null)
         {
-            watcher.recordEdit(SourceType.Java, sourceDocument.getText(0, sourceDocument.getLength()), includeOneLineEdits);
+            watcher.recordJavaEdit(sourceDocument.getText(0, sourceDocument.getLength()), includeOneLineEdits);
         }
     }
 
@@ -3574,7 +3644,7 @@ public final class MoeEditor extends ScopeColorsBorderPane
     }
 
     @Override
-    public boolean compileStarted()
+    public boolean compileStarted(int compilationSequence)
     {
         madeChangeOnCurrentLine = false;
         errorManager.removeAllErrorHighlights();
@@ -3582,6 +3652,7 @@ public final class MoeEditor extends ScopeColorsBorderPane
     }
 
     @Override
+    @OnThread(Tag.FXPlatform)
     public boolean isOpen()
     {
         return fxTabbedEditor != null && fxTabbedEditor.isWindowVisible();

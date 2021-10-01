@@ -24,7 +24,6 @@ package bluej.utility;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.lang.reflect.InvocationTargetException;
 import java.net.MalformedURLException;
 import java.net.URISyntaxException;
 import java.net.URL;
@@ -42,8 +41,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.stream.Collectors;
 
-import javax.swing.SwingUtilities;
-
 import bluej.Config;
 import javafx.application.Platform;
 import nu.xom.Attribute;
@@ -52,6 +49,7 @@ import nu.xom.Document;
 import nu.xom.Element;
 import nu.xom.ParsingException;
 import org.reflections.Reflections;
+import org.reflections.ReflectionsException;
 import org.reflections.scanners.SubTypesScanner;
 import org.reflections.util.ClasspathHelper;
 import org.reflections.util.ConfigurationBuilder;
@@ -131,15 +129,23 @@ public class ImportScanner
         private AssistContentThreadSafe getType(String prefix, String name, JavadocResolver javadocResolver)
         {
             return types.computeIfAbsent(name, s -> {
-                Class<?> c = reflections.typeNameToClass(prefix + s);
                 // To safely get an AssistContentThreadSafe, we must create one from the FXPlatform thread.
                 // So we need to hop across to the FXPlatform thread.  Because we are an arbitrary background
                 // worker thread, it is safe to use wait afterwards; without risk of deadlock:
                 try
                 {
+                    Class<?> c = reflections.typeNameToClass(prefix + s);
                     CompletableFuture<AssistContentThreadSafe> f = new CompletableFuture<>();
                     Platform.runLater(() -> f.complete(new AssistContentThreadSafe(new ImportedTypeCompletion(c, javadocResolver))));
                     return f.get();
+                }
+                catch (ReflectionsException e)
+                {
+                    // Don't report this one; it happens frequently, for example
+                    // when the user is typing in an import in a Stride import frame.
+                    // We check j, ja, jav, ... java.ut, java.uti, etc.
+                    // No need to report an exception for every bad import
+                    return null;
                 }
                 catch (Exception e)
                 {
@@ -485,7 +491,7 @@ public class ImportScanner
             }
         }
         catch (ParsingException | IOException e) {
-            Debug.reportError(e);
+            Debug.message(e.getClass().getName() + " while reading import cache: " + e.getMessage());
         }
     }
 
