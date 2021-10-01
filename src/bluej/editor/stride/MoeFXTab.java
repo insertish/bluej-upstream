@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 2016 Michael Kölling and John Rosenberg 
+ Copyright (C) 2016,2017 Michael Kölling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -23,11 +23,9 @@ package bluej.editor.stride;
 
 import bluej.editor.moe.MoeEditor;
 import bluej.utility.javafx.JavaFXUtil;
-import bluej.utility.javafx.SwingNodeFixed;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.beans.property.StringProperty;
 import javafx.beans.value.ObservableStringValue;
-import javafx.embed.swing.SwingNode;
 import javafx.geometry.Pos;
 import javafx.scene.control.Label;
 import javafx.scene.control.Menu;
@@ -38,20 +36,20 @@ import javafx.scene.layout.HBox;
 import threadchecker.OnThread;
 import threadchecker.Tag;
 
-import javax.swing.SwingUtilities;
 import java.util.List;
+
 
 /**
  * Created by neil on 13/04/2016.
  */
-public @OnThread(Tag.FX) class MoeFXTab extends FXTab
+public @OnThread(Tag.FXPlatform) class MoeFXTab extends FXTab
 {
-    private final MoeEditor moeEditor;
-    private FXTabbedEditor parent = null;
-    private final StringProperty windowTitleProperty = new SimpleStringProperty();
+    // -------- INSTANCE VARIABLES --------
     private boolean initialised = false;
+    private final MoeEditor moeEditor;
     private final TabMenuManager menuManager;
-    private SwingNode swingNode;
+    private final StringProperty windowTitleProperty = new SimpleStringProperty();
+    private FXTabbedEditor parent;
 
     @OnThread(Tag.FXPlatform)
     public MoeFXTab(MoeEditor moeEditor, String windowTitle)
@@ -62,6 +60,7 @@ public @OnThread(Tag.FX) class MoeFXTab extends FXTab
         menuManager = new TabMenuManager(this)
         {
             @Override
+            @OnThread(Tag.FXPlatform)
             List<Menu> getMenus()
             {
                 updateMoveMenus();
@@ -95,7 +94,6 @@ public @OnThread(Tag.FX) class MoeFXTab extends FXTab
     @Override
     void focusWhenShown()
     {
-        swingNode.requestFocus();
         moeEditor.requestEditorFocus();
     }
 
@@ -122,11 +120,7 @@ public @OnThread(Tag.FX) class MoeFXTab extends FXTab
     {
         if (!initialised)
             initialised = true;
-        swingNode = new SwingNodeFixed();
-        //JPanel panel = new JPanel();
-        //panel.add(moeEditor);
-        swingNode.setContent(moeEditor);
-        setContent(swingNode);
+        setContent(moeEditor);
 
         setText("");
         Label titleLabel = new Label(windowTitleProperty.get());
@@ -137,9 +131,7 @@ public @OnThread(Tag.FX) class MoeFXTab extends FXTab
         tabHeader.addEventHandler(MouseEvent.MOUSE_CLICKED, e -> {
             if (e.getButton() == MouseButton.MIDDLE)
             {
-                SwingUtilities.invokeLater(() ->
-                    moeEditor.setVisible(false)
-                );
+                moeEditor.setEditorVisible(false);
             }
         });
         setGraphic(tabHeader);
@@ -148,16 +140,14 @@ public @OnThread(Tag.FX) class MoeFXTab extends FXTab
     @Override
     public void notifySelected()
     {
-        SwingUtilities.invokeLater(() -> moeEditor.notifyVisibleTab(true));
+        moeEditor.notifyVisibleTab(true);
     }
 
     @Override
     public void notifyUnselected()
     {
-        SwingUtilities.invokeLater(() -> {
-            moeEditor.notifyVisibleTab(false);
-            moeEditor.cancelFreshState();
-        });
+        moeEditor.notifyVisibleTab(false);
+        moeEditor.cancelFreshState();
     }
 
     @Override
@@ -165,7 +155,7 @@ public @OnThread(Tag.FX) class MoeFXTab extends FXTab
     {
         this.parent = parent;
         moeEditor.setParent(parent, partOfMove);
-        SwingUtilities.invokeLater(() -> moeEditor.notifyVisibleTab(false));
+        moeEditor.notifyVisibleTab(false);
     }
 
     @Override
@@ -178,4 +168,5 @@ public @OnThread(Tag.FX) class MoeFXTab extends FXTab
     {
         return moeEditor;
     }
+
 }

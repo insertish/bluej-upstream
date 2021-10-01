@@ -22,7 +22,6 @@
 package bluej.utility;
 
 import java.awt.Component;
-import java.awt.Point;
 import java.awt.Toolkit;
 import java.awt.Window;
 import java.awt.datatransfer.StringSelection;
@@ -36,14 +35,9 @@ import javax.swing.JDialog;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 
-import javafx.scene.control.Alert;
-import javafx.scene.control.Button;
-import javafx.scene.control.ButtonBar;
-import javafx.scene.control.ButtonType;
-import javafx.scene.control.TextInputDialog;
+import javafx.scene.control.*;
 import javafx.stage.Modality;
 
-import bluej.utility.javafx.SwingNodeDialog;
 import threadchecker.OnThread;
 import threadchecker.Tag;
 import bluej.Config;
@@ -291,7 +285,7 @@ public class DialogManager
             Alert alert = new Alert(Alert.AlertType.CONFIRMATION, messageAndButtons.getMessage(), buttons.toArray(new ButtonType[0]));
             alert.setHeaderText("");
             alert.initOwner(parent);
-            alert.initModality(Modality.WINDOW_MODAL);
+            alert.initModality(parent == null ? Modality.APPLICATION_MODAL : Modality.WINDOW_MODAL);
             alert.setTitle(Config.getApplicationName() + ":  " +
                 Config.getString("dialogmgr.question"));
             return alert.showAndWait().map(buttons::indexOf).orElse(buttons.size() - 1);
@@ -459,18 +453,25 @@ public class DialogManager
         centreWindow(dialog, (Window)dialog.getParent());
     }
 
-    public static void centreDialog(SwingNodeDialog dialog)
-    {
-        
-    }
-
-
     /**
      * centreWindow - try to center a window within a parent window
      */
     public static void centreWindow(Window child, Window parent)
     {
         child.setLocationRelativeTo(parent);
+    }
+
+    @OnThread(Tag.FXPlatform)
+    public static void centreDialog(Dialog dialog)
+    {
+        dialog.setOnShown(event -> centreWindow(dialog, dialog.getOwner()));
+    }
+
+    @OnThread(Tag.FXPlatform)
+    private static void centreWindow(Dialog dialog, javafx.stage.Window owner)
+    {
+        dialog.setX(owner.getX() + owner.getWidth()/2d - dialog.getWidth()/2d);
+        dialog.setY(owner.getY() + owner.getHeight()/2d - dialog.getHeight()/2d);
     }
 
     public static void addOKCancelButtons(JPanel panel, JButton okButton, JButton cancelButton) 

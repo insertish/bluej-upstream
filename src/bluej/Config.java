@@ -25,7 +25,6 @@ import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.Image;
-import java.awt.Point;
 import java.awt.Rectangle;
 import java.awt.Toolkit;
 import java.awt.event.InputEvent;
@@ -40,40 +39,34 @@ import java.io.IOException;
 import java.io.OutputStreamWriter;
 import java.io.PrintStream;
 import java.net.MalformedURLException;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Date;
-import java.util.List;
-import java.util.Locale;
-import java.util.MissingResourceException;
-import java.util.Properties;
-import java.util.Scanner;
+import java.util.*;
 
+import javafx.beans.property.BooleanProperty;
+import javafx.beans.property.SimpleBooleanProperty;
 import javafx.collections.ObservableList;
 import javafx.geometry.Point2D;
+import javafx.scene.Node;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.scene.control.DialogPane;
+import javafx.scene.control.Label;
 import javafx.scene.control.SplitPane;
 import javafx.scene.input.KeyCharacterCombination;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyCodeCombination;
 import javafx.scene.input.KeyCombination;
+import javafx.scene.layout.StackPane;
+import javafx.scene.shape.Polygon;
 import javafx.stage.Screen;
-import javafx.stage.Stage;
 import javafx.stage.Window;
 
 import javax.swing.ImageIcon;
 import javax.swing.KeyStroke;
-import javax.swing.UIManager;
-import javax.swing.UIManager.LookAndFeelInfo;
-import javax.swing.UnsupportedLookAndFeelException;
 import javax.swing.border.BevelBorder;
 import javax.swing.border.Border;
 import javax.swing.border.CompoundBorder;
 import javax.swing.border.EmptyBorder;
 import javax.swing.border.LineBorder;
-import javax.swing.plaf.metal.MetalLookAndFeel;
 
 import bluej.stride.generic.InteractionManager;
 import bluej.utility.javafx.JavaFXUtil;
@@ -116,7 +109,6 @@ public final class Config
     public static final String BLUEJ_OPENPACKAGE = "bluej.openPackage";
     public static final String bluejDebugLogName = "bluej-debuglog.txt";
     public static final String greenfootDebugLogName = "greenfoot-debuglog.txt";
-    public static final Color ENV_COLOUR = new Color(152,32,32);
     private static final int SHORTCUT_MASK =
         Toolkit.getDefaultToolkit().getMenuShortcutKeyMask();
     // Bit ugly having it here, but it's needed by MiscPrefPanel (which may just be in BlueJ)
@@ -132,6 +124,9 @@ public final class Config
     public static Properties moeSystemProps;  // moe (editor) properties
     public static Properties moeUserProps;    // moe (editor) properties
 
+    // We only want at most one BooleanProperty per property-name,
+    // so we have to keep track of the ones we've made:
+    private static final Map<String, BooleanProperty> booleanProperties = new HashMap<>();
 
     // bluej configuration properties hierarchy
     // (command overrides user which overrides system)
@@ -156,15 +151,12 @@ public final class Config
     private static BlueJPropStringSource propSource; // source for properties
     private static File bluejLibDir;
     private static File userPrefDir;
+    private static File templateDir;
     /** The greenfoot subdirectory of the "lib"-directory*/ 
     private static File greenfootLibDir;
     private static boolean usingMacOSScreenMenubar;
     private static boolean initialised = false;
     private static boolean isGreenfoot = false;
-    private static Color selectionColour;
-    private static Color selectionColour2;
-    private static Color highlightColour;
-    private static Color highlightColour2;
     private static List<String> debugVMArgs = new ArrayList<>();
     /** whether this is the debug vm or not. */
     private static boolean isDebugVm = true; // Default to true, will be corrected on main VM
@@ -262,15 +254,7 @@ public final class Config
         System.setProperty("apple.laf.useScreenMenuBar", macOSscreenMenuBar);      
 
         usingMacOSScreenMenubar = isMacOS() && macOSscreenMenuBar.equals("true");
-        
-        boolean themed = Config.getPropBoolean("bluej.useTheme");
-        if(themed) {    
-            MetalLookAndFeel.setCurrentTheme(new BlueJTheme());
-        }
 
-        String laf = Config.getPropString("bluej.lookAndFeel", "bluejdefault");
-        setLookAndFeel(laf);
-        
         //read any debug vm args
         initDebugVMArgs();
         Config.setVMLocale();
@@ -1103,7 +1087,17 @@ public final class Config
         if(keyString.length() == 1) {
             return new KeyCharacterCombination(keyString, modifiers.toArray(new KeyCombination.Modifier[0]));
         }
-        return new KeyCodeCombination(KeyCode.getKeyCode(keyString), modifiers.toArray(new KeyCombination.Modifier[0]));
+        if (keyString.equals("BACK_SPACE"))
+            keyString = "Backspace";
+
+        KeyCode keyCode = KeyCode.getKeyCode(keyString);
+        if (keyCode != null)
+            return new KeyCodeCombination(keyCode, modifiers.toArray(new KeyCombination.Modifier[0]));
+        else
+        {
+            Debug.message("Unknown key: \"" + keyString + "\"");
+            return null;
+        }
     }
 
     /**
@@ -1237,6 +1231,28 @@ public final class Config
         }
         return value;
     }
+
+    /**
+     * Gets a boolean value from the BlueJ properties as JavaFX observable
+     * property.  Any changes to the property will be saved to the BlueJ properties
+     * automatically.
+     *
+     * Only one instance is created per property name for the lifetime of
+     * the program.  This is generally good as you can call this method twice
+     * and updates will be reflected in both returned properties (because it
+     * will be the same property object!).  But be careful if you bind
+     * the property as you may be unbinding an earlier binding.
+     */
+    @OnThread(Tag.FXPlatform)
+    public static BooleanProperty getPropBooleanProperty(String propname)
+    {
+        return booleanProperties.computeIfAbsent(propname, p -> {
+            boolean initial = getPropBoolean(propname);
+            SimpleBooleanProperty prop = new SimpleBooleanProperty(initial);
+            JavaFXUtil.addChangeListener(prop, b -> putPropBoolean(propname, b));
+            return prop;
+        });
+    }
     
     /**
      * Get a boolean value from the BlueJ properties. The default value is false.
@@ -1244,7 +1260,7 @@ public final class Config
     public static boolean getPropBoolean(String propname)
     {
         return parseBoolean(getPropString(propname, null));
-    }    
+    }
     
     /**
      * Get a boolean value from the BlueJ properties, with the specified default.
@@ -1309,7 +1325,12 @@ public final class Config
         catch (NullPointerException npe) { }
         return null;
     }
-    
+
+    /**
+     * Gets an image as an FX image.  Note that you pass the property name
+     * as the parameter, which gets resolved via getPropString.
+     * If you don't want this resolution, use getFixedImageAsFXImage
+     */
     @OnThread(Tag.FX)
     public static javafx.scene.image.Image getImageAsFXImage(String propname)
     {
@@ -1340,7 +1361,12 @@ public final class Config
         catch (java.net.MalformedURLException mue) { }
         return null;
     }
-    
+
+    /**
+     * Gets the given file name from the images directory as an image.
+     * @param filename
+     * @return
+     */
     @OnThread(Tag.FX)
     public static javafx.scene.image.Image getFixedImageAsFXImage(String filename)
     {
@@ -1444,11 +1470,20 @@ public final class Config
      */
     public static File getTemplateDir()
     {
-        String path = commandProps.getProperty("bluej.templatePath" , "");
-        if(path.length() == 0) {
-            return getLanguageFile("templates");
-        }
-        return new File(path);
+    	if (templateDir == null) {
+    		String path = commandProps.getProperty("bluej.templatePath" , "");
+    		if(path.length() == 0) {
+    			templateDir = getLanguageFile("templates");
+    			if (! templateDir.exists()) {
+    				templateDir = getDefaultLanguageFile("templates");
+    			}
+    			return templateDir;
+    		}
+    		else {
+    			templateDir = new File(path); 
+    		}
+    	}
+        return templateDir;
     }
 
     /**
@@ -1572,50 +1607,6 @@ public final class Config
         return null;
     }
 
-    /**
-     * Return a color value for selections.
-     */
-    public static Color getSelectionColour()
-    {
-        if(selectionColour == null) {
-            selectionColour = Config.getItemColour("colour.selection");
-        }
-        return selectionColour;
-    }
-
-    /**
-     * Return the second (gradient) color value for selections.
-     */
-    public static Color getSelectionColour2()
-    {
-        if(selectionColour2 == null) {
-            selectionColour2 = Config.getItemColour("colour.selection2");
-        }
-        return selectionColour2;
-    }
-
-    /**
-     * Return a color value for selections.
-     */
-    public static Color getHighlightColour()
-    {
-        if(highlightColour == null) {
-            highlightColour = Config.getItemColour("colour.highlight");
-        }
-        return highlightColour;
-    }
-
-    /**
-     * Return the second (gradient) color value for selections.
-     */
-    public static Color getHighlightColour2()
-    {
-        if(highlightColour2 == null) {
-            highlightColour2 = Config.getItemColour("colour.highlight2");
-        }
-        return highlightColour2;
-    }
-    
     /**
      * Get a font from a specified property, using the given default font name and
      * the given size. Font name can end with "-bold" to indicate bold style.
@@ -1784,78 +1775,7 @@ public final class Config
         Locale loc = new Locale(lang, region);
         Locale.setDefault(loc);
     }
-    
-    /**
-     * Set Look and Feel for BlueJ interface
-     * @param laf the l&f specified. Should be one of 3 options:
-     * "system", "crossplatform" or "default"
-     */
-    private static void setLookAndFeel(String laf)
-    {
-        try {
-            if (laf.equals("default")) {
-                return;
-            }
-            
-            // if system specified
-            if(laf.equals("system")) {
-                UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
-                return;
-            }
-            else if(laf.equals("crossplatform")) {
-                UIManager.setLookAndFeel(UIManager.getCrossPlatformLookAndFeelClassName());
-                usingMacOSScreenMenubar = false; // Screen menu bar requires aqua look-and-feel
-                return;
-            }
-            
-            if (! laf.equals("bluejdefault")) {
-                LookAndFeelInfo [] lafi = UIManager.getInstalledLookAndFeels();
-                for (LookAndFeelInfo aLafi : lafi) {
-                    if (aLafi.getName().equals(laf)) {
-                        UIManager.setLookAndFeel(aLafi.getClassName());
-                        return;
-                    }
-                }
-                
-                // Try as a class name
-                UIManager.setLookAndFeel(laf);
-                return;
-            }
-            
-            // do the "default, ie. let BlueJ decide
-            // Windows - System l&F, Linux & Solaris - cross-platform
-            if (isWinOS()){
-                UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
-            }
-            // treat Linux and Solaris the same at the moment
-            else if(isLinux() || isSolaris()) {
-                LookAndFeelInfo [] lafi = UIManager.getInstalledLookAndFeels();
-                LookAndFeelInfo nimbus = null;
-                for (LookAndFeelInfo lafInstance : lafi) {
-                    if (lafInstance.getName().equals("Nimbus")) {
-                        nimbus = lafInstance;
-                        break;
-                    }
-                }
-                
-                if (nimbus != null) {
-                    UIManager.setLookAndFeel(nimbus.getClassName());
-                }
-                else {
-                    UIManager.setLookAndFeel(UIManager.getCrossPlatformLookAndFeelClassName());
-                }
-            }
-        } catch (ClassNotFoundException e) {
-            Debug.log("Could not find look-and-feel class: " + e.getMessage());
-        } catch (InstantiationException e) {
-            e.printStackTrace();
-        } catch (IllegalAccessException e) {
-            e.printStackTrace();
-        } catch (UnsupportedLookAndFeelException e) {
-            Debug.log("Unsupported look-and-feel: " + e.getMessage());
-        }
-    }
-    
+
     /**
      * Initialise debug VM args from bluej config file
      * Should only be called once in Config.initialise(...)
@@ -1932,12 +1852,15 @@ public final class Config
                 "editor-selection",
                 "editor-slot-choice",
                 "editor-suggestions",
-                "editor-tabs"};
+                "editor-tabs",
+                "moe",
+                "shared"};
         
         for (String stem : stylesheetStems)
         {
             addStylesheet(scene.getStylesheets(), stem);
         }
+        addJavaColorsStylesheet(scene.getStylesheets());
     }
 
     @OnThread(Tag.FX)
@@ -1959,6 +1882,20 @@ public final class Config
     }
 
     @OnThread(Tag.FX)
+    public static void addTerminalStylesheets(Scene scene)
+    {
+        addStylesheet(scene.getStylesheets(), "terminal");
+    }
+
+    @OnThread(Tag.FX)
+    public static void addDebuggerStylesheets(Scene scene)
+    {
+        addStylesheet(scene.getStylesheets(), "debugger");
+        addStylesheet(scene.getStylesheets(), "shared");
+    }
+
+
+    @OnThread(Tag.FX)
     public static void addPMFStylesheets(Scene scene)
     {
         addStylesheet(scene.getStylesheets(), "pkgmgrframe");
@@ -1970,7 +1907,8 @@ public final class Config
         try
         {
             sheetList.add(new File(bluejLibDir + "/stylesheets", stem + ".css").toURI().toURL().toString());
-        } catch (MalformedURLException e)
+        }
+        catch (MalformedURLException e)
         {
             Debug.reportError(e);
         }
@@ -1979,13 +1917,30 @@ public final class Config
     @OnThread(Tag.FX)
     public static void addDialogStylesheets(DialogPane dialogPane)
     {
-        try
+        addStylesheet(dialogPane.getStylesheets(), "dialogs");
+        addJavaColorsStylesheet(dialogPane.getStylesheets());
+    }
+
+    @OnThread(Tag.FX)
+    private static void addJavaColorsStylesheet(ObservableList<String> stylesheets)
+    {
+        // First add ours, so that it acts as a default:
+        addStylesheet(stylesheets, "java-colors");
+        // Then add the users, so that it will take precendence:
+
+        File userColorsFile = getUserConfigFile("java-colors.css");
+        if (userColorsFile.exists())
         {
-            dialogPane.getStylesheets().add(new File (bluejLibDir + "/stylesheets", "dialogs.css").toURI().toURL().toString());
-        }
-        catch (MalformedURLException e)
-        {
-            Debug.reportError(e);
+            try
+            {
+                stylesheets.add(userColorsFile.toURI().toURL().toString());
+                // Note this, in case we get support requests about weird colours:
+                Debug.log("Using user-specified java-colors file.");
+            }
+            catch (MalformedURLException e)
+            {
+                Debug.reportError(e);
+            }
         }
     }
 
@@ -2077,7 +2032,7 @@ public final class Config
     }
 
     @OnThread(Tag.FXPlatform)
-    public static void rememberPosition(Window window, String locationPrefix)
+    public static void loadAndTrackPosition(Window window, String locationPrefix)
     {
         JavaFXUtil.addChangeListener(window.xProperty(), x -> putLocation(locationPrefix, (int)window.getX(), (int)window.getY()));
         JavaFXUtil.addChangeListener(window.yProperty(), y -> putLocation(locationPrefix, (int)window.getX(), (int)window.getY()));
@@ -2088,9 +2043,9 @@ public final class Config
     }
 
     @OnThread(Tag.FXPlatform)
-    public static void rememberPositionAndSize(Window window, String locationPrefix)
+    public static void loadAndTrackPositionAndSize(Window window, String locationPrefix)
     {
-        rememberPosition(window, locationPrefix);
+        loadAndTrackPosition(window, locationPrefix);
 
         JavaFXUtil.addChangeListener(window.widthProperty(), x -> putSize(locationPrefix, (int)window.getWidth(), (int)window.getHeight()));
         JavaFXUtil.addChangeListener(window.heightProperty(), y -> putSize(locationPrefix, (int)window.getWidth(), (int)window.getHeight()));
@@ -2119,9 +2074,17 @@ public final class Config
 
         JavaFXUtil.addChangeListener(splitPane.getDividers().get(0).positionProperty(), pos -> putPropInteger(locationName, (int)(pos.doubleValue() * SCALE)));
 
-        window.addEventHandler(WindowEvent.WINDOW_SHOWN, e -> {
+        if (window.isShowing())
+        {
             splitPane.setDividerPosition(0, initialPos);
-        });
+        }
+        else
+        {
+            window.addEventHandler(WindowEvent.WINDOW_SHOWN, e ->
+            {
+                splitPane.setDividerPosition(0, initialPos);
+            });
+        }
     }
 
     public static KeyCode getKeyCodeForYesNo(InteractionManager.ShortcutKey keyPurpose)
@@ -2162,6 +2125,45 @@ public final class Config
             // Put it on the top-left of the primary screen:
             return new Point2D(Screen.getPrimary().getBounds().getMinX() + 100, Screen.getPrimary().getBounds().getMinY() + 100);
         }
+    }
+
+    @OnThread(Tag.FX)
+    public static Node makeStopIcon(boolean large)
+    {
+        Polygon octagon = new Polygon(
+                9, 0,
+                22, 0,
+                31, 9,
+                31, 22,
+                22, 31,
+                9, 31,
+                0, 22,
+                0, 9
+        );
+        if (!large)
+        {
+            JavaFXUtil.scalePolygonPoints(octagon, 0.5, false);
+        }
+        JavaFXUtil.addStyleClass(octagon, "octagon");
+        Label stop = new Label("STOP");
+        StackPane stackPane = new StackPane(octagon, stop);
+        JavaFXUtil.setPseudoclass("bj-large", large, stackPane);
+        JavaFXUtil.addStyleClass(stackPane, "stop-icon");
+        return stackPane;
+    }
+
+    @OnThread(Tag.FX)
+    public static Polygon makeArrowShape(boolean shortTail)
+    {
+        return new Polygon(
+                10, 0,
+                18, 10,
+                10, 20,
+                10, 14,
+                shortTail ? 4 : 0, 14,
+                shortTail ? 4 : 0, 6,
+                10, 6
+            );
     }
 
     /**

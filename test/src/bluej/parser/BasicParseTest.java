@@ -31,9 +31,8 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Properties;
 
-import javax.swing.text.BadLocationException;
-
 import bluej.editor.moe.MoeSyntaxDocument;
+import bluej.editor.moe.ScopeColors;
 import bluej.parser.entity.ClassLoaderResolver;
 import bluej.parser.entity.EntityResolver;
 import bluej.parser.entity.PackageResolver;
@@ -442,12 +441,9 @@ public class BasicParseTest extends junit.framework.TestCase
     
     private ParsedCUNode cuForSource(String sourceCode, EntityResolver resolver)
     {
-        MoeSyntaxDocument document = new MoeSyntaxDocument(resolver);
+        MoeSyntaxDocument document = new MoeSyntaxDocument(resolver, ScopeColors.dummy());
         document.enableParser(true);
-        try {
-            document.insertString(0, sourceCode, null);
-        }
-        catch (BadLocationException ble) {}
+        document.insertString(0, sourceCode);
         return document.getParser();
     }
     

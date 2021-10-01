@@ -68,6 +68,8 @@ import bluej.stride.framedjava.elements.VarElement;
 import bluej.stride.framedjava.elements.WhileElement;
 import bluej.utility.JavaUtils;
 import bluej.utility.Utility;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 
 import static bluej.parser.lexer.JavaTokenTypes.SL_COMMENT;
 

@@ -48,7 +48,7 @@ import bluej.utility.JavaUtils;
  * 
  * @author Davin McCall
  */
-@OnThread(Tag.Swing)
+@OnThread(Tag.FXPlatform)
 public class MethodCompletion extends AssistContent
 {
     @OnThread(Tag.Any) private final MethodReflective method;
@@ -62,7 +62,6 @@ public class MethodCompletion extends AssistContent
      *                   call on a raw expression, will be null.
      * @param javadocResolver  The javadoc resolver to use
      */
-    @OnThread(Tag.Any)
     public MethodCompletion(MethodReflective method,
             Map<String,GenTypeParameter> typeArgs,
             JavadocResolver javadocResolver)
@@ -106,6 +105,7 @@ public class MethodCompletion extends AssistContent
     }
     
     @Override
+    @OnThread(Tag.FXPlatform)
     public String getJavadoc()
     {
         String jd = method.getJavaDoc();
@@ -117,6 +117,7 @@ public class MethodCompletion extends AssistContent
     }
 
     @Override
+    @OnThread(Tag.FXPlatform)
     public boolean getJavadocAsync(final JavadocCallback callback, Executor executor)
     {
         String jd = method.getJavaDoc();
@@ -170,6 +171,7 @@ public class MethodCompletion extends AssistContent
     /**
      * Gets a String that is the method's unique signature
      */
+    @OnThread(Tag.FXPlatform)
     public String getSignature()
     {
         StringBuilder sig = new StringBuilder();
@@ -180,6 +182,7 @@ public class MethodCompletion extends AssistContent
     }
 
     @Override
+    @OnThread(Tag.FXPlatform)
     public List<ParamInfo> getParams()
     {
         // We must get Javadoc before asking for parameter names, as it is this method call that sets the parameter names:
@@ -196,6 +199,7 @@ public class MethodCompletion extends AssistContent
         return r;
     }
 
+    @OnThread(Tag.FXPlatform)
     private Supplier<String> javadocForParam(String paramName)
     {
         final String javadocSrc = getJavadoc();

@@ -21,12 +21,12 @@
  */
 package bluej.editor.moe;
 
-import javax.swing.SwingUtilities;
-import java.awt.FlowLayout;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-
+import bluej.Config;
+import bluej.editor.EditorManager;
+import bluej.prefmgr.PrefMgr;
+import bluej.prefmgr.PrefMgrDialog;
+import bluej.prefmgr.PrefPanelListener;
+import bluej.utility.javafx.JavaFXUtil;
 import javafx.scene.Node;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.TextField;
@@ -34,16 +34,12 @@ import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Pane;
 import javafx.scene.layout.VBox;
-
-import bluej.BlueJTheme;
-import bluej.Config;
-import bluej.editor.EditorManager;
-import bluej.prefmgr.PrefMgr;
-import bluej.prefmgr.PrefMgrDialog;
-import bluej.prefmgr.PrefPanelListener;
-import bluej.utility.javafx.JavaFXUtil;
 import threadchecker.OnThread;
 import threadchecker.Tag;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 
 /**
  * A PrefPanel subclass to allow the user to interactively edit
@@ -109,8 +105,8 @@ public class EditorPrefPanel extends VBox implements PrefPanelListener
 
     public void beginEditing()
     {
-        editorFontField.setText(String.valueOf(PrefMgr.getEditorFontSize()));
-        highlightingBox.setSelected(PrefMgr.getFlag(PrefMgr.HILIGHTING));
+        editorFontField.setText(String.valueOf(PrefMgr.getEditorFontSize().get()));
+        highlightingBox.setSelected(PrefMgr.getFlag(PrefMgr.HIGHLIGHTING));
         autoIndentBox.setSelected(PrefMgr.getFlag(PrefMgr.AUTO_INDENT));
         lineNumbersBox.setSelected(PrefMgr.getFlag(PrefMgr.LINENUMBERS));
         makeBackupBox.setSelected(PrefMgr.getFlag(PrefMgr.MAKE_BACKUP));
@@ -126,21 +122,18 @@ public class EditorPrefPanel extends VBox implements PrefPanelListener
         String fontText = editorFontField.getText();
         
 
-        PrefMgr.setFlag(PrefMgr.HILIGHTING, highlightingBox.isSelected());
+        PrefMgr.setFlag(PrefMgr.HIGHLIGHTING, highlightingBox.isSelected());
         PrefMgr.setFlag(PrefMgr.AUTO_INDENT, autoIndentBox.isSelected());
         PrefMgr.setFlag(PrefMgr.LINENUMBERS, lineNumbersBox.isSelected());
         PrefMgr.setFlag(PrefMgr.MAKE_BACKUP, makeBackupBox.isSelected());
         PrefMgr.setFlag(PrefMgr.MATCH_BRACKETS, matchBracketsBox.isSelected());
         int strength = scopeHighlightingPrefDisplay.getStrengthValue();
-        SwingUtilities.invokeLater(() -> {
-            try {
-                PrefMgr.setEditorFontSize(Integer.parseInt(fontText));
-            }
-            catch (NumberFormatException nfe) { }
-            PrefMgr.setScopeHighlightStrength(strength);
-            MoeSyntaxView.resetSyntaxHighlighting();
-            EditorManager.getEditorManager().refreshAll();
-        });
+        try {
+            PrefMgr.setEditorFontSize(Integer.parseInt(fontText));
+        }
+        catch (NumberFormatException nfe) { }
+        PrefMgr.setScopeHighlightStrength(strength);
+        EditorManager.getEditorManager().refreshAll();
     }
 
 }

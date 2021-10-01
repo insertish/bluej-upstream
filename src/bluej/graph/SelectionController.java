@@ -21,30 +21,22 @@
  */
 package bluej.graph;
 
-import java.awt.Rectangle;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Iterator;
-import java.util.List;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
-import java.util.stream.StreamSupport;
-
+import bluej.Config;
+import bluej.pkgmgr.Package;
+import bluej.pkgmgr.PackageEditor;
+import bluej.pkgmgr.target.Target;
+import bluej.utility.Utility;
 import bluej.utility.javafx.FXPlatformConsumer;
-import bluej.utility.javafx.FXPlatformRunnable;
-import javafx.scene.input.KeyCode;
+
+import java.util.Collection;
+import java.util.List;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.input.MouseButton;
 import javafx.scene.input.MouseEvent;
 
-import bluej.Config;
-import bluej.pkgmgr.Package;
-import bluej.pkgmgr.PackageEditor;
-import bluej.pkgmgr.target.ClassTarget;
-import bluej.pkgmgr.target.Target;
-import bluej.utility.Utility;
 import threadchecker.OnThread;
 import threadchecker.Tag;
+
 
 /**
  * This class controls the selection (the set of selected elements in the graph).
@@ -72,7 +64,6 @@ public class SelectionController
      * @param graphEditor
      * @param graph
      */
-    @OnThread(Tag.Any)
     public SelectionController(PackageEditor graphEditor)
     {
         this.graphEditor = graphEditor;
@@ -136,7 +127,12 @@ public class SelectionController
     {
         if (isButtonOne(evt)) {
             if (evt.getClickCount() > 1) {
-                selection.doubleClick();
+                selection.getSelected().forEach(target -> {
+                    if (evt.getTarget().equals(target)) {
+                        selection.doubleClick();
+                        return;
+                    }
+                });
             }
         }
     }

@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2010,2012,2014,2016  Michael Kolling and John Rosenberg
+ Copyright (C) 1999-2010,2012,2014,2016,2017  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -21,11 +21,8 @@
  */
 package bluej.groupwork.actions;
 
-import java.awt.EventQueue;
-import java.awt.event.ActionEvent;
 import java.io.File;
 import java.io.IOException;
-import java.lang.reflect.InvocationTargetException;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -33,13 +30,6 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Set;
 
-import javax.swing.AbstractAction;
-import javax.swing.SwingUtilities;
-
-import javafx.application.Platform;
-
-import threadchecker.OnThread;
-import threadchecker.Tag;
 import bluej.Config;
 import bluej.collect.DataCollector;
 import bluej.groupwork.StatusHandle;
@@ -59,36 +49,40 @@ import bluej.pkgmgr.target.PackageTarget;
 import bluej.pkgmgr.target.ReadmeTarget;
 import bluej.pkgmgr.target.Target;
 import bluej.utility.DialogManager;
+import bluej.utility.FXWorker;
 import bluej.utility.JavaNames;
-import bluej.utility.SwingWorker;
 
+import javafx.application.Platform;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 
 /**
  * Action to update out-of-date files.
- * 
+ *
  * <p>Before this action is enabled, setFilesToUpdate(), setFilesToForceUpdate()
  * and setStatusHandle() must each be called.
- * 
+ *
  * @author Kasper Fisker
  */
-public class UpdateAction extends AbstractAction
+@OnThread(Tag.FXPlatform)
+public class UpdateAction extends TeamAction
 {
     private Project project;
     private boolean includeLayout = true;
     private UpdateFilesFrame updateFrame;
     private UpdateWorker worker;
-    
+
     private Set<File> filesToUpdate;
     private Set<File> filesToForceUpdate;
     private StatusHandle statusHandle;
-    
+
     /** A list of packages whose bluej.pkg file has been removed */
     private List<String> removedPackages;
-    
+
     public UpdateAction(UpdateFilesFrame updateFrame)
     {
-        super(Config.getString("team.update"));
-        putValue(SHORT_DESCRIPTION, Config.getString("tooltip.update"));
+        super(Config.getString("team.update"), false);
+        setShortDescription(Config.getString("tooltip.update"));
         this.updateFrame = updateFrame;
     }
 
@@ -100,7 +94,7 @@ public class UpdateAction extends AbstractAction
     {
         filesToUpdate = files;
     }
-    
+
     /**
      * Set the files to be updated with a clean copy of the repository
      * @files a Set of File
@@ -109,7 +103,7 @@ public class UpdateAction extends AbstractAction
     {
         filesToForceUpdate = files;
     }
-    
+
     /**
      * Set the status handle (which comes from a preceeding status operation).
      */
@@ -117,22 +111,20 @@ public class UpdateAction extends AbstractAction
     {
         this.statusHandle = statusHandle;
     }
-    
-    /* (non-Javadoc)
-     * @see java.awt.event.ActionListener#actionPerformed(java.awt.event.ActionEvent)
-     */
-    public void actionPerformed(ActionEvent event)
+
+    @Override
+    protected void actionPerformed(PkgMgrFrame pmf)
     {
         project = updateFrame.getProject();
-        
+
         if (project != null) {
             updateFrame.startProgress();
             PkgMgrFrame.displayMessage(project, Config.getString("team.update.statusMessage"));
-            
-            worker = new UpdateWorker(project, statusHandle,
-                    filesToUpdate, filesToForceUpdate);
+
+            worker = new UpdateWorker(project, statusHandle, filesToUpdate, filesToForceUpdate);
             worker.start();
         }
+        updateFrame.disableLayoutCheck();
     }
 
     /**
@@ -145,22 +137,23 @@ public class UpdateAction extends AbstractAction
         }
         setEnabled(true);
     }
-    
-    private class UpdateWorker extends SwingWorker implements UpdateListener
+
+    private class UpdateWorker extends FXWorker implements UpdateListener
     {
         private TeamworkCommand command;
         private TeamworkCommandResult result;
         private boolean aborted;
-        
+
         public UpdateWorker(Project project, StatusHandle statusHandle,
-                Set<File> filesToUpdate, Set<File> filesToForceUpdate)
+                            Set<File> filesToUpdate, Set<File> filesToForceUpdate)
         {
             command = statusHandle.updateTo(this, filesToUpdate, filesToForceUpdate);
         }
-        
+
+        @OnThread(Tag.Worker)
         public Object construct()
         {
-            removedPackages = new ArrayList<String>();
+            removedPackages = new ArrayList<>();
             result = command.getResult();
             return result;
         }
@@ -168,184 +161,200 @@ public class UpdateAction extends AbstractAction
         /* (non-Javadoc)
          * @see bluej.groupwork.UpdateListener#fileAdded(java.io.File)
          */
+        @OnThread(Tag.FXPlatform)
         public void fileAdded(final File f)
         {
-            SwingUtilities.invokeLater(() -> {
-                    project.prepareCreateDir(f.getParentFile());
-                    
-                    String fileName = f.getName();
-                    if (! fileName.endsWith(".java") &&
-                            ! fileName.endsWith(".class") &&
-                            ! BlueJPackageFile.isPackageFileName(fileName)) {
-                        return;
+            project.prepareCreateDir(f.getParentFile());
+
+            String fileName = f.getName();
+            if (! fileName.endsWith(".java") &&
+                    ! fileName.endsWith(".class") &&
+                    ! BlueJPackageFile.isPackageFileName(fileName)) {
+                return;
+            }
+
+            // First find out the package name...
+            String packageName = project.getPackageForFile(f);
+            if (packageName == null) {
+                return;
+            }
+
+            if (BlueJPackageFile.isPackageFileName(fileName)) {
+                if (packageName.length() > 0) {
+                    // If we now have a new package, we might need to add it
+                    // as a target in an existing package
+                    String parentPackageName = JavaNames.getPrefix(packageName);
+                    Package parentPackage = project.getCachedPackage(parentPackageName);
+                    if (parentPackage != null) {
+                        Target t = parentPackage.addPackage(JavaNames.getBase(packageName));
+                        parentPackage.positionNewTarget(t);
                     }
-                    
-                    // First find out the package name...
-                    String packageName = project.getPackageForFile(f);
-                    if (packageName == null) {
-                        return;
-                    }
-                    
-                    if (BlueJPackageFile.isPackageFileName(fileName)) {
-                        if (packageName.length() > 0) {
-                            // If we now have a new package, we might need to add it
-                            // as a target in an existing package
-                            String parentPackageName = JavaNames.getPrefix(packageName);
-                            Package parentPackage = project.getCachedPackage(parentPackageName);
-                            if (parentPackage != null) {
-                                Target t = parentPackage.addPackage(JavaNames.getBase(packageName));
-                                parentPackage.positionNewTarget(t);
-                            }
-                        }
-                    }
-                    else {
-                        int n = fileName.lastIndexOf(".");
-                        String name = fileName.substring(0, n);
-                        if (! JavaNames.isIdentifier(name)) {
-                            return;
-                        }
-                        
-                        Package pkg = project.getCachedPackage(packageName);
-                        if (pkg == null) {
-                            return;
-                        }
-                        Target t = pkg.getTarget(name);
-                        if (t != null && ! (t instanceof ClassTarget)) {
-                            return;
-                        }
-                        ClassTarget ct = (ClassTarget) t;
-                        if (ct == null) {
-                            ct = pkg.addClass(name);
-                            pkg.positionNewTarget(ct);
-                            DataCollector.addClass(pkg, ct);
-                        }
-                        ct.reload();
-                    }
-            });
+                }
+            }
+            else {
+                int n = fileName.lastIndexOf(".");
+                String name = fileName.substring(0, n);
+                if (! JavaNames.isIdentifier(name)) {
+                    return;
+                }
+
+                Package pkg = project.getCachedPackage(packageName);
+                if (pkg == null) {
+                    return;
+                }
+                Target t = pkg.getTarget(name);
+                if (t != null && ! (t instanceof ClassTarget)) {
+                    return;
+                }
+
+                ClassTarget ct = (ClassTarget) t;
+                if (ct == null) {
+                    ct = pkg.addClass(name);
+                    pkg.positionNewTarget(ct);
+                    DataCollector.addClass(pkg, ct);
+                }
+                ct.reload();
+            }
         }
-        
+
         /* (non-Javadoc)
          * @see bluej.groupwork.UpdateListener#fileRemoved(java.io.File)
          */
+        @OnThread(Tag.FXPlatform)
         public void fileRemoved(final File f)
         {
-            SwingUtilities.invokeLater(() -> {
-                   String fileName = f.getName();
-                   if (! fileName.endsWith(".java") &&
-                           ! fileName.endsWith(".class") &&
-                           ! BlueJPackageFile.isPackageFileName(fileName)) {
-                       return;
-                   }
-                   
-                   // First find out the package name...
-                   String packageName = project.getPackageForFile(f);
-                   if (packageName == null) {
-                       return;
-                   }
-                   
-                   if (BlueJPackageFile.isPackageFileName(fileName)) {
-                       // Delay removing the package until
-                       // after the update has finished, and only do it if there
-                       // are no files left in the package.
-                       removedPackages.add(packageName);
-                   }
-                   else {
-                       // Remove a class
-                       int n = fileName.lastIndexOf(".");
-                       String name = fileName.substring(0, n);
-                       Package pkg = project.getCachedPackage(packageName);
-                       if (pkg == null) {
-                           return;
-                       }
-                       Target t = pkg.getTarget(name);
-                       if (! (t instanceof ClassTarget)) {
-                           return;
-                       }
-                       
-                       ClassTarget ct = (ClassTarget) t;
-                       if (ct.hasSourceCode() && ! fileName.endsWith(".java")) {
-                           ct.markModified();
-                       }
-                       else {
-                           ct.remove();
-                       }
-                   }
-            });
+            String fileName = f.getName();
+            if (!fileName.endsWith(".java") &&
+                    !fileName.endsWith(".class") &&
+                    !BlueJPackageFile.isPackageFileName(fileName))
+            {
+                return;
+            }
+
+            // First find out the package name...
+            String packageName = project.getPackageForFile(f);
+            if (packageName == null)
+            {
+                return;
+            }
+
+            if (BlueJPackageFile.isPackageFileName(fileName))
+            {
+                // Delay removing the package until
+                // after the update has finished, and only do it if there
+                // are no files left in the package.
+                removedPackages.add(packageName);
+            }
+            else
+            {
+                // Remove a class
+                int n = fileName.lastIndexOf(".");
+                String name = fileName.substring(0, n);
+                Package pkg = project.getCachedPackage(packageName);
+                if (pkg == null)
+                {
+                    return;
+                }
+                Target t = pkg.getTarget(name);
+                if (!(t instanceof ClassTarget))
+                {
+                    return;
+                }
+
+                ClassTarget ct = (ClassTarget) t;
+                if (ct.hasSourceCode() && !fileName.endsWith(".java"))
+                {
+                    ct.markModified();
+                }
+                else
+                {
+                    ct.remove();
+                }
+            }
         }
-        
+
         /* (non-Javadoc)
          * @see bluej.groupwork.UpdateListener#fileUpdated(java.io.File)
          */
+        @OnThread(Tag.FXPlatform)
         public void fileUpdated(final File f)
         {
-            SwingUtilities.invokeLater(() -> {
-                    String fileName = f.getName();
-                    if (! fileName.endsWith(".java") &&
-                            ! fileName.endsWith(".class") &&
-                            ! BlueJPackageFile.isPackageFileName(fileName)) {
-                        return;
+            String fileName = f.getName();
+            if (!fileName.endsWith(".java") &&
+                    !fileName.endsWith(".class") &&
+                    !BlueJPackageFile.isPackageFileName(fileName))
+            {
+                return;
+            }
+
+            // First find out the package name...
+            String packageName = project.getPackageForFile(f);
+            if (packageName == null)
+            {
+                return;
+            }
+            Package pkg = project.getCachedPackage(packageName);
+            if (pkg == null)
+            {
+                return;
+            }
+
+            if (BlueJPackageFile.isPackageFileName(fileName))
+            {
+                try
+                {
+                    if (includeLayout)
+                    {
+                        pkg.reReadGraphLayout();
                     }
-                    
-                    // First find out the package name...
-                    String packageName = project.getPackageForFile(f);
-                    if (packageName == null) {
-                        return;
-                    }
-                    Package pkg = project.getCachedPackage(packageName);
-                    if (pkg == null) {
-                        return;
-                    }
-                    
-                    if (BlueJPackageFile.isPackageFileName(fileName)) {
-                        try {
-                            if (includeLayout) {
-                                pkg.reReadGraphLayout();
-                            }
-                        }
-                        catch (IOException ioe) {
-                            ioe.printStackTrace();
-                        }
-                    }
-                    else {
-                        int n = fileName.lastIndexOf(".");
-                        String name = fileName.substring(0, n);
-                        Target t = pkg.getTarget(name);
-                        
-                                               
-                       if (t == null && f.exists()) {
-                           //create new target.
-                           ClassTarget ct = pkg.addClass(name);
-                           pkg.positionNewTarget(ct);
-                           DataCollector.addClass(pkg, ct);
-                           ct.reload();
-                           return;
-                       }
-                       
-                        if (! (t instanceof ClassTarget)) {
-                            return;
-                        }
-                        
-                        ClassTarget ct = (ClassTarget) t;
-                        ct.reload();
-                    }
-            });
+                }
+                catch (IOException ioe)
+                {
+                    ioe.printStackTrace();
+                }
+            }
+            else
+            {
+                int n = fileName.lastIndexOf(".");
+                String name = fileName.substring(0, n);
+                Target t = pkg.getTarget(name);
+
+
+                if (t == null && f.exists())
+                {
+                    //create new target.
+                    ClassTarget ct = pkg.addClass(name);
+                    pkg.positionNewTarget(ct);
+                    DataCollector.addClass(pkg, ct);
+                    ct.reload();
+                    return;
+                }
+
+                if (!(t instanceof ClassTarget))
+                {
+                    return;
+                }
+
+                ClassTarget ct = (ClassTarget) t;
+                ct.reload();
+            }
         }
-        
+
         /* (non-Javadoc)
          * @see bluej.groupwork.UpdateListener#dirRemoved(java.io.File)
          */
+        @OnThread(Tag.FXPlatform)
         public void dirRemoved(final File f)
         {
-            SwingUtilities.invokeLater(() -> {
-                    String path = makeRelativePath(project.getProjectDir(), f);
-                    String pkgName = path.replace(File.separatorChar, '.');
-                    removedPackages.add(pkgName);
-            });
+            String path = makeRelativePath(project.getProjectDir(), f);
+            String pkgName = path.replace(File.separatorChar, '.');
+            removedPackages.add(pkgName);
         }
-        
+
         /* (non-Javadoc)
          * @see bluej.groupwork.UpdateListener#handleConflicts(bluej.groupwork.UpdateServerResponse)
          */
+        @OnThread(Tag.FXPlatform)
         public void handleConflicts(final UpdateResults updateServerResponse)
         {
             if (updateServerResponse == null) {
@@ -357,107 +366,104 @@ public class UpdateAction extends AbstractAction
                 return;
             }
 
-                Platform.runLater(() -> {
-                    /** A list of files to replace with repository version */
-                    Set<File> filesToOverride = new HashSet<File>();
 
-                    // Binary conflicts
-                    for (Iterator<File> i = updateServerResponse.getBinaryConflicts().iterator();
-                            i.hasNext(); ) {
-                        File f = i.next();
+            /** A list of files to replace with repository version */
+            Set<File> filesToOverride = new HashSet<>();
 
-                        if (BlueJPackageFile.isPackageFileName(f.getName())) {
-                            filesToOverride.add(f);
-                        }
-                        else {
-                            // TODO make the displayed file path relative to project
-                            int answer = DialogManager.askQuestionFX(null,
-                                    "team-binary-conflict", new String[] {f.getName()});
-                            if (answer == 0) {
-                                // keep local version
-                            }
-                            else {
-                                // use repository version
-                                filesToOverride.add(f);
-                            }
+            // Binary conflicts
+            for (Iterator<File> i = updateServerResponse.getBinaryConflicts().iterator();
+                 i.hasNext(); ) {
+                File f = i.next();
+
+                if (BlueJPackageFile.isPackageFileName(f.getName())) {
+                    filesToOverride.add(f);
+                }
+                else {
+                    // TODO make the displayed file path relative to project
+                    int answer = DialogManager.askQuestionFX(null,
+                            "team-binary-conflict", new String[] {f.getName()});
+                    if (answer == 0) {
+                        // keep local version
+                    }
+                    else {
+                        // use repository version
+                        filesToOverride.add(f);
+                    }
+                }
+            }
+
+            updateServerResponse.overrideFiles(filesToOverride);
+
+            List<String> blueJconflicts = new LinkedList<String>();
+            List<String> nonBlueJConflicts = new LinkedList<String>();
+            List<Target> targets = new LinkedList<Target>();
+
+            for (Iterator<File> i = updateServerResponse.getConflicts().iterator();
+                 i.hasNext(); )
+            {
+                File file = i.next();
+
+                // Calculate the file base name
+                String baseName = file.getName();
+
+                // bluej package file may come up as a conflict, but it won't cause a problem,
+                // so it can be ignored.
+                if (!BlueJPackageFile.isPackageFileName(baseName))
+                {
+                    Target target = null;
+
+                    if (baseName.endsWith(".java") || baseName.endsWith(".class"))
+                    {
+                        String pkg = project.getPackageForFile(file);
+                        if (pkg != null)
+                        {
+                            String targetId = filenameToTargetIdentifier(baseName);
+                            targetId = JavaNames.combineNames(pkg, targetId);
+                            target = project.getTarget(targetId);
                         }
                     }
-                    SwingUtilities.invokeLater(() ->
+                    else if (baseName.equals("README.TXT"))
                     {
-                        updateServerResponse.overrideFiles(filesToOverride);
-
-                        List<String> blueJconflicts = new LinkedList<String>();
-                        List<String> nonBlueJConflicts = new LinkedList<String>();
-                        List<Target> targets = new LinkedList<Target>();
-
-                        for (Iterator<File> i = updateServerResponse.getConflicts().iterator();
-                             i.hasNext(); )
+                        String pkg = project.getPackageForFile(file);
+                        if (pkg != null)
                         {
-                            File file = i.next();
-
-                            // Calculate the file base name
-                            String baseName = file.getName();
-
-                            // bluej package file may come up as a conflict, but it won't cause a problem,
-                            // so it can be ignored.
-                            if (!BlueJPackageFile.isPackageFileName(baseName))
-                            {
-                                Target target = null;
-
-                                if (baseName.endsWith(".java") || baseName.endsWith(".class"))
-                                {
-                                    String pkg = project.getPackageForFile(file);
-                                    if (pkg != null)
-                                    {
-                                        String targetId = filenameToTargetIdentifier(baseName);
-                                        targetId = JavaNames.combineNames(pkg, targetId);
-                                        target = project.getTarget(targetId);
-                                    }
-                                }
-                                else if (baseName.equals("README.TXT"))
-                                {
-                                    String pkg = project.getPackageForFile(file);
-                                    if (pkg != null)
-                                    {
-                                        String targetId = ReadmeTarget.README_ID;
-                                        targetId = JavaNames.combineNames(pkg, targetId);
-                                        target = project.getTarget(targetId);
-                                    }
-                                }
-
-                                String fileName = makeRelativePath(project.getProjectDir(), file);
-
-                                if (target == null)
-                                {
-                                    nonBlueJConflicts.add(fileName);
-                                }
-                                else
-                                {
-                                    blueJconflicts.add(fileName);
-                                    targets.add(target);
-                                }
-                            }
+                            String targetId = ReadmeTarget.README_ID;
+                            targetId = JavaNames.combineNames(pkg, targetId);
+                            target = project.getTarget(targetId);
                         }
+                    }
 
-                        if (!blueJconflicts.isEmpty() || !nonBlueJConflicts.isEmpty())
-                        {
-                            project.clearAllSelections();
-                            project.selectTargetsInGraphs(targets);
+                    String fileName = makeRelativePath(project.getProjectDir(), file);
 
-                            ConflictsDialog conflictsDialog = new ConflictsDialog(project,
-                                blueJconflicts, nonBlueJConflicts);
-                            conflictsDialog.setVisible(true);
-                        }
-                    });
-                });
+                    if (target == null)
+                    {
+                        nonBlueJConflicts.add(fileName);
+                    }
+                    else
+                    {
+                        blueJconflicts.add(fileName);
+                        targets.add(target);
+                    }
+                }
+            }
+
+            if (!blueJconflicts.isEmpty() || !nonBlueJConflicts.isEmpty())
+            {
+                project.clearAllSelections();
+                project.selectTargetsInGraphs(targets);
+
+                ConflictsDialog conflictsDialog = new ConflictsDialog(project, updateFrame.asWindow(),
+                        blueJconflicts, nonBlueJConflicts);
+                conflictsDialog.show();
+            }
         }
-        
+
         public void abort()
         {
             command.cancel();
             aborted = true;
         }
-        
+
         public void finished()
         {
             handleRemovedPkgs();
@@ -472,28 +478,28 @@ public class UpdateAction extends AbstractAction
             }
             else {
                 PkgMgrFrame.displayMessage(project, "");
-                Platform.runLater(() -> TeamUtils.handleServerResponseFX(result, updateFrame.asWindow()));
+                TeamUtils.handleServerResponseFX(result, updateFrame.asWindow());
             }
-            
+
             if (! aborted) {
                 updateFrame.setVisible(false);
-                updateFrame.dispose();
+                updateFrame.close();
                 setEnabled(true);
             }
         }
-        
+
         /**
          * If packages were removed by the update, remove them from the
          * parent package graph.
          */
-        @OnThread(Tag.Swing)
+        @OnThread(Tag.FXPlatform)
         private void handleRemovedPkgs()
         {
             for (Iterator<String> i = removedPackages.iterator(); i.hasNext(); ) {
                 String packageName = i.next();
                 String parentPackage = JavaNames.getPrefix(packageName);
                 String baseName = JavaNames.getBase(packageName);
-                
+
                 File packageDir = JavaNames.convertQualifiedNameToFile(packageName, project.getProjectDir());
                 if (! packageDir.exists()) {
                     // Close the package window, if open
@@ -502,11 +508,11 @@ public class UpdateAction extends AbstractAction
                         pkg.closeAllEditors();
                         PkgMgrFrame frame = PkgMgrFrame.findFrame(pkg);
                         if (frame != null) {
-                            Platform.runLater(() -> frame.doClose(true, false));
+                            frame.doClose(true, false);
                         }
                         project.removePackage(packageName);
                     }
-                    
+
                     // Get the parent package so we can remove the child.
                     pkg = project.getCachedPackage(parentPackage);
                     if (pkg != null) {
@@ -519,7 +525,7 @@ public class UpdateAction extends AbstractAction
             }
         }
     }
-    
+
     /**
      * Strip the dot-suffix from a file name.
      * @param filename
@@ -530,20 +536,21 @@ public class UpdateAction extends AbstractAction
         int lastDot = filename.lastIndexOf('.');
         return filename.substring(0, lastDot);
     }
-    
+
     /**
      * Make a relative path between a file and containing directory. 
      */
+    @OnThread(Tag.Any)
     private static String makeRelativePath(File parent, File file)
     {
         String parentStr = parent.getAbsolutePath();
         String filePath = file.getAbsolutePath();
-        
+
         if (filePath.startsWith(parentStr)) {
             // remove parent, plus path separator character
             filePath = filePath.substring(parentStr.length() + 1);
         }
-        
+
         return filePath;
     }
 }

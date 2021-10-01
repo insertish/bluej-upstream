@@ -21,6 +21,9 @@
  */
 package bluej.debugger.gentype;
 
+import threadchecker.OnThread;
+import threadchecker.Tag;
+
 import java.util.ArrayList;
 import java.util.Map;
 import java.util.Set;

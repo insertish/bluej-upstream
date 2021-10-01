@@ -83,13 +83,15 @@ class JdiThread extends DebuggerThread
     }
 
     /** the reference to the remote thread */
-    private ThreadReference rt;
+    @OnThread(Tag.Any)
+    private final ThreadReference rt;
     
     /** We track suspension status internally */
     @OnThread(value = Tag.Any,requireSynchronized = true)
     private boolean isSuspended;
     
     /** Any active step request */
+    @OnThread(Tag.Any)
     StepRequest stepRequest;
     
     /*
@@ -102,13 +104,15 @@ class JdiThread extends DebuggerThread
     // stores a stack frame that was selected for this
     // thread (selection is done for debugging)
     private int selectedFrame;
-   
+
+    @OnThread(Tag.Any)
     private EventRequestManager eventReqMgr;
     
     private JdiDebugger debugger;
 
     // ---- instance: ----
 
+    @OnThread(Tag.Any)
     public JdiThread(JdiDebugger debugger, ThreadReference rt)
     {
         this.rt = rt;
@@ -136,6 +140,7 @@ class JdiThread extends DebuggerThread
     /** 
      * Return the reference to the thread object in the remote machine.
      */
+    @OnThread(Tag.Any)
     ThreadReference getRemoteThread()
     {
         return rt;
@@ -276,6 +281,9 @@ class JdiThread extends DebuggerThread
                     name.equals("Screen Updater") ||
                     name.startsWith("SunToolkit.") ||
                     name.startsWith("Native Carbon") ||
+                    name.equals("JavaFX-Launcher") ||
+                    name.startsWith("QuantumRenderer") ||
+                    name.equals("JavaFX BlueJ Helper") ||
                     name.equals("Java2D Disposer")) {
                 return true;
             }
@@ -360,13 +368,14 @@ class JdiThread extends DebuggerThread
      * The thread must be suspended to do this. Otherwise an empty List
      * is returned.
      */
-    public List<String> getLocalVariables(int frameNo)
+    @OnThread(Tag.FXPlatform)
+    public List<VarDisplayInfo> getLocalVariables(int frameNo)
     {
         try {
             if(rt.isSuspended()) {
                 StackFrame frame = rt.frame(frameNo);
                 List<LocalVariable> vars = frame.visibleVariables();
-                List<String> localVars = new ArrayList<String>();
+                List<VarDisplayInfo> localVars = new ArrayList<>();
                 
                 // To work around a JDI bug (probably related to the other one described
                 // below) we collect information we need about the variables on the
@@ -401,8 +410,12 @@ class JdiThread extends DebuggerThread
                     // Add "type name = value" to the list
                     JavaType vartype = JdiReflective.fromLocalVar(localTypes.get(i), genericSigs.get(i),
                             typeNames.get(i), declaringType);
-                    localVars.add(vartype.toString(true) + " " + var.name()
-                            + " = " + localVals.get(i));
+                    int iFinal = i;
+                    localVars.add(new VarDisplayInfo(vartype, var, localVals.get(i),
+                        varIsObject(frameNo, i) ?
+                            (() -> getStackObject(frameNo, iFinal))
+                            : null
+                    ));
                 }
                 return localVars;
             }
@@ -421,7 +434,7 @@ class JdiThread extends DebuggerThread
             }
             catch (InterruptedException ie) {}
         }
-        return new ArrayList<String>();
+        return new ArrayList<>();
     }
 
     /**
@@ -552,6 +565,7 @@ class JdiThread extends DebuggerThread
      * Inform the JdiThread that the underlying thread has been suspended due to
      * (for example) hitting a breakpoint.
      */
+    @OnThread(Tag.Any)
     public void stopped()
     {
         synchronized (this)
@@ -618,6 +632,7 @@ class JdiThread extends DebuggerThread
      * A previously set step may not have completed yet - find out and
      * if it is so, remove it.
      */
+    @OnThread(Tag.Any)
     private void clearPreviousStep(ThreadReference thread)
     {
         if (eventReqMgr == null)
@@ -629,6 +644,7 @@ class JdiThread extends DebuggerThread
         }
     }
 
+    @OnThread(Tag.Any)
     private void getEventRequestManager()
     {
         eventReqMgr = rt.virtualMachine().eventRequestManager();
@@ -659,6 +675,7 @@ class JdiThread extends DebuggerThread
      * Called when we are the serverThread, to let us know we've been resumed
      * (and should update our internal status accordingly)
      */
+    @OnThread(Tag.Any)
     public synchronized void notifyResumed()
     {
         isSuspended = false;

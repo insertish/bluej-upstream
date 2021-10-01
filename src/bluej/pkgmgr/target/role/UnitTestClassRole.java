@@ -21,12 +21,42 @@
  */
 package bluej.pkgmgr.target.role;
 
-import java.awt.Color;
-import java.awt.EventQueue;
-import java.awt.GradientPaint;
-import java.awt.Paint;
-import java.awt.SecondaryLoop;
-import java.awt.Toolkit;
+import bluej.Config;
+import bluej.collect.DataCollector;
+import bluej.compiler.CompileReason;
+import bluej.compiler.CompileType;
+import bluej.debugger.DebuggerObject;
+import bluej.debugmgr.objectbench.ObjectWrapper;
+import bluej.editor.TextEditor;
+import bluej.parser.SourceLocation;
+import bluej.parser.SourceSpan;
+import bluej.parser.UnitTestAnalyzer;
+import bluej.pkgmgr.PackageEditor;
+import bluej.pkgmgr.PkgMgrFrame;
+import bluej.pkgmgr.Project;
+import bluej.pkgmgr.TestRunnerThread;
+import bluej.pkgmgr.target.ClassTarget;
+import bluej.pkgmgr.target.DependentTarget.State;
+import bluej.pkgmgr.target.Target;
+import bluej.testmgr.TestDisplayFrame;
+import bluej.testmgr.record.ExistingFixtureInvokerRecord;
+import bluej.utility.Debug;
+import bluej.utility.DialogManager;
+import bluej.utility.JavaNames;
+import bluej.utility.JavaUtils;
+import bluej.utility.javafx.FXPlatformSupplier;
+import bluej.utility.javafx.JavaFXUtil;
+import bluej.utility.javafx.dialog.InputDialog;
+import javafx.application.Platform;
+import javafx.collections.ObservableList;
+import javafx.event.ActionEvent;
+import javafx.scene.control.Menu;
+import javafx.scene.control.MenuItem;
+import javafx.scene.control.SeparatorMenuItem;
+import org.junit.Test;
+import threadchecker.OnThread;
+import threadchecker.Tag;
+
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
@@ -42,46 +72,9 @@ import java.util.List;
 import java.util.ListIterator;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
-import javax.swing.SwingUtilities;
-
-import bluej.pkgmgr.target.DependentTarget.State;
-import javafx.application.Platform;
-import javafx.collections.ObservableList;
-import javafx.event.ActionEvent;
-import javafx.scene.control.Menu;
-import javafx.scene.control.MenuItem;
-import javafx.scene.control.SeparatorMenuItem;
-
-import bluej.compiler.CompileReason;
-import bluej.compiler.CompileType;
-import bluej.pkgmgr.Project;
-import bluej.utility.javafx.dialog.InputDialog;
-import org.junit.Test;
-
-import bluej.Config;
-import bluej.collect.DataCollector;
-import bluej.debugger.DebuggerObject;
-import bluej.debugmgr.objectbench.ObjectWrapper;
-import bluej.editor.TextEditor;
-import bluej.parser.SourceLocation;
-import bluej.parser.SourceSpan;
-import bluej.parser.UnitTestAnalyzer;
-import bluej.pkgmgr.PackageEditor;
-import bluej.pkgmgr.PkgMgrFrame;
-import bluej.pkgmgr.TestRunnerThread;
-import bluej.pkgmgr.target.ClassTarget;
-import bluej.pkgmgr.target.Target;
-import bluej.testmgr.TestDisplayFrame;
-import bluej.testmgr.record.ExistingFixtureInvokerRecord;
-import bluej.utility.Debug;
-import bluej.utility.DialogManager;
-import bluej.utility.JavaNames;
-import bluej.utility.JavaUtils;
-import threadchecker.OnThread;
-import threadchecker.Tag;
+import static bluej.pkgmgr.target.ClassTarget.MENU_STYLE_INBUILT;
 
 /**
  * A role object for Junit unit tests.
@@ -92,8 +85,6 @@ public class UnitTestClassRole extends ClassRole
 {
     public static final String UNITTEST_ROLE_NAME = "UnitTestTarget";
     public static final String UNITTEST_ROLE_NAME_JUNIT4 = "UnitTestTargetJunit4";
-
-    private final Color unittestbg = Config.getOptionalItemColour("colour.class.bg.unittest");
 
     private static final String testAll = Config.getString("pkgmgr.test.popup.testAll");
     private static final String createTest = Config.getString("pkgmgr.test.popup.createTest");
@@ -206,6 +197,7 @@ public class UnitTestClassRole extends ClassRole
     {
         menu.add(testAction);
         testAction.setDisable(!enableTestAll);
+        JavaFXUtil.addStyleClass(testAction, MENU_STYLE_INBUILT);
     }
 
     /**
@@ -300,7 +292,7 @@ public class UnitTestClassRole extends ClassRole
         if (param != null) {
             // Only running a single test
             Project proj = pmf.getProject();
-            Platform.runLater(() -> TestDisplayFrame.getTestDisplay().startTest(proj, 1));
+            TestDisplayFrame.getTestDisplay().startTest(proj, 1);
         }
         
         new TestRunnerThread(pmf, ct, param).start();
@@ -330,7 +322,7 @@ public class UnitTestClassRole extends ClassRole
                 .collect(Collectors.toList());
 
         Project proj = pmf.getProject();
-        Platform.runLater(() -> TestDisplayFrame.getTestDisplay().startTest(proj, testMethods.size()));
+        TestDisplayFrame.getTestDisplay().startTest(proj, testMethods.size());
         return testMethods;
     }
     
@@ -380,43 +372,38 @@ public class UnitTestClassRole extends ClassRole
         if (newTestName == null)
             return;
 
-        SwingUtilities.invokeLater(() -> {
-            // find out if the method already exists in the unit test src
-            try {
-                Charset charset = pmf.getProject().getProjectCharset();
-                UnitTestAnalyzer uta = analyzeUnitTest(ct, charset);
-    
-                SourceSpan existingSpan = uta.getMethodBlockSpan(newTestName);
-    
-                if (existingSpan != null)
+
+        // find out if the method already exists in the unit test src
+        try {
+            Charset charset = pmf.getProject().getProjectCharset();
+            UnitTestAnalyzer uta = analyzeUnitTest(ct, charset);
+
+            SourceSpan existingSpan = uta.getMethodBlockSpan(newTestName);
+
+            if (existingSpan != null)
+            {
+                if (DialogManager.askQuestionFX(pmf.getFXWindow(), "unittest-method-present") == 1)
                 {
-                    Platform.runLater(() -> {
-                        if (DialogManager.askQuestionFX(pmf.getFXWindow(), "unittest-method-present") == 1)
-                        {
-                            // Don't do anything
-                        }
-                        else
-                        {
-                            SwingUtilities.invokeLater(() -> finishTestCase(pmf, ct, newTestName));
-                        }
-                    });
+                    // Don't do anything
                 }
                 else
                 {
                     finishTestCase(pmf, ct, newTestName);
                 }
             }
-            catch (IOException ioe) { 
-                Platform.runLater(() -> {
-                    DialogManager.showErrorWithTextFX(pmf.getFXWindow(), "unittest-io-error", ioe.getLocalizedMessage());
-                    Debug.reportError("Error reading unit test source", ioe);
-                    SwingUtilities.invokeLater(() -> finishTestCase(pmf, ct, newTestName));
-                });
+            else
+            {
+                finishTestCase(pmf, ct, newTestName);
             }
-        });
+        }
+        catch (IOException ioe) {
+            DialogManager.showErrorWithTextFX(pmf.getFXWindow(), "unittest-io-error", ioe.getLocalizedMessage());
+            Debug.reportError("Error reading unit test source", ioe);
+            finishTestCase(pmf, ct, newTestName);
+        }
     }
 
-    @OnThread(Tag.Swing)
+    @OnThread(Tag.FXPlatform)
     private void finishTestCase(PkgMgrFrame pmf, ClassTarget ct, String newTestName)
     {
         pmf.testRecordingStarted(Config.getString("pkgmgr.test.recording") + " "
@@ -472,32 +459,33 @@ public class UnitTestClassRole extends ClassRole
      */
     private void runTestSetup(final PkgMgrFrame pmf, final ClassTarget ct, final boolean recordAsFixtureToBench)
     {
+        Project project = pmf.getProject();
+
         // Avoid running test setup (which is user code) on the event thread.
         // Run it on a new thread instead.
         new Thread() {
+            @OnThread(value = Tag.Unique, ignoreParent = true)
             public void run() {
+
+                final FXPlatformSupplier<Map<String, DebuggerObject>> dobs = project.getDebugger().runTestSetUp(ct.getQualifiedName());
                 
-                final Map<String,DebuggerObject> dobs = pmf.getProject().getDebugger().runTestSetUp(ct.getQualifiedName());
-                
-                EventQueue.invokeLater(new Runnable() {
-                    public void run() {
-                        List<DataCollector.NamedTyped> recordObjects = new ArrayList<DataCollector.NamedTyped>();
-                        Iterator<Map.Entry<String,DebuggerObject>> it = dobs.entrySet().iterator();
-                        
-                        while(it.hasNext()) {
-                            Map.Entry<String,DebuggerObject> mapent = it.next();
-                            DebuggerObject objVal = mapent.getValue();
-                            
-                            if (! objVal.isNullObject()) {
-                                String actualName = pmf.putObjectOnBench(mapent.getKey(), objVal, objVal.getGenType(), null, Optional.empty());
-                                recordObjects.add(new DataCollector.NamedTyped(actualName, objVal.getClassName()));
-                            }
+                Platform.runLater(() -> {
+                    List<DataCollector.NamedTyped> recordObjects = new ArrayList<DataCollector.NamedTyped>();
+                    Iterator<Map.Entry<String,DebuggerObject>> it = dobs.get().entrySet().iterator();
+
+                    while(it.hasNext()) {
+                        Map.Entry<String,DebuggerObject> mapent = it.next();
+                        DebuggerObject objVal = mapent.getValue();
+
+                        if (! objVal.isNullObject()) {
+                            String actualName = pmf.putObjectOnBench(mapent.getKey(), objVal, objVal.getGenType(), null, Optional.empty());
+                            recordObjects.add(new DataCollector.NamedTyped(actualName, objVal.getClassName()));
                         }
-                        
-                        if (recordAsFixtureToBench)
-                        {
-                            DataCollector.fixtureToObjectBench(pmf.getPackage(), ct.getSourceFile(), recordObjects);
-                        }
+                    }
+
+                    if (recordAsFixtureToBench)
+                    {
+                        DataCollector.fixtureToObjectBench(pmf.getPackage(), ct.getSourceFile(), recordObjects);
                     }
                 });
             }
@@ -637,16 +625,9 @@ public class UnitTestClassRole extends ClassRole
             
             // if we already have fields, ask if we are sure we want to get rid of them
             if (variables != null && variables.size() > 0) {
-                AtomicBoolean shouldContinue = new AtomicBoolean();
-                SecondaryLoop loop = Toolkit.getDefaultToolkit().getSystemEventQueue().createSecondaryLoop();
-                Platform.runLater(() -> {
-                    boolean cont = DialogManager.askQuestionFX(null, "unittest-fixture-present") != 1;
-                    shouldContinue.set(cont);
-                    loop.exit();
-                });
-                loop.enter();
+                boolean shouldContinue = DialogManager.askQuestionFX(null, "unittest-fixture-present") != 1;
 
-                if (!shouldContinue.get())
+                if (!shouldContinue)
                     return;
             }
 
@@ -745,10 +726,10 @@ public class UnitTestClassRole extends ClassRole
             super(name);
             this.ped = ped;
             this.t = t;
-            setOnAction(e -> SwingUtilities.invokeLater(() -> actionPerformed(e)));
+            setOnAction(e -> actionPerformed(e));
         }
 
-        @OnThread(Tag.Swing)
+        @OnThread(Tag.FXPlatform)
         public abstract void actionPerformed(javafx.event.ActionEvent actionEvent);
     }
 
@@ -776,7 +757,7 @@ public class UnitTestClassRole extends ClassRole
         }
 
         @Override
-        @OnThread(Tag.Swing)
+        @OnThread(Tag.FXPlatform)
         public void actionPerformed(ActionEvent e)
         {
             ped.raiseRunTargetEvent(t, testName);
@@ -792,7 +773,7 @@ public class UnitTestClassRole extends ClassRole
         }
 
         @Override
-        @OnThread(Tag.Swing)
+        @OnThread(Tag.FXPlatform)
         public void actionPerformed(ActionEvent e)
         {
             ped.raiseMakeTestCaseEvent(t);
@@ -808,7 +789,7 @@ public class UnitTestClassRole extends ClassRole
         }
 
         @Override
-        @OnThread(Tag.Swing)
+        @OnThread(Tag.FXPlatform)
         public void actionPerformed(ActionEvent e)
         {
             ped.raiseBenchToFixtureEvent(t);
@@ -824,7 +805,7 @@ public class UnitTestClassRole extends ClassRole
         }
 
         @Override
-        @OnThread(Tag.Swing)
+        @OnThread(Tag.FXPlatform)
         public void actionPerformed(ActionEvent e)
         {
             ped.raiseFixtureToBenchEvent(t);

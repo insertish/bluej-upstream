@@ -24,25 +24,25 @@ package bluej.prefmgr;
 import java.awt.Font;
 import java.io.File;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
 
-import javafx.application.Platform;
+import bluej.utility.javafx.JavaFXUtil;
+import javafx.beans.binding.Bindings;
+import javafx.beans.binding.BooleanExpression;
+import javafx.beans.binding.StringExpression;
+import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.IntegerProperty;
+import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleIntegerProperty;
+import javafx.beans.property.SimpleStringProperty;
+import javafx.beans.property.StringProperty;
 import javafx.beans.value.ObservableIntegerValue;
-import javafx.beans.value.ObservableValue;
 
 import threadchecker.OnThread;
 import threadchecker.Tag;
 import bluej.Config;
 import bluej.editor.EditorManager;
-import bluej.editor.moe.BlueJSyntaxView;
-import bluej.pkgmgr.PkgMgrFrame;
-import bluej.pkgmgr.Project;
-import bluej.terminal.Terminal;
 
 /**
  * A class to manage the user editable preferences
@@ -53,11 +53,11 @@ import bluej.terminal.Terminal;
  *
  * @author  Andrew Patterson
  */
-@OnThread(Tag.Swing)
+@OnThread(Tag.FXPlatform)
 public class PrefMgr
 {
     // publicly accessible names for flags
-    public static final String HILIGHTING = "bluej.editor.syntaxHilighting";
+    public static final String HIGHLIGHTING = "bluej.editor.syntaxHilighting";
     public static final String AUTO_INDENT = "bluej.editor.autoIndent";
     public static final String LINENUMBERS = "bluej.editor.displayLineNumbers";
     public static final String MAKE_BACKUP = "bluej.editor.makeBackup";
@@ -73,38 +73,33 @@ public class PrefMgr
     public static final String START_WITH_SUDO = "bluej.startWithSudo";
     public static final String STRIDE_SIDEBAR_SHOWING = "bluej.editor.stride.sidebarShowing";
     
-    public static final String USE_THEMES = "bluej.useTheme";
-    public static final int MIN_STRIDE_FONT_SIZE = 6;
-    public static final int MAX_STRIDE_FONT_SIZE = 160;
+    public static final int MIN_EDITOR_FONT_SIZE = 6;
+    public static final int MAX_EDITOR_FONT_SIZE = 160;
     public static final int DEFAULT_STRIDE_FONT_SIZE = 11;
+    public static final int DEFAULT_JAVA_FONT_SIZE = 10;
     // font property names
     private static final String editorFontPropertyName = "bluej.editor.font";
     private static final String editorMacFontPropertyName = "bluej.editor.MacOS.font";
     private static final String editorFontSizePropertyName = "bluej.editor.fontsize";
     // other constants
     private static final int NUM_RECENT_PROJECTS = Config.getPropInteger("bluej.numberOfRecentProjects", 12);
-    // preference variables: FONTS
-    private static int fontSize;
-    private static int targetFontSize;
-    private static Font normalFont;
-    private static Font targetFont;
     // initialised by a call to setMenuFontSize()
-    private static int menuFontSize;
-    private static Font menuFont;
+    @OnThread(Tag.Swing)
     private static Font popupMenuFont;
+    @OnThread(Tag.Swing)
     private static Font italicMenuFont;
     // initialised by a call to setEditorFontSize()
-    @OnThread(Tag.Any)
-    private static int editorFontSize;
-    private static Font editorStandardFont;
+    @OnThread(Tag.FX)
+    private static final IntegerProperty editorFontSize = new SimpleIntegerProperty(DEFAULT_JAVA_FONT_SIZE);
+    private static final StringProperty editorStandardFont = new SimpleStringProperty("Roboto Mono");
     @OnThread(Tag.FX)
     private static IntegerProperty strideFontSize = null; // Setup in call to strideFontSizeProperty
 
     // preference variables: (other than fonts)
     
     /** transparency of the scope highlighting */
-    @OnThread(Tag.Any)
-    private static int highlightStrength; 
+    @OnThread(Tag.FXPlatform)
+    private static final IntegerProperty highlightStrength = new SimpleIntegerProperty(0);
     
     // last value of naviviewExpanded
     private static boolean isNaviviewExpanded=true;
@@ -120,6 +115,17 @@ public class PrefMgr
     // flags are all boolean preferences
     @OnThread(value = Tag.Any, requireSynchronized = true)
     private static HashMap<String,String> flags = new HashMap<String,String>();
+    // Flags have 0 or 1 properties.  Once requested for a flag, it
+    // is shared between all uses of that property flag.
+    @OnThread(Tag.FXPlatform)
+    private static HashMap<String, BooleanProperty> flagProperties = new HashMap<>();
+    // The CSS style needed to apply the editor font styling
+    @OnThread(Tag.FX)
+    private static StringExpression editorFontCSS;
+    // The CSS style needed to apply the editor font size styling, but
+    // slightly shrunken and doesn't set family
+    @OnThread(Tag.FX)
+    private static StringExpression editorFontSizeOnlyCSS;
 
     /**
      * Private constructor to prevent instantiation
@@ -182,42 +188,19 @@ public class PrefMgr
             Config.putPropString("bluej.recentProject" + i, recentProjects.get(i));
         }
     }
-    
-    public static Font getStandardFont()
-    {
-        return normalFont;
-    }
-    
-    public static Font getStandoutFont()
-    {
-        return normalFont;
-    }
 
-    public static Font getStandardMenuFont()
-    {
-        return menuFont;
-    }
-
+    @OnThread(Tag.Swing)
     public static Font getStandoutMenuFont()
     {
         return italicMenuFont;
     }
 
+    @OnThread(Tag.Swing)
     public static Font getPopupMenuFont()
     {
         return popupMenuFont;   
     }
-    
-    public static Font getTargetFont()
-    {
-        return targetFont;        
-    }
 
-    public static Font getStandardEditorFont()
-    {
-        return editorStandardFont;
-    }
-    
     /**
      * Get the value for a flag. Flags are boolean preferences.
      * 'flag' must be one of the flag names defined as public
@@ -231,6 +214,15 @@ public class PrefMgr
             return false;
         }
         return value.equals("true");
+    }
+
+    /**
+     * Provides a read-only observable view of a flag's value.
+     */
+    @OnThread(Tag.FXPlatform)
+    public static BooleanExpression flagProperty(String flagName)
+    {
+        return flagProperties.computeIfAbsent(flagName, f -> new SimpleBooleanProperty(getFlag(f)));
     }
 
     /**
@@ -252,6 +244,11 @@ public class PrefMgr
             Config.putPropString(flag, value);
 
         flags.put(flag, value);
+        JavaFXUtil.runNowOrLater(() -> {
+            BooleanProperty prop = flagProperties.get(flag);
+            if (prop != null)
+                prop.set(enabled);
+        });
     }
 
     private static List<String> readRecentProjects()
@@ -276,23 +273,6 @@ public class PrefMgr
         if (size > 0) {
             initEditorFontSize(size);
             EditorManager.getEditorManager().refreshAll();
-            Terminal.setTerminalFontSize(size);
-            PkgMgrFrame [] frames = PkgMgrFrame.getAllFrames();
-            Collection<Project> projects = Project.getProjects();
-            Iterator<Project> i = projects.iterator();
-            while (i.hasNext()) {
-                Project project = i.next();
-                if (project.hasTerminal()) {
-                    project.getTerminal().resetFont();
-                }
-            }
-            for (PkgMgrFrame frame : frames)
-            {
-                Platform.runLater(() -> {
-                    if (frame.getCodePad() != null)
-                        frame.getCodePad().resetFontSize();
-                });
-            }
         }
     }
     
@@ -302,19 +282,19 @@ public class PrefMgr
      */
     private static void initEditorFontSize(int size)
     {
-        if (size > 0 && size != editorFontSize) {
-            editorFontSize = size;
+        if (size > 0 && size != editorFontSize.get()) {
+            editorFontSize.set(size);
 
             Config.putPropInteger(editorFontSizePropertyName, size);
 
-            Font font;
+            String font;
             if(Config.isMacOS()) {
-                font = Config.getFont(editorMacFontPropertyName, "Monaco", size);
+                font = Config.getPropString(editorMacFontPropertyName, "Roboto Mono");
             }
             else {
-                font = Config.getFont(editorFontPropertyName, "Monospaced", size);
+                font = Config.getPropString(editorFontPropertyName, "Roboto Mono");
             }
-            editorStandardFont = font;
+            editorStandardFont.set(font);
         }
     }
     
@@ -327,14 +307,29 @@ public class PrefMgr
      * Return the editor font size as an integer size
      * (use getStandardEditorFont() if access to the actual font is required)
      */
-    @OnThread(Tag.Any)
-    public static int getEditorFontSize()
+    @OnThread(Tag.FXPlatform)
+    public static IntegerProperty getEditorFontSize()
     {
         return editorFontSize;
     }
 
-    @OnThread(Tag.Any)
-    public static int getScopeHighlightStrength()
+    @OnThread(Tag.FXPlatform)
+    public static StringExpression getEditorFontCSS(boolean includeFamily)
+    {
+        if (editorFontCSS == null)
+        {
+            editorFontSizeOnlyCSS = Bindings.concat(
+                    "-fx-font-size: ", editorFontSize, "pt;");
+            editorFontCSS = Bindings.concat(
+                    "-fx-font-size: ", editorFontSize, "pt;",
+                    "-fx-font-family: \"", editorStandardFont, "\";"
+            );
+        }
+        return includeFamily ? editorFontCSS : editorFontSizeOnlyCSS;
+    }
+
+    @OnThread(Tag.FXPlatform)
+    public static ObservableIntegerValue getScopeHighlightStrength()
     {
         return highlightStrength;
     }
@@ -345,8 +340,7 @@ public class PrefMgr
      */
     public static void setScopeHighlightStrength(int strength)
     {
-        highlightStrength = strength;
-        BlueJSyntaxView.setHighlightStrength(strength);
+        highlightStrength.set(strength);
         Config.putPropInteger(SCOPE_HIGHLIGHTING_STRENGTH, strength);
     }
 
@@ -377,7 +371,7 @@ public class PrefMgr
         {
             String fontSizePropName = "bluej.stride.editor.fontSize";
             int sizeFromConfig = Config.getPropInteger(fontSizePropName,DEFAULT_STRIDE_FONT_SIZE);
-            int clampedSize = Math.max(MIN_STRIDE_FONT_SIZE, Math.min(MAX_STRIDE_FONT_SIZE, sizeFromConfig));
+            int clampedSize = Math.max(MIN_EDITOR_FONT_SIZE, Math.min(MAX_EDITOR_FONT_SIZE, sizeFromConfig));
             strideFontSize = new SimpleIntegerProperty(clampedSize);
             
             strideFontSize.addListener((a, b, newVal) -> {
@@ -395,37 +389,30 @@ public class PrefMgr
     static {
         //set up fonts
         initEditorFontSize(Config.getPropInteger(editorFontSizePropertyName, 12));
+        JavaFXUtil.addChangeListener(editorFontSize, size -> Config.putPropInteger(editorFontSizePropertyName, size.intValue()));
 
         //bluej menu font
-        menuFontSize = Config.getPropInteger("bluej.menu.fontsize", 12);
-        menuFont = Config.getFont("bluej.menu.font", "SansSerif", menuFontSize);
+        int menuFontSize = Config.getPropInteger("bluej.menu.fontsize", 12);
+        Font menuFont = Config.getFont("bluej.menu.font", "SansSerif", menuFontSize);
         
         // popup menus are not permitted to be bold (MIK style guide) at present
         // make popup menus same font as drop down menus
         italicMenuFont = menuFont.deriveFont(Font.ITALIC);
         popupMenuFont = menuFont.deriveFont(Font.PLAIN);
 
-        //standard font for UI components
-        fontSize = Config.getPropInteger("bluej.fontsize", 12);
-        normalFont = Config.getFont("bluej.font", "SansSerif", fontSize);
-
-        targetFontSize = Config.getPropInteger("bluej.target.fontsize", 12);
-        targetFont = Config.getFont("bluej.target.font", "SansSerif-bold", targetFontSize);
-        
         // preferences other than fonts:
-        highlightStrength = Config.getPropInteger(SCOPE_HIGHLIGHTING_STRENGTH, 20);
+        highlightStrength.set(Config.getPropInteger(SCOPE_HIGHLIGHTING_STRENGTH, 20));
         isNaviviewExpanded=initializeisNavivewExpanded();
         
         projectDirectory = Config.getPropString("bluej.projectPath", System.getProperty("user.home"));
         recentProjects = readRecentProjects();
         
-        flags.put(HILIGHTING, Config.getPropString(HILIGHTING, "true"));
+        flags.put(HIGHLIGHTING, Config.getPropString(HIGHLIGHTING, "true"));
         flags.put(AUTO_INDENT, Config.getPropString(AUTO_INDENT, "false"));
         flags.put(LINENUMBERS, Config.getPropString(LINENUMBERS, "false"));
         flags.put(MAKE_BACKUP, Config.getPropString(MAKE_BACKUP, "false"));
         flags.put(MATCH_BRACKETS, Config.getPropString(MATCH_BRACKETS, "true"));
         flags.put(LINK_LIB, Config.getPropString(LINK_LIB, "true"));
-        flags.put(USE_THEMES, Config.getPropString(USE_THEMES, "false"));
         flags.put(SHOW_TEST_TOOLS, Config.getPropString(SHOW_TEST_TOOLS, "false"));
         flags.put(SHOW_TEAM_TOOLS, Config.getPropString(SHOW_TEAM_TOOLS, "false"));
         flags.put(SHOW_TEXT_EVAL, Config.getPropString(SHOW_TEXT_EVAL, "false"));

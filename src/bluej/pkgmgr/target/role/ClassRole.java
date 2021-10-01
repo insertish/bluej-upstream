@@ -21,28 +21,6 @@
  */
 package bluej.pkgmgr.target.role;
 
-import java.awt.Color;
-import java.awt.GradientPaint;
-import java.awt.Paint;
-import java.io.File;
-import java.io.IOException;
-import java.nio.charset.Charset;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Hashtable;
-import java.util.List;
-import java.util.Properties;
-
-import javafx.collections.ObservableList;
-import javafx.scene.control.Menu;
-import javafx.scene.control.MenuItem;
-
-import javax.swing.Action;
-import javax.swing.JMenuItem;
-import javax.swing.JPopupMenu;
-import javax.swing.SwingUtilities;
-
-
 import bluej.Config;
 import bluej.debugmgr.ConstructAction;
 import bluej.debugmgr.objectbench.InvokeAction;
@@ -60,8 +38,21 @@ import bluej.views.ConstructorView;
 import bluej.views.MethodView;
 import bluej.views.View;
 import bluej.views.ViewFilter;
+import javafx.collections.ObservableList;
+import javafx.scene.control.Menu;
+import javafx.scene.control.MenuItem;
 import threadchecker.OnThread;
 import threadchecker.Tag;
+
+import javax.swing.*;
+import java.io.File;
+import java.io.IOException;
+import java.nio.charset.Charset;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Hashtable;
+import java.util.List;
+import java.util.Properties;
 
 /**
  * A class role in a class target, providing behaviour specific to particular
@@ -72,9 +63,6 @@ import threadchecker.Tag;
 public abstract class ClassRole
 {
     public final static String CLASS_ROLE_NAME = null;
-
-    private final Color defaultbg = Config.getOptionalItemColour("colour.class.bg.default");
-    protected final Color envOpColour = Config.ENV_COLOUR;
 
     @OnThread(Tag.Any)
     public String getRoleName()
@@ -275,9 +263,9 @@ public abstract class ClassRole
                 if (m instanceof MethodView)
                 {
                     MenuItem menuItem = new MenuItem(prefix + m.getLongDesc());
-                    menuItem.setOnAction(e -> SwingUtilities.invokeLater(() ->
-                        new InvokeAction((MethodView)m, il, prefix + m.getLongDesc()).actionPerformed(null)
-                    ));
+                    menuItem.setOnAction(e ->
+                        il.executeMethod((MethodView)m)
+                    );
 
                     // check whether it's time for a submenu
                     int itemCount = menu.size();
@@ -294,9 +282,9 @@ public abstract class ClassRole
                 {
                     MenuItem menuItem = new MenuItem(prefix + m.getLongDesc());
                     menu.add(menuItem);
-                    menuItem.setOnAction(e -> SwingUtilities.invokeLater(() ->
-                        new ConstructAction((ConstructorView) m, il, prefix + m.getLongDesc()).actionPerformed(null)
-                    ));
+                    menuItem.setOnAction(e ->
+                        il.callConstructor((ConstructorView) m)
+                    );
                     hasEntries = true;
                 }
             }
@@ -308,6 +296,7 @@ public abstract class ClassRole
         return hasEntries;
     }
     // Swing version, for Greenfoot:
+    @OnThread(Tag.SwingIsFX)
     public static boolean createMenuItems(JPopupMenu menu, CallableView[] members, ViewFilter filter, int first, int last,
                                           String prefix, InvokeListener il)
     {

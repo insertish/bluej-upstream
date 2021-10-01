@@ -23,17 +23,18 @@ package bluej.parser.nodes;
 
 import java.io.Reader;
 
-import javax.swing.text.Document;
-import javax.swing.text.Element;
-
 import bluej.debugger.gentype.GenTypeClass;
 import bluej.debugger.gentype.GenTypeSolid;
+import bluej.editor.moe.MoeSyntaxDocument;
+import bluej.editor.moe.MoeSyntaxDocument.Element;
 import bluej.parser.CodeSuggestions;
 import bluej.parser.CompletionParser;
 import bluej.parser.DocumentReader;
 import bluej.parser.entity.EntityResolver;
 import bluej.parser.entity.JavaEntity;
 import bluej.parser.nodes.NodeTree.NodeAndPosition;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 
 /**
  * A node representing a parsed expression.
@@ -60,7 +61,7 @@ public class ExpressionNode extends JavaParentNode
     }
     
     @Override
-    protected CodeSuggestions getExpressionType(int pos, int nodePos, JavaEntity defaultType, Document document)
+    protected CodeSuggestions getExpressionType(int pos, int nodePos, JavaEntity defaultType, MoeSyntaxDocument document)
     {
         valueEntityCache.clear();
         pocEntityCache.clear();
@@ -71,9 +72,10 @@ public class ExpressionNode extends JavaParentNode
         }
         return suggestAsExpression(pos, nodePos, this, defaultType, document);
     }
-    
+
+    @OnThread(Tag.FXPlatform)
     public static CodeSuggestions suggestAsExpression(int pos, int nodePos, EntityResolver resolver,
-            JavaEntity defaultType, Document document)
+            JavaEntity defaultType, MoeSyntaxDocument document)
     {
         Reader r = new DocumentReader(document, nodePos, pos);
         Element map = document.getDefaultRootElement();

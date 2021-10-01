@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2016  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2016,2017  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -21,46 +21,40 @@
  */
 package bluej.groupwork.actions;
 
-import java.awt.Dialog;
-import java.awt.event.ActionEvent;
-
-import javax.swing.AbstractAction;
-
-import javafx.application.Platform;
-import javafx.stage.Window;
-
 import bluej.groupwork.TeamSettings;
 import bluej.groupwork.TeamworkProvider;
 import bluej.groupwork.ui.CheckConnectionDialog;
 import bluej.groupwork.ui.TeamSettingsPanel;
+import bluej.pkgmgr.PkgMgrFrame;
 import bluej.utility.javafx.FXPlatformSupplier;
+
+import javafx.stage.Window;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 
 /**
  * Test the username, password, host, etc. settings to make sure they are valid
  * 
  * @author fisker
  */
-public class ValidateConnectionAction extends AbstractAction
+@OnThread(Tag.FXPlatform)
+public class ValidateConnectionAction extends TeamAction
 {
     private TeamSettingsPanel teamSettingsPanel;
     private FXPlatformSupplier<Window> owner;
     
-    public ValidateConnectionAction(String name, TeamSettingsPanel teamSettingsPanel,
-                                    FXPlatformSupplier<Window> owner)
+    public ValidateConnectionAction(TeamSettingsPanel teamSettingsPanel, FXPlatformSupplier<Window> owner)
     {
-        super(name);
+        super("team.settings.checkConnection", true);
         this.teamSettingsPanel = teamSettingsPanel;
         this.owner = owner;
     }
     
-    /* (non-Javadoc)
-     * @see java.awt.event.ActionListener#actionPerformed(java.awt.event.ActionEvent)
-     */
-    public void actionPerformed(ActionEvent e)
+    @Override
+    protected void actionPerformed(PkgMgrFrame pmf)
     {
         TeamworkProvider provider = teamSettingsPanel.getSelectedProvider();
         TeamSettings settings = teamSettingsPanel.getSettings();
-
-        Platform.runLater(() -> new CheckConnectionDialog(owner.get(), provider, settings).showAndCheck());
+        new CheckConnectionDialog(owner.get(), provider, settings).showAndCheck();
     }
 }

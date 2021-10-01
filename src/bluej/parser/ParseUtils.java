@@ -84,7 +84,7 @@ public class ParseUtils
      * Get the possible code completions, based on the provided suggestions context.
      * If there are can be no valid completions in the given context, returns null.
      */
-    @OnThread(Tag.Swing)
+    @OnThread(Tag.FXPlatform)
     public static AssistContent[] getPossibleCompletions(CodeSuggestions suggests, 
             JavadocResolver javadocResolver, AssistContentConsumer consumer)
     {
@@ -105,7 +105,6 @@ public class ParseUtils
      * @return  A suitable GenTypeClass representing the target type for completion
      *           purposes, or null if there is no such suitable type.
      */
-    @OnThread(Tag.Any)
     public static GenTypeClass initGetPossibleCompletions(CodeSuggestions suggests)
     {
         if (suggests != null) {
@@ -135,7 +134,7 @@ public class ParseUtils
         return null; // no completions
     }
 
-    @OnThread(Tag.Swing)
+    @OnThread(Tag.FXPlatform)
     private static List<AssistContent> getCompletionsForTarget(GenTypeClass exprType, CodeSuggestions suggests,
             JavadocResolver javadocResolver, AssistContentConsumer consumer)
     {
@@ -225,7 +224,7 @@ public class ParseUtils
      * a unique signature), and do so if necessary. Returns an AssistContent object representing the method if
      * it was added, or null otherwise. 
      */
-    @OnThread(Tag.Swing)
+    @OnThread(Tag.FXPlatform)
     private static AssistContent discoverElement(JavadocResolver javadocResolver, Set<String> contentSigs, List<AssistContent> completions, 
             Map<String, GenTypeParameter> typeArgs, MethodReflective method, AssistContentConsumer consumer)
     {
@@ -260,6 +259,7 @@ public class ParseUtils
      * @param resolver  Entity resolver which will (eventually) resolve the entity
      * @param tokens  The tokens making up the specification
      */
+    @OnThread(Tag.FXPlatform)
     public static JavaEntity getImportEntity(EntityResolver resolver,
             Reflective querySource, List<LocatableToken> tokens)
     {
@@ -299,6 +299,7 @@ public class ParseUtils
      * @param querySource  The source of the query - a fully qualified class name
      * @param tokens  The tokens specifying the type
      */
+    @OnThread(Tag.FXPlatform)
     public static JavaEntity getTypeEntity(EntityResolver resolver,
             Reflective querySource, List<LocatableToken> tokens)
     {
@@ -310,6 +311,7 @@ public class ParseUtils
      * Get an entity for a type specification. The returned entity may be unresolved.
      * Returns null if the type specification appears to be invalid.
      */
+    @OnThread(Tag.FXPlatform)
     private static JavaEntity getTypeEntity(EntityResolver resolver, Reflective querySource,
             ListIterator<LocatableToken> i, DepthRef depthRef)
     {
@@ -407,6 +409,7 @@ public class ParseUtils
      * @param depthRef  The current argument depth; will be adjusted on return
      * @return   A JavaEntity representing the type with type arguments applied (or null)
      */
+    @OnThread(Tag.FXPlatform)
     private static JavaEntity processTypeArgs(EntityResolver resolver, Reflective querySource, 
             JavaEntity base, ListIterator<LocatableToken> i, DepthRef depthRef)
     {

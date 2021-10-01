@@ -1,53 +1,44 @@
 /*
- This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2012,2014,2016  Michael Kolling and John Rosenberg 
- 
- This program is free software; you can redistribute it and/or 
- modify it under the terms of the GNU General Public License 
- as published by the Free Software Foundation; either version 2 
- of the License, or (at your option) any later version. 
- 
- This program is distributed in the hope that it will be useful, 
- but WITHOUT ANY WARRANTY; without even the implied warranty of 
- MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the 
- GNU General Public License for more details. 
- 
- You should have received a copy of the GNU General Public License 
- along with this program; if not, write to the Free Software 
- Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA. 
- 
- This file is subject to the Classpath exception as provided in the  
+ This file is part of the BlueJ program.
+ Copyright (C) 1999-2009,2012,2014,2016,2017  Michael Kolling and John Rosenberg
+
+ This program is free software; you can redistribute it and/or
+ modify it under the terms of the GNU General Public License
+ as published by the Free Software Foundation; either version 2
+ of the License, or (at your option) any later version.
+
+ This program is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ GNU General Public License for more details.
+
+ You should have received a copy of the GNU General Public License
+ along with this program; if not, write to the Free Software
+ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+
+ This file is subject to the Classpath exception as provided in the
  LICENSE.txt file that accompanied this code.
  */
 package bluej.groupwork.ui;
 
-import java.awt.BorderLayout;
-import java.awt.Component;
-import java.awt.Dimension;
-import java.awt.FlowLayout;
-import java.awt.event.ActionEvent;
-import java.awt.event.ActionListener;
 import java.io.File;
 import java.io.FileFilter;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Comparator;
 import java.util.HashMap;
-import java.util.Iterator;
-import java.util.List;
 import java.util.Map;
 
-import javax.swing.JButton;
-import javax.swing.JPanel;
-import javax.swing.JScrollPane;
-import javax.swing.JTable;
+import javafx.beans.property.ReadOnlyObjectWrapper;
+import javafx.beans.property.ReadOnlyStringWrapper;
+import javafx.collections.FXCollections;
+import javafx.collections.ObservableList;
+import javafx.geometry.Pos;
+import javafx.scene.Node;
+import javafx.scene.control.Button;
+import javafx.scene.control.ButtonType;
+import javafx.scene.control.TableColumn;
+import javafx.scene.control.TableView;
+import javafx.scene.layout.BorderPane;
+import javafx.stage.Window;
 
-import javafx.application.Platform;
-
-import bluej.utility.javafx.SwingNodeDialog;
-import threadchecker.OnThread;
-import threadchecker.Tag;
-import bluej.BlueJTheme;
 import bluej.Config;
 import bluej.collect.DataCollector;
 import bluej.groupwork.Repository;
@@ -59,120 +50,129 @@ import bluej.groupwork.TeamViewFilter;
 import bluej.groupwork.TeamworkCommand;
 import bluej.groupwork.TeamworkCommandResult;
 import bluej.pkgmgr.Project;
-import bluej.utility.SwingWorker;
+import bluej.utility.DialogManager;
+import bluej.utility.FXWorker;
+import bluej.utility.javafx.FXCustomizedDialog;
+import bluej.utility.javafx.JavaFXUtil;
+
+import threadchecker.OnThread;
+import threadchecker.Tag;
 
 /**
  * Main frame for CVS Status Dialog
  *
  * @author bquig
+ * @author Amjad Altadmri
+ *
  */
-public class StatusFrame extends SwingNodeDialog
+@OnThread(Tag.FXPlatform)
+public class StatusFrame extends FXCustomizedDialog<Void>
 {
     private Project project;
-    private JTable statusTable;
-    private StatusTableModel statusModel;
-    private JScrollPane statusScroller;
-    private JButton refreshButton;
-    private ActivityIndicator progressBar;
-    private StatusMessageCellRenderer statusRenderer;
-    
-    private StatusWorker worker;
-    
     private Repository repository;
-    
-    private static final int MAX_ENTRIES = 20; 
-    
-    /** 
+    private StatusTableModel statusModel;
+
+    private Button refreshButton;
+    private ActivityIndicator progressBar;
+    private StatusWorker worker;
+
+    private static final int MAX_ENTRIES = 20;
+    private final boolean isDVCS;
+
+    private TableView<TeamStatusInfo> statusTable;
+
+    /**
      * Creates a new instance of StatusFrame. Called via factory method
-     * getStatusWindow. 
+     * getStatusWindow.
      */
-    public StatusFrame(Project proj)
+    public StatusFrame(Project project, Window owner)
     {
-        project = proj;
-        makeWindow();
-        //DialogManager.tileWindow(this, proj);
+        super(owner, "team.status", "team-status");
+        this.project = project;
+        isDVCS = project.getTeamSettingsController().isDVCS();
+        getDialogPane().setContent(makeMainPane());
+        prepareButtonPane();
+        DialogManager.centreDialog(this);
     }
 
-    private void makeWindow()
-    {              
-        setTitle(Config.getString("team.status"));
+    @Override
+    protected Node wrapButtonBar(Node original)
+    {
+        makeRefreshPaneComponents();
+        BorderPane borderPane = new BorderPane(progressBar, null, original, null, refreshButton);
+        JavaFXUtil.addStyleClass(borderPane, "replacement-button-bar");
+        return borderPane;
+    }
+
+    private Node makeMainPane()
+    {
         // try and set up a reasonable default amount of entries that avoids resizing
         // and scrolling once we get info back from repository
-        statusModel = new StatusTableModel(project, estimateInitialEntries());
-        statusTable = new JTable(statusModel);
-        statusTable.getTableHeader().setReorderingAllowed(false);
-        
-        // set relative column widths
-        statusTable.getColumnModel().getColumn(0).setPreferredWidth(70);
-        statusTable.getColumnModel().getColumn(1).setPreferredWidth(40);
-        statusTable.getColumnModel().getColumn(2).setPreferredWidth(60);
-        
-        //set up custom renderer to colour code status message field
-        statusRenderer = new StatusMessageCellRenderer(project);
-        statusTable.setDefaultRenderer(java.lang.Object.class, statusRenderer);
-        
-        statusScroller = new JScrollPane(statusTable);               
-        statusScroller.setBorder(BlueJTheme.generalBorderWithStatusBar);
-        Dimension prefSize = statusTable.getMaximumSize();
-        Dimension scrollPrefSize =  statusTable.getPreferredScrollableViewportSize();
-        
-        Dimension best = new Dimension(scrollPrefSize.width + 50, prefSize.height + 30);
-        statusScroller.setPreferredSize(best);
-        getContentPane().add(statusScroller, BorderLayout.CENTER);
-        getContentPane().add(makeButtonPanel(), BorderLayout.SOUTH);
-        pack();
+        statusModel = isDVCS ?
+                new StatusTableModelDVCS(project, estimateInitialEntries()) :
+                new StatusTableModelNonDVCS(project, estimateInitialEntries());
+
+        statusTable = new TableView<>(statusModel.getResources());
+        //TODO implements the next line?
+        // statusTable.getTableHeader().setReorderingAllowed(false);
+
+        TableColumn<TeamStatusInfo, String> firstColumn = new TableColumn<>(statusModel.getColumnName(0));
+        JavaFXUtil.addStyleClass(firstColumn, "team-status-firstColumn");
+        firstColumn.setCellValueFactory(v ->
+                new ReadOnlyStringWrapper(ResourceDescriptor.getResource(project, v.getValue(), false)));
+
+        TableColumn<TeamStatusInfo, Object> secondColumn = new TableColumn<>(statusModel.getColumnName(1));
+        JavaFXUtil.addStyleClass(secondColumn, "team-status-secondColumn");
+        secondColumn.setCellValueFactory(v -> new ReadOnlyObjectWrapper<>(getValueAt(v.getValue(), 1)));
+        secondColumn.setCellFactory(col -> new StatusTableCell(isDVCS, 1));
+
+        TableColumn<TeamStatusInfo, Object> thirdColumn = new TableColumn<>(statusModel.getColumnName(2));
+        JavaFXUtil.addStyleClass(thirdColumn, "team-status-thirdColumn");
+        thirdColumn.setCellValueFactory(v -> new ReadOnlyObjectWrapper<>(getValueAt(v.getValue(), 2)));
+        thirdColumn.setCellFactory(col -> new StatusTableCell(isDVCS, 2));
+
+        statusTable.getColumns().setAll(firstColumn, secondColumn, thirdColumn);
+
+        statusTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
+
+        statusTable.setBackground(null);
+        JavaFXUtil.addStyleClass(statusTable, "status-table");
+
+        // Wrap in border pane so that padding works right:
+        return new BorderPane(statusTable);
     }
-    
+
     /**
-     * Create the button panel with a Resolve button and a close button
-     * @return JPanel the buttonPanel
+     * Create the Refresh button and status progress bar
      */
-    private JPanel makeButtonPanel()
+    private void makeRefreshPaneComponents()
     {
-        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        // progress bar
+        progressBar = new ActivityIndicator();
+        progressBar.setRunning(false);
+        BorderPane.setAlignment(progressBar, Pos.CENTER);
 
-        {
-            buttonPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
-            buttonPanel.setBorder(BlueJTheme.generalBorder);
-            
-            // progress bar
-            progressBar = new ActivityIndicator();
-            progressBar.setRunning(false);
-            buttonPanel.add(progressBar);
-            
-            //close button
-            JButton closeButton = BlueJTheme.getCloseButton();
-            closeButton.addActionListener(new ActionListener() {
-                    public void actionPerformed(ActionEvent evt)
-                    {
-                        if (worker != null) {
-                            worker.abort();
-                        }
-                        setVisible(false);
-                    }
-                });
-
-            //refresh button
-            refreshButton = new JButton(Config.getString("team.status.refresh"));
-            refreshButton.setEnabled(false);
-            refreshButton.addActionListener(new ActionListener() {
-                    public void actionPerformed(ActionEvent evt)
-                    {
-                        update();
-                    }
-                });
-
-            setDefaultButton(refreshButton);
-
-            buttonPanel.add(refreshButton);
-            buttonPanel.add(closeButton);
-
-            Platform.runLater(() -> setCloseIsButton(closeButton));
-        }
-
-        return buttonPanel;
+        //refresh button
+        refreshButton = new Button(Config.getString("team.status.refresh"));
+        refreshButton.setDisable(true);
+        refreshButton.setOnAction(event -> update());
+        refreshButton.requestFocus();
     }
-    
+
+    /**
+     * Set up the buttons panel to contain a close button, and register the close action.
+     */
+    private void prepareButtonPane()
+    {
+        //close button
+        getDialogPane().getButtonTypes().setAll(ButtonType.CLOSE);
+        this.setOnCloseRequest(event -> {
+            if (worker != null) {
+                worker.abort();
+            }
+        });
+    }
+
     /**
      * try and estimate the number of entries in status table to avoid resizing
      * once repository has responded.
@@ -199,22 +199,43 @@ public class StatusFrame extends SwingNodeDialog
         repository = project.getRepository();
         if (repository != null) {
             progressBar.setRunning(true);
-            refreshButton.setEnabled(false);
+            refreshButton.setDisable(true);
             worker = new StatusWorker();
             worker.start();
         }
         else {
-            setVisible(false);
+            hide();
         }
     }
-    
+
     /**
-     * Inner class to do the actual cvs status call to ensure that the UI is not 
+     * Find the table entry at a particular column for a specific info object (row).
+     *
+     * @param   info    the info object which occupies a row
+     * @param   col     the table column number
+     * @return          the Object at that location in the table
+     */
+    public Object getValueAt(TeamStatusInfo info, int col)
+    {
+        switch (col) {
+            case 1:
+                return isDVCS ? info.getStatus() : info.getLocalVersion();
+            case 2:
+                return isDVCS ? info.getRemoteStatus() : info.getStatus();
+            default:
+                break;
+        }
+
+        return null;
+    }
+
+    /**
+     * Inner class to do the actual cvs status call to ensure that the UI is not
      * blocked during remote call
      */
-    class StatusWorker extends SwingWorker implements StatusListener
+    class StatusWorker extends FXWorker implements StatusListener
     {
-        List<TeamStatusInfo> resources;
+        ObservableList<TeamStatusInfo> resources;
         TeamworkCommand command;
         TeamworkCommandResult result;
         boolean aborted;
@@ -223,7 +244,7 @@ public class StatusFrame extends SwingNodeDialog
         public StatusWorker()
         {
             super();
-            resources = new ArrayList<TeamStatusInfo>();
+            resources = FXCollections.observableArrayList();
             //Set files = project.getTeamSettingsController().getProjectFiles(true);
             command = repository.getStatus(this, filter, true);
         }
@@ -234,8 +255,8 @@ public class StatusFrame extends SwingNodeDialog
             aborted = true;
         }
 
-        @OnThread(Tag.Unique)
-        public Object construct() 
+        @OnThread(Tag.Worker)
+        public Object construct()
         {
             result = command.getResult();
             return resources;
@@ -252,8 +273,8 @@ public class StatusFrame extends SwingNodeDialog
         {
             // Nothing to be done here.
         }
-        
-        public void finished() 
+
+        public void finished()
         {
             progressBar.setRunning(false);
             if (! aborted) {
@@ -261,36 +282,28 @@ public class StatusFrame extends SwingNodeDialog
                     StatusFrame.this.dialogThenHide(() -> TeamUtils.handleServerResponseFX(result, StatusFrame.this.asWindow()));
                 }
                 else {
-                    Collections.sort(resources, new Comparator<TeamStatusInfo>() {
-                        public int compare(TeamStatusInfo arg0, TeamStatusInfo arg1)
-                        {
-                            TeamStatusInfo tsi0 = (TeamStatusInfo) arg0;
-                            TeamStatusInfo tsi1 = (TeamStatusInfo) arg1;
-
-                            return tsi1.getStatus() - tsi0.getStatus();
-                        }
-                    });
+                    resources.sort((info0, info1) -> info1.getStatus().ordinal() - info0.getStatus().ordinal());
 
                     TeamViewFilter filter = new TeamViewFilter();
                     // Remove old package files from display
-                    for (Iterator<TeamStatusInfo> iterator = resources.iterator(); iterator.hasNext();) {
-                        TeamStatusInfo info = iterator.next();
-                        if(! filter.accept(info)) {
-                            iterator.remove();
-                        }                        
-                    }
+                    resources.removeIf(info -> !filter.accept(info));
                     statusModel.setStatusData(resources);
-                    
-                    Map<File, String> statusMap = new HashMap<File, String>();
-                    
+
+                    Map<File, String> statusMap = new HashMap<>();
+
                     for (TeamStatusInfo s : resources)
                     {
-                        statusMap.put(s.getFile(), TeamStatusInfo.getStatusString(s.getStatus()));
+                        statusMap.put(s.getFile(), s.getStatus().getStatusString());
                     }
-                    
+
                     DataCollector.teamStatusProject(project, repository, statusMap);
                 }
-                refreshButton.setEnabled(true);
+                refreshButton.setDisable(false);
+                if (statusTable.getItems() != null ) {
+                    statusTable.getItems().clear();
+                }
+                statusTable.refresh();
+                statusTable.setItems(resources);
             }
         }
     }

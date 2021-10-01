@@ -23,79 +23,107 @@ package bluej.editor.moe;
 
 import bluej.Config;
 import bluej.prefmgr.PrefMgr;
-
-import java.awt.*;              // New Event model    
-import javax.swing.*;
+import bluej.utility.javafx.JavaFXUtil;
+import javafx.scene.control.Label;
+import javafx.scene.input.MouseButton;
+import javafx.scene.layout.VBox;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 
 /**
  * Status label for the Moe editor.
  * 
  * @author Michael Kolling
  */
-public final class StatusLabel extends JLabel
+@OnThread(Tag.FXPlatform)
+public final class StatusLabel extends VBox
 {
-    // ---------------- CONSTANTS -----------------
-
-    private static Font statusFont = new Font("SansSerif",
-            Font.BOLD | Font.ITALIC, PrefMgr.getEditorFontSize() - 1);
-
-    // current save state
-    static final int READONLY = 0;
-    static final int SAVED = 1;   
-    static final int CHANGED = 2; 
-
-    private final String[] stateString = { 
-        Config.getString("editor.state.readOnly"), 
-        Config.getString("editor.state.saved"),
-        Config.getString("editor.state.changed")
-    };
-
-    // ------------ INSTANCE VARIABLES ------------
-
-    private int state;
-
-    // -------------- CONSTRUCTORS ----------------
-
-    public StatusLabel(int initialState)
+    public static enum Status
     {
-        super("", JLabel.CENTER);
-        setText(stateString[initialState]);
-        setFont(statusFont);
-        setBorder(BorderFactory.createEmptyBorder(0, 8, 0, 8));
+        READONLY("editor.state.readOnly"),
+        SAVED("editor.state.saved"),
+        CHANGED("editor.state.changed");
+
+        private final String displayText;
+
+        private Status(String displayKey)
+        {
+            this.displayText = Config.getString(displayKey);
+        }
+
+        public String getDisplayText()
+        {
+            return displayText;
+        }
+    }
+
+    private final Label statusLabel;
+    private final Label errorLabel;
+    private Status state;
+    private int errorCount = 0;
+
+    public StatusLabel(Status initialState, MoeEditor editor, MoeErrorManager errorManager)
+    {
+        JavaFXUtil.addStyleClass(this, "moe-status-label-wrapper");
+        styleProperty().bind(PrefMgr.getEditorFontCSS(false));
         state = initialState;
+        statusLabel = new Label();
+        errorLabel = new Label();
+        JavaFXUtil.addStyleClass(errorLabel, "error-count-label");
+        getChildren().setAll(statusLabel, errorLabel);
+        updateLabel();
+        errorManager.listenForErrorChange(errs -> {
+            errorCount = errs.size();
+            updateLabel();
+        });
+        // Click on either of the labels, or background will work:
+        setOnMouseClicked(e -> {
+            if (e.getButton() == MouseButton.PRIMARY)
+            {
+                // We don't mean for this to function as a compile button when there are no errors:
+                if (errorCount > 0)
+                {
+                    editor.compileOrShowNextError();
+                }
+                e.consume();
+            }
+        });
     }
 
     // ------------- PUBLIC METHODS ---------------
 
     public boolean isSaved() 
     {
-        return (state != CHANGED);
+        return (state != Status.CHANGED);
     }
 
     public boolean isChanged() 
     {
-        return (state == CHANGED);
+        return (state == Status.CHANGED);
     }
 
     public boolean isReadOnly() 
     {
-        return (state == READONLY);
+        return (state == Status.READONLY);
     }
 
-    public void setState(int newState)
+    public void setState(Status newState)
     {
         state = newState;
-        setText(stateString[state]);
+        updateLabel();
     }
-    
-    public void refresh()
+
+    private void updateLabel()
     {
-        setFont(statusFont);
-    }
-    
-    public static void resetFont()
-    {
-        int fontSize = Math.max(PrefMgr.getEditorFontSize() - 1, 1);
-        statusFont = new Font("SansSerif", Font.BOLD | Font.ITALIC, fontSize);
+        statusLabel.setText(state.getDisplayText().replace("\n", ""));
+        if (errorCount > 0)
+        {
+            errorLabel.setText("Errors: " + errorCount);
+        }
+        else
+        {
+            errorLabel.setText("");
+        }
+        JavaFXUtil.setPseudoclass("bj-status-error", errorCount > 0, this);
     }
 }

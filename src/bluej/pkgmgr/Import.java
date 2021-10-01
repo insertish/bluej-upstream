@@ -21,19 +21,6 @@
  */
 package bluej.pkgmgr;
 
-import java.awt.SecondaryLoop;
-import java.awt.Toolkit;
-import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.concurrent.atomic.AtomicBoolean;
-import javafx.application.Platform;
-import javafx.stage.Window;
-
 import bluej.extensions.SourceType;
 import bluej.parser.InfoParser;
 import bluej.parser.symtab.ClassInfo;
@@ -41,6 +28,15 @@ import bluej.utility.Debug;
 import bluej.utility.DialogManager;
 import bluej.utility.JavaNames;
 import bluej.utility.javafx.FXPlatformSupplier;
+import javafx.stage.Window;
+
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.LinkedList;
+import java.util.List;
 
 /**
  * Utility functions to help in the process of importing directory
@@ -76,7 +72,7 @@ public class Import
 
         // check to make sure the path contains some java source files
         if (interestingDirs.size() == 0) {
-            Platform.runLater(() -> DialogManager.showErrorFX(parentWin.get(), "open-non-bluej-no-java"));
+            DialogManager.showErrorFX(parentWin.get(), "open-non-bluej-no-java");
             return false;
         }
 
@@ -113,17 +109,11 @@ public class Import
 
         // now ask if they want to continue if we have detected mismatches
         if (mismatchFiles.size() > 0) {
-            AtomicBoolean shouldContinue = new AtomicBoolean();
-            SecondaryLoop loop = Toolkit.getDefaultToolkit().getSystemEventQueue().createSecondaryLoop();
-            Platform.runLater(() -> {
-                ImportMismatchDialog imd = new ImportMismatchDialog(parentWin.get(), mismatchFiles);
-                boolean cont = imd.showAndWait().orElse(false);
-                shouldContinue.set(cont);
-                loop.exit();
-            });
-            loop.enter();
-            
-            if (!shouldContinue.get())
+            boolean shouldContinue;
+            ImportMismatchDialog imd = new ImportMismatchDialog(parentWin.get(), mismatchFiles);
+            shouldContinue = imd.showAndWait().orElse(false);
+
+            if (!shouldContinue)
                 return false;
         }
 

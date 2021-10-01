@@ -113,7 +113,7 @@ public abstract class Inspector extends Stage
     /**
      * Convert a field to a string representation, used to display the field in the inspector value list.
      */
-    @OnThread(Tag.Any)
+    @OnThread(Tag.FXPlatform)
     public static String fieldToString(DebuggerField field)
     {
         int mods = field.getModifiers();
@@ -320,11 +320,9 @@ public abstract class Inspector extends Stage
         if (selectedField != null) {
             GetInvokerRecord getIr = new GetInvokerRecord(selectedFieldType, selectedFieldName, ir);
             DebuggerObject selField = this.selectedField;
-            SwingUtilities.invokeLater(() -> {
-                PackageEditor pkgEd = pkg.getEditor();
-                pkgEd.recordInteraction(getIr);
-                pkgEd.raisePutOnBenchEvent(this, selField, selField.getGenType(), getIr, true, Optional.empty());
-            });
+            PackageEditor pkgEd = pkg.getEditor();
+            pkgEd.recordInteraction(getIr);
+            pkgEd.raisePutOnBenchEvent(this, selField, selField.getGenType(), getIr, true, Optional.empty());
         }
     }
 

@@ -21,22 +21,21 @@
  */
 package bluej.parser.nodes;
 
-import java.lang.reflect.Modifier;
-import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.List;
-
-import javax.swing.text.Document;
-
 import bluej.debugger.gentype.GenTypeDeclTpar;
 import bluej.debugger.gentype.JavaType;
 import bluej.debugger.gentype.Reflective;
+import bluej.editor.moe.MoeSyntaxDocument;
 import bluej.parser.CodeSuggestions;
 import bluej.parser.entity.JavaEntity;
 import bluej.parser.entity.PackageOrClass;
 import bluej.parser.entity.TparEntity;
 import bluej.parser.entity.TypeEntity;
 import bluej.parser.entity.ValueEntity;
+
+import java.lang.reflect.Modifier;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
 
 
 /**
@@ -256,7 +255,7 @@ public class MethodNode extends JavaParentNode
     
     @Override
     protected CodeSuggestions getExpressionType(int pos, int nodePos,
-            JavaEntity defaultType, Document document)
+            JavaEntity defaultType, MoeSyntaxDocument document)
     {
         if (Modifier.isStatic(modifiers)) {
             JavaType dtype = defaultType.getType();

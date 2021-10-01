@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2011,2012,2013,2016  Michael Kolling and John Rosenberg
+ Copyright (C) 1999-2009,2010,2011,2012,2013,2016,2017  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -22,15 +22,26 @@
 
 package bluej.debugmgr.codepad;
 
-import javax.swing.*;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Optional;
-import java.util.stream.Collectors;
-import javafx.application.Platform;
+import bluej.BlueJEvent;
+import bluej.Config;
+import bluej.collect.DataCollector;
+import bluej.debugger.DebuggerField;
+import bluej.debugger.DebuggerObject;
+import bluej.debugger.ExceptionDescription;
+import bluej.debugger.gentype.JavaType;
+import bluej.debugmgr.ExecutionEvent;
+import bluej.debugmgr.IndexHistory;
+import bluej.debugmgr.Invoker;
+import bluej.debugmgr.NamedValue;
+import bluej.debugmgr.ResultWatcher;
+import bluej.debugmgr.ValueCollection;
+import bluej.parser.TextAnalyzer;
+import bluej.pkgmgr.PkgMgrFrame;
+import bluej.pkgmgr.Project;
+import bluej.prefmgr.PrefMgr;
+import bluej.testmgr.record.InvokerRecord;
+import bluej.utility.Utility;
+import bluej.utility.javafx.JavaFXUtil;
 import javafx.beans.binding.Bindings;
 import javafx.beans.binding.BooleanBinding;
 import javafx.collections.ListChangeListener;
@@ -52,6 +63,8 @@ import javafx.scene.image.ImageView;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.DataFormat;
 import javafx.scene.input.KeyCode;
+import javafx.scene.input.KeyCodeCombination;
+import javafx.scene.input.KeyCombination;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.input.MouseButton;
 import javafx.scene.input.MouseEvent;
@@ -65,28 +78,19 @@ import javafx.scene.shape.Path;
 import javafx.scene.shape.QuadCurveTo;
 import javafx.scene.shape.Rectangle;
 import javafx.stage.Stage;
-
-import bluej.BlueJEvent;
-import bluej.Config;
-import bluej.collect.DataCollector;
-import bluej.debugger.DebuggerField;
-import bluej.debugger.DebuggerObject;
-import bluej.debugger.ExceptionDescription;
-import bluej.debugger.gentype.JavaType;
-import bluej.debugmgr.ExecutionEvent;
-import bluej.debugmgr.IndexHistory;
-import bluej.debugmgr.Invoker;
-import bluej.debugmgr.NamedValue;
-import bluej.debugmgr.ResultWatcher;
-import bluej.debugmgr.ValueCollection;
-import bluej.parser.TextAnalyzer;
-import bluej.pkgmgr.PkgMgrFrame;
-import bluej.pkgmgr.Project;
-import bluej.testmgr.record.InvokerRecord;
-import bluej.utility.Utility;
-import bluej.utility.javafx.JavaFXUtil;
+import org.fxmisc.wellbehaved.event.EventPattern;
+import org.fxmisc.wellbehaved.event.InputMap;
+import org.fxmisc.wellbehaved.event.Nodes;
 import threadchecker.OnThread;
 import threadchecker.Tag;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Optional;
+import java.util.stream.Collectors;
 
 /**
  * A code pad which can evaluate fragments of Java code.
@@ -103,7 +107,7 @@ import threadchecker.Tag;
  * This means the users see one text field at the bottom of the list, and rows
  * above that with the history (styled as we like).
  */
-@OnThread(Tag.FX)
+@OnThread(Tag.FXPlatform)
 public class CodePad extends VBox
     implements ValueCollection, PkgMgrFrame.PkgMgrPane
 {
@@ -271,9 +275,7 @@ public class CodePad extends VBox
                     {
                         Stage fxWindow = frame.getFXWindow();
                         Point2D from = graphic.localToScene(new Point2D(0.0, 0.0));
-                        SwingUtilities.invokeLater(() -> {
-                            frame.getPackage().getEditor().raisePutOnBenchEvent(fxWindow, objInfo.obj, objInfo.obj.getGenType(), objInfo.ir, true, Optional.of(from));
-                        });
+                        frame.getPackage().getEditor().raisePutOnBenchEvent(fxWindow, objInfo.obj, objInfo.obj.getGenType(), objInfo.ir, true, Optional.of(from));
                         e.consume();
                     }
                 });
@@ -356,27 +358,18 @@ public class CodePad extends VBox
     private String currentCommand = "";
     @OnThread(Tag.FX)
     private IndexHistory history;
-    @OnThread(Tag.Swing)
     private Invoker invoker = null;
-    @OnThread(Tag.Swing)
     private TextAnalyzer textParser = null;
     
     // Keeping track of invocation
-    @OnThread(Tag.Swing)
     private boolean firstTry;
-    @OnThread(Tag.Swing)
     private boolean wrappedResult;
-    @OnThread(Tag.Swing)
     private String errorMessage;
 
-    @OnThread(Tag.Swing)
     private boolean busy = false;
 
-    @OnThread(Tag.Swing)
     private List<CodepadVar> localVars = new ArrayList<CodepadVar>();
-    @OnThread(Tag.Swing)
     private List<CodepadVar> newlyDeclareds;
-    @OnThread(Tag.Swing)
     private List<String> autoInitializedVars;
     // The action which removes the hover state on the object icon
     private Runnable removeHover;
@@ -393,6 +386,15 @@ public class CodePad extends VBox
         historyView = new ListView<>();
         historyView.setFocusTraversable(false);
         historyView.setEditable(false);
+
+        inputField.styleProperty().bind(PrefMgr.getEditorFontCSS(false));
+        historyView.styleProperty().bind(PrefMgr.getEditorFontCSS(false));
+
+        Nodes.addInputMap(inputField, InputMap.sequence(
+            InputMap.consume(EventPattern.keyPressed(KeyCode.EQUALS, KeyCombination.SHORTCUT_DOWN), e -> Utility.increaseFontSize(PrefMgr.getEditorFontSize())),
+            InputMap.consume(EventPattern.keyPressed(KeyCode.MINUS, KeyCombination.SHORTCUT_DOWN), e -> Utility.decreaseFontSize(PrefMgr.getEditorFontSize()))
+        ));
+
         // We can't lookup the scroll bar until we're in the scene and showing.
         // But also, we don't care about showing the shadow until there are items in the history
         // to be scrolled.  So a neat solution is to add the effect the first time items
@@ -476,7 +478,7 @@ public class CodePad extends VBox
                 history.add(line);
                 String cmd = currentCommand;
                 currentCommand = "";
-                SwingUtilities.invokeLater(() -> executeCommand(cmd));
+                executeCommand(cmd);
             }
         });
 
@@ -520,7 +522,6 @@ public class CodePad extends VBox
     /**
      * Clear the local variables.
      */
-    @OnThread(Tag.Swing)
     public void clearVars()
     {
         localVars.clear();
@@ -534,7 +535,6 @@ public class CodePad extends VBox
     /*
      * @see bluej.debugmgr.ValueCollection#getValueIterator()
      */
-    @OnThread(Tag.Swing)
     public Iterator<CodepadVar> getValueIterator()
     {
         return localVars.iterator();
@@ -543,7 +543,6 @@ public class CodePad extends VBox
     /*
      * @see bluej.debugmgr.ValueCollection#getNamedValue(java.lang.String)
      */
-    @OnThread(Tag.Swing)
     public NamedValue getNamedValue(String name)
     {
         Class<Object> c = Object.class;
@@ -563,7 +562,6 @@ public class CodePad extends VBox
      * @param name  The name of the variable to search for
      * @return    The named variable, or null
      */
-    @OnThread(Tag.Swing)
     private NamedValue getLocalVar(String name)
     {
         Iterator<CodepadVar> i = localVars.iterator();
@@ -590,7 +588,7 @@ public class CodePad extends VBox
                  * @see bluej.debugmgr.ResultWatcher#beginExecution()
                  */
         @Override
-        @OnThread(Tag.Swing)
+        @OnThread(Tag.FXPlatform)
         public void beginCompile()
         {
         }
@@ -599,7 +597,7 @@ public class CodePad extends VBox
          * @see bluej.debugmgr.ResultWatcher#beginExecution()
          */
         @Override
-        @OnThread(Tag.Swing)
+        @OnThread(Tag.FXPlatform)
         public void beginExecution(InvokerRecord ir)
         {
             BlueJEvent.raiseEvent(BlueJEvent.METHOD_CALL, ir);
@@ -609,7 +607,7 @@ public class CodePad extends VBox
          * @see bluej.debugmgr.ResultWatcher#putResult(bluej.debugger.DebuggerObject, java.lang.String, bluej.testmgr.record.InvokerRecord)
          */
         @Override
-        @OnThread(Tag.Swing)
+        @OnThread(Tag.FXPlatform)
         public void putResult(final DebuggerObject result, final String name, final InvokerRecord ir)
         {
             frame.getObjectBench().addInteraction(ir);
@@ -644,7 +642,7 @@ public class CodePad extends VBox
                         nindex = warning.length();
 
                     String warnLine = warning.substring(findex, nindex);
-                    Platform.runLater(() -> error(warnLine));
+                    error(warnLine);
                     findex = nindex + 1; // skip the newline character
                 }
 
@@ -659,7 +657,7 @@ public class CodePad extends VBox
                 if (resultString.equals(nullLabel))
                 {
                     DataCollector.codePadSuccess(frame.getPackage(), ir.getOriginalCommand(), resultString);
-                    Platform.runLater(() -> output(resultString));
+                    output(resultString);
                 }
                 else
                 {
@@ -671,14 +669,14 @@ public class CodePad extends VBox
                         String resultType = resultObject.getGenType().toString(true);
                         String resultOutputString = resultString + "   (" + resultType + ")";
                         DataCollector.codePadSuccess(frame.getPackage(), ir.getOriginalCommand(), resultOutputString);
-                        Platform.runLater(() -> objectOutput(resultOutputString, new ObjectInfo(resultObject, ir)));
+                        objectOutput(resultOutputString, new ObjectInfo(resultObject, ir));
                     }
                     else
                     {
                         String resultType = resultField.getType().toString(true);
                         String resultOutputString = resultString + "   (" + resultType + ")";
                         DataCollector.codePadSuccess(frame.getPackage(), ir.getOriginalCommand(), resultOutputString);
-                        Platform.runLater(() -> output(resultOutputString));
+                        output(resultOutputString);
                     }
                 }
             }
@@ -694,22 +692,20 @@ public class CodePad extends VBox
             BlueJEvent.raiseEvent(BlueJEvent.EXECUTION_RESULT, executionEvent);
 
             textParser.confirmCommand();
-            Platform.runLater(() -> inputField.setEditable(true));    // allow next input
+            inputField.setEditable(true);    // allow next input
             busy = false;
         }
 
-        @OnThread(Tag.Swing)
         private void updateInspectors()
         {
             Project proj = frame.getPackage().getProject();
-            Platform.runLater(() -> proj.updateInspectors());
+            proj.updateInspectors();
         }
 
         /**
          * An invocation has failed - here is the error message
          */
         @Override
-        @OnThread(Tag.Swing)
         public void putError(String message, InvokerRecord ir)
         {
             if (firstTry)
@@ -764,7 +760,6 @@ public class CodePad extends VBox
          * A runtime exception occurred.
          */
         @Override
-        @OnThread(Tag.Swing)
         public void putException(ExceptionDescription exception, InvokerRecord ir)
         {
             ExecutionEvent executionEvent = new ExecutionEvent(frame.getPackage());
@@ -790,7 +785,6 @@ public class CodePad extends VBox
          * execution).
          */
         @Override
-        @OnThread(Tag.Swing)
         public void putVMTerminated(InvokerRecord ir)
         {
             if (autoInitializedVars != null)
@@ -801,7 +795,7 @@ public class CodePad extends VBox
 
             String message = Config.getString("pkgmgr.codepad.vmTerminated");
             DataCollector.codePadError(frame.getPackage(), ir.getOriginalCommand(), message);
-            Platform.runLater(() -> error(message));
+            error(message);
 
             completeExecution();
         }
@@ -811,7 +805,6 @@ public class CodePad extends VBox
      * Remove the newly declared variables from the value collection.
      * (This is needed if compilation fails, or execution bombs with an exception).
      */
-    @OnThread(Tag.Swing)
     private void removeNewlyDeclareds()
     {
         if (newlyDeclareds != null) {
@@ -828,20 +821,18 @@ public class CodePad extends VBox
     /**
      * Show an error message, and allow further command input.
      */
-    @OnThread(Tag.Swing)
     private void showErrorMsg(final String message)
     {
-        Platform.runLater(() -> error("Error: " + message));
+        error("Error: " + message);
         completeExecution();
     }
     
     /**
      * Show an exception message, and allow further command input.
      */
-    @OnThread(Tag.Swing)
     private void showExceptionMsg(final String message)
     {
-        Platform.runLater(() -> error("Exception: " + message));
+        error("Exception: " + message);
         completeExecution();
     }
     
@@ -849,10 +840,9 @@ public class CodePad extends VBox
      * Execution of the current command has finished (one way or another).
      * Allow further command input.
      */
-    @OnThread(Tag.Swing)
     private void completeExecution()
     {
-        Platform.runLater(() -> inputField.setEditable(true));
+        inputField.setEditable(true);
         busy = false;
     }
 
@@ -901,15 +891,18 @@ public class CodePad extends VBox
 
     public void clear()
     {
-        SwingUtilities.invokeLater(this::clearVars);
+        clearVars();
     }
 
-    public void resetFontSize()
+    /**
+     * Clear the CodePad after closing the project that the only one is opened,
+     * When opening a new project, the CodePad appears again and it is clear.
+     */
+    public void clearHistoryView()
     {
-
+        historyView.getItems().clear();
     }
 
-    @OnThread(Tag.Swing)
     private void executeCommand(String command)
     {
         if (busy) {

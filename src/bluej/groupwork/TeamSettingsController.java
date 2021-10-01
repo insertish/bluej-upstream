@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2014,2015,2016  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2014,2015,2016,2017  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -34,16 +34,14 @@ import java.util.List;
 import java.util.Properties;
 import java.util.Set;
 
-import javafx.application.Platform;
-
-import threadchecker.OnThread;
-import threadchecker.Tag;
 import bluej.Config;
 import bluej.groupwork.ui.TeamSettingsDialog;
 import bluej.pkgmgr.PkgMgrFrame;
 import bluej.pkgmgr.Project;
 import bluej.utility.Debug;
 
+import threadchecker.OnThread;
+import threadchecker.Tag;
 
 /**
  * This class is responsible for reading and writing the configuration files
@@ -52,14 +50,14 @@ import bluej.utility.Debug;
  *
  * @author fisker
  */
-@OnThread(Tag.Swing)
+@OnThread(Tag.FXPlatform)
 public class TeamSettingsController
 {
     // Don't need synchronized because it's never modified again:
     @OnThread(value = Tag.Any)
     private static final ArrayList<TeamworkProvider> teamProviders;
     static {
-        teamProviders = new ArrayList<TeamworkProvider>(2);
+        teamProviders = new ArrayList<>(2);
         try {
             teamProviders.add(loadProvider("bluej.groupwork.svn.SubversionProvider"));
         }
@@ -74,7 +72,16 @@ public class TeamSettingsController
                     + ": " + e.getLocalizedMessage());
         }
     }
-    
+
+    /**
+     * An enum with all current use server types.
+     */
+    public enum ServerType
+    {
+        Subversion,
+        Git
+    }
+
     private static TeamworkProvider loadProvider(String name) throws Throwable
     {
         Class<?> c = Class.forName(name);
@@ -129,35 +136,47 @@ public class TeamSettingsController
         project = proj;
         projectDir = proj.getProjectDir();
         repository = null;
-        checkTeamSettingsDialog();
+        disableRepositorySettings();
     }
     
     /**
-     * Get a list of the teamwork providers (CVS, Subversion).
+     * Get a list of the teamwork providers (Subversion, Git).
      */
     public List<TeamworkProvider> getTeamworkProviders()
     {
         return teamProviders;
     }
-    
+
+    /**
+     * Get the teamwork provider by name (Subversion, Git).
+     *
+     * @param type The server type that we need to get its provider
+     * @return The teamwork provider for the type passed
+     */
+    public TeamworkProvider getTeamworkProvider(ServerType type)
+    {
+        return teamProviders.stream()
+                .filter(teamworkProvider -> teamworkProvider.getProviderName().equals(type.name()))
+                .findAny().get();
+    }
+
     /**
      * Get the repository. Returns null if user credentials are required
      * but the user chooses to cancel.
      */
-    public Repository getRepository(boolean authRequired)
+    public RepositoryOrError trytoEstablishRepository(boolean authRequired)
     {
+        RepositoryOrError repositoryOrError = new RepositoryOrError(repository);
+
         if (authRequired && password == null) {
             // If we don't yet know the password, prompt the user
-            getTeamSettingsDialog().doTeamSettings();
+            if (!getTeamSettingsDialog().showAndWait().isPresent())
+                return null; // user cancelled, password still null
 
-            // If we still don't know it, user cancelled
-            if (password == null) {
-                return null;
-            }
-            
             TeamSettings settings = teamSettingsDialog.getSettings();
             if (repository == null) {
-                repository = settings.getProvider().getRepository(projectDir, settings);
+                repositoryOrError = settings.getProvider().getRepository(projectDir, settings);
+                repository = repositoryOrError.getRepository();
             }
             else {
                 repository.setPassword(settings);
@@ -171,11 +190,12 @@ public class TeamSettingsController
             // We might have the password, but not yet have created
             // the repository
             if (repository == null) {
-                repository = settings.getProvider().getRepository(projectDir, settings);
+                repositoryOrError = settings.getProvider().getRepository(projectDir, settings);
+                repository = repositoryOrError.getRepository();
             }
         }
         
-        return repository;
+        return repositoryOrError;
     }
     
     /**
@@ -191,11 +211,11 @@ public class TeamSettingsController
         if (repository == null) {
             TeamworkProvider provider = settings.getProvider();
             if (password == null && auth) {
-                if (getTeamSettingsDialog().doTeamSettings() == TeamSettingsDialog.CANCEL) {
+                if ( ! getTeamSettingsDialog().showAndWait().isPresent() ) {
                     return false;
                 }
             }
-            repository = provider.getRepository(projectDir, settings);
+            repository = provider.getRepository(projectDir, settings).getRepository();
         }
         return true;
     }
@@ -238,22 +258,7 @@ public class TeamSettingsController
         if (repository != null) {
             repositoryFilter = repository.getMetadataFilter();
         }
-        return new CodeFileFilter(getIgnoreFiles(), includeLayout, repositoryFilter);
-    }
-    
-    /**
-     * Get a filename filter suitable for filtering out files which we don't want
-     * to be under version control.
-     * @param authenticate true if we should ask user for authentication.
-     */
-    public FileFilter getFileFilter(boolean includeLayout, boolean authenticate)
-    {
-        initRepository(authenticate);
-        FileFilter repositoryFilter = null;
-        if (repository != null) {
-            repositoryFilter = repository.getMetadataFilter();
-        }
-        return new CodeFileFilter(getIgnoreFiles(), includeLayout, repositoryFilter);
+        return new CodeFileFilter(getIgnoreFiles(), includeLayout, projectDir, repositoryFilter);
     }
     
     /**
@@ -366,9 +371,12 @@ public class TeamSettingsController
      * be deleted, or false if the version control system will delete it either
      * immediately or at commit time.
      */
-    public boolean  prepareDeleteDir(File dir)
+    public boolean prepareDeleteDir(File dir)
     {
-        return getRepository(false).prepareDeleteDir(dir);
+        RepositoryOrError repositoryOrError = trytoEstablishRepository(false);
+        if (repositoryOrError.getRepository() == null)
+            return false;
+        return repositoryOrError.getRepository().prepareDeleteDir(dir);
     }
     
     /**
@@ -376,7 +384,9 @@ public class TeamSettingsController
      */
     public void prepareCreateDir(File dir)
     {
-        getRepository(false).prepareCreateDir(dir);
+        RepositoryOrError repositoryOrError = trytoEstablishRepository(false);
+        if (repositoryOrError.getRepository() != null)
+            repositoryOrError.getRepository().prepareCreateDir(dir);
     }
 
     /**
@@ -385,13 +395,12 @@ public class TeamSettingsController
     public TeamSettingsDialog getTeamSettingsDialog()
     {
         if (teamSettingsDialog == null) {
-            teamSettingsDialog = new TeamSettingsDialog(this);
-            TeamSettingsDialog dlgFinal = teamSettingsDialog;
-            PkgMgrFrame pmf = PkgMgrFrame.getMostRecent();
-            Platform.runLater(() -> dlgFinal.setLocationRelativeTo(pmf.getFXWindow()));
-            checkTeamSettingsDialog();
+            teamSettingsDialog = new TeamSettingsDialog(PkgMgrFrame.getMostRecent().getFXWindow(), this);
+            // TODO This shouldn't happen here, it should be after
+            // a successful operation, such as a Checkout.
+            disableRepositorySettings();
         }
-        
+
         return teamSettingsDialog;
     }
     
@@ -399,7 +408,7 @@ public class TeamSettingsController
      * Disable the repository fields in the team settings dialog if
      * we have a project attached.
      */
-    private void checkTeamSettingsDialog()
+    private void disableRepositorySettings()
     {
         if (teamSettingsDialog != null && project != null) {
             // We have a project, which means we have an established

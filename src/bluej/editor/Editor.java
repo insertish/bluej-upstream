@@ -21,7 +21,6 @@
  */
 package bluej.editor;
 
-import java.awt.print.PrinterJob;
 import java.io.IOException;
 import java.util.List;
 import java.util.function.Consumer;
@@ -33,6 +32,8 @@ import bluej.editor.stride.FrameEditor;
 import bluej.parser.symtab.ClassInfo;
 import bluej.stride.framedjava.elements.CallElement;
 import bluej.stride.framedjava.elements.NormalMethodElement;
+import bluej.utility.javafx.FXRunnable;
+import javafx.print.PrinterJob;
 import threadchecker.OnThread;
 import threadchecker.Tag;
 
@@ -58,7 +59,8 @@ public interface Editor
      * 
      * @param vis  true to make the editor visible, or false to hide it.
      */
-    void setVisible(boolean vis);
+    @OnThread(Tag.FXPlatform)
+    void setEditorVisible(boolean vis);
 
     /**
      * True if the editor is open in the tabbed window.
@@ -85,6 +87,7 @@ public interface Editor
     /**
      * Close the editor window.
      */
+    @OnThread(Tag.FXPlatform)
     void close();
 
     /**
@@ -131,6 +134,7 @@ public interface Editor
      *  
      *  @param msg the message to display
      */
+    @OnThread(Tag.FXPlatform)
     public void writeMessage(String msg);
 
 
@@ -194,10 +198,10 @@ public interface Editor
     boolean isModified();
 
     /**
-     * Prints the contents of the editor
+     * Returns an action which will print the contents of the editor
      */
-    @OnThread(Tag.Any)
-    void printTo(PrinterJob printerJob, boolean printLineNumbers, boolean printBackground);
+    @OnThread(Tag.FXPlatform)
+    FXRunnable printTo(PrinterJob printerJob, boolean printLineNumbers, boolean printBackground);
 
     /**
      * Set the 'read-only' property of this editor.
@@ -239,14 +243,12 @@ public interface Editor
      * Obtain the TextEditor implementation of this editor, if it has one. May return null if no
      * TextEditor implementation is available.
      */
-    @OnThread(Tag.Swing)
     TextEditor assumeText();
     
     /**
      * Obtain the FrameEditor implementation of this editor, if it has one. May return null if no
      * FrameEditor implementation is available.
      */
-    @OnThread(Tag.FX)
     FrameEditor assumeFrame();
     
     /**
@@ -269,8 +271,18 @@ public interface Editor
     void insertMethodCallInConstructor(bluej.extensions.editor.Editor e, String className, CallElement methodCall, Consumer<Boolean> after);
 
     void cancelFreshState();
-    
-    void focusMethod(String methodName);
+
+    /**
+     * Focuses the method of the given name in the editor.  If the paramTypes are non-null
+     * then it uses them to distinguish between overloaded methods.  If paramTypes is null,
+     * it focuses an arbitrary choice of any overloaded methods with that name.
+     *
+     * @param methodName The name of the method to focus in the editor
+     * @param paramTypes The types of the parameters, to narrow down overloads, or null
+     *                   if you don't know them (in which case if the method is overloaded,
+     *                   it will show an arbitrary pick for the method.)
+     */
+    void focusMethod(String methodName, List<String> paramTypes);
 
     /**
      * For a class, set the extends section to extend the given className

@@ -23,17 +23,19 @@ package bluej;
 
 import javafx.application.Application;
 import javafx.application.Platform;
+import javafx.scene.image.Image;
+import javafx.scene.image.WritableImage;
 import javafx.stage.Stage;
 import threadchecker.OnThread;
 import threadchecker.Tag;
 
-import java.awt.*;
 import java.io.File;
-import java.lang.reflect.InvocationTargetException;
 import java.net.*;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Properties;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 
 /**
  * This class is the BlueJ boot loader. bluej.Boot is the class that should be 
@@ -53,8 +55,8 @@ public class Boot
     // The version numbers for BlueJ are changed in the BlueJ build.xml
     // and then the update-version target should be executed.
     public static final int BLUEJ_VERSION_MAJOR = 4;
-    public static final int BLUEJ_VERSION_MINOR = 0;
-    public static final int BLUEJ_VERSION_RELEASE = 1;
+    public static final int BLUEJ_VERSION_MINOR = 1;
+    public static final int BLUEJ_VERSION_RELEASE = 0;
     public static final String BLUEJ_VERSION_SUFFIX = "";
 
     // public static final int BLUEJ_VERSION_NUMBER = BLUEJ_VERSION_MAJOR * 1000 +
@@ -121,6 +123,7 @@ public class Boot
         "lang-stride.jar",
         "nsmenufx-2.1.4.jar",
         "org.eclipse.jgit-4.1.0.jar",
+        "richtextfx-fat-0.7-M5n.jar",
         "sequence-library-1.0.3.jar",
         "slf4j-api-1.7.2.jar",
         "slf4j-jdk14-1.7.2.jar",
@@ -142,6 +145,7 @@ public class Boot
     private static File bluejLibDir;
     private static final ArrayList<File> macInitialProjects = new ArrayList<>();
 
+    @OnThread(Tag.FXPlatform)
     private SplashWindow splashWindow;
     
     public static String[] cmdLineArgs;      // Command line arguments
@@ -158,21 +162,21 @@ public class Boot
      * 
      * @param props the properties (created from the args)
      */
-    private Boot(Properties props, final SwingSupplier<SplashLabel> image)
+    private Boot(Properties props, final FXPlatformSupplier<Image> image)
     {
-        // Display the splash window, and wait until it's been painted before
-        // proceeding. Otherwise, the event thread may be occupied by BlueJ
-        // starting up and the window might *never* be painted.
-        
-        try {
-            EventQueue.invokeAndWait(() -> splashWindow = new SplashWindow(image.get()));
-
-            // I removed this for now [mik]. We are using invokeAndWait, so we already wait anyway.
-            // The following call adds 3 secs to startup time (for no reason, I think). Avoid.
-            //splashWindow.waitUntilPainted();
+        CompletableFuture<Boolean> shown = new CompletableFuture<>();
+        // Display the splash window:
+        Platform.runLater(() -> {
+            splashWindow = new SplashWindow(image.get());
+            shown.complete(true);
+        });
+        try
+        {
+            shown.get();
         }
-        catch (InvocationTargetException | InterruptedException ite) {
-            ite.printStackTrace();
+        catch (InterruptedException | ExecutionException e)
+        {
+            // Just ignore it and continue, I guess...
         }
 
         this.commandLineProps = props;
@@ -195,9 +199,9 @@ public class Boot
     }
 
     @FunctionalInterface
-    private static interface SwingSupplier<T>
+    private static interface FXPlatformSupplier<T>
     {
-        @OnThread(Tag.Swing)
+        @OnThread(Tag.FXPlatform)
         public T get();
     }
 
@@ -207,13 +211,28 @@ public class Boot
         Properties commandLineProps = processCommandLineProperties(cmdLineArgs);
         isGreenfoot = commandLineProps.getProperty("greenfoot", "false").equals("true");
         
-        SwingSupplier<SplashLabel> image = new SwingSupplier<SplashLabel>()
+        FXPlatformSupplier<Image> image = new FXPlatformSupplier<Image>()
         {
             @Override
-            @OnThread(Tag.Swing)
-            public SplashLabel get()
+            @OnThread(Tag.FXPlatform)
+            public Image get()
             {
-                return new SplashLabel(isGreenfoot ? "gen-greenfoot-splash.png" : "gen-bluej-splash.png");
+                URL url = getClass().getResource(isGreenfoot ? "gen-greenfoot-splash.png" : "gen-bluej-splash.png");
+                if (url != null)
+                    return new Image(url.toString());
+                else
+                {
+                    // Just use blank
+                    WritableImage writableImage = new WritableImage(500, 300);
+                    for (int y = 0; y < writableImage.getHeight(); y++)
+                    {
+                        for (int x = 0; x < writableImage.getWidth(); x++)
+                        {
+                            writableImage.getPixelWriter().setColor(x, y, javafx.scene.paint.Color.WHITE);
+                        }
+                    }
+                    return writableImage;
+                }
             }
         };
         if(isGreenfoot) {
@@ -396,10 +415,14 @@ public class Boot
      */
     public void disposeSplashWindow()
     {
-        if (splashWindow != null) {
-            splashWindow.dispose();
-            splashWindow = null;
-        }
+        Platform.runLater(() ->
+        {
+            if (splashWindow != null)
+            {
+                splashWindow.hide();
+                splashWindow = null;
+            }
+        });
     }
 
     /**

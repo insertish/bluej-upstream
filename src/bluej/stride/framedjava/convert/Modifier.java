@@ -26,6 +26,8 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 import bluej.parser.lexer.LocatableToken;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 
 /**
  * A modifier.  Might be a keyword (e.g. "public", "final") or an annotation

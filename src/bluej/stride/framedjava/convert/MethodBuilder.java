@@ -26,6 +26,8 @@ import java.util.List;
 
 import bluej.parser.lexer.LocatableToken;
 import bluej.stride.framedjava.ast.ParamFragment;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 
 /**
  * A class to record the details of a method/constructor currently being parsed.

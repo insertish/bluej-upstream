@@ -21,36 +21,31 @@
  */
 package bluej.collect;
 
-import javax.swing.SwingUtilities;
-import java.awt.SecondaryLoop;
-import java.awt.Toolkit;
-import java.io.File;
-import java.util.BitSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.UUID;
-
-import javafx.application.Platform;
-
 import bluej.Boot;
+import bluej.Config;
 import bluej.compiler.CompileInputFile;
 import bluej.compiler.CompileReason;
-import bluej.extensions.SourceType;
-import bluej.pkgmgr.target.ClassTarget;
-import threadchecker.OnThread;
-import threadchecker.Tag;
-import bluej.Config;
 import bluej.debugger.DebuggerTestResult;
 import bluej.debugger.ExceptionDescription;
 import bluej.debugger.SourceLocation;
 import bluej.debugmgr.inspector.ClassInspector;
 import bluej.debugmgr.inspector.Inspector;
 import bluej.debugmgr.inspector.ObjectInspector;
+import bluej.extensions.SourceType;
 import bluej.extmgr.ExtensionWrapper;
 import bluej.groupwork.Repository;
 import bluej.pkgmgr.Package;
 import bluej.pkgmgr.Project;
+import bluej.pkgmgr.target.ClassTarget;
+import threadchecker.OnThread;
+import threadchecker.Tag;
+
+import java.io.File;
+import java.util.BitSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
 
 /**
  * DataCollector for sending off data.
@@ -63,7 +58,8 @@ import bluej.pkgmgr.Project;
  * This class mainly acts as a proxy for the DataCollectorImpl class, which implements the actual
  * collection logic.
  */
-public @OnThread(Tag.Swing) class DataCollector
+@OnThread(Tag.FXPlatform)
+public class DataCollector
 {
     private static final String PROPERTY_UUID = "blackbox.uuid";
     private static final String PROPERTY_EXPERIMENT = "blackbox.experiment";
@@ -275,7 +271,7 @@ public @OnThread(Tag.Swing) class DataCollector
         if (Config.isGreenfoot() && !Boot.isTrialRecording()) return;
         startSession();
         if (dontSend()) return;
-        SwingUtilities.invokeLater(() -> DataCollectorImpl.bluejOpened(osVersion, javaVersion, bluejVersion, interfaceLanguage, extensions));
+        DataCollectorImpl.bluejOpened(osVersion, javaVersion, bluejVersion, interfaceLanguage, extensions);
     }
     
     public static void bluejClosed()

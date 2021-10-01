@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2015,2016  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2015,2016,2017  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -27,6 +27,9 @@ import bluej.groupwork.StatusHandle;
 import bluej.groupwork.TeamStatusInfo;
 import bluej.groupwork.TeamworkCommand;
 import bluej.groupwork.UpdateListener;
+import threadchecker.OnThread;
+import threadchecker.Tag;
+
 import java.io.File;
 import java.util.Set;
 
@@ -36,12 +39,14 @@ import java.util.Set;
  * 
  * @author Fabio Hedayioglu
  */
+@OnThread(Tag.FXPlatform)
 public class GitStatusHandle implements StatusHandle
 {
 
-    private GitRepository repository;
+    private final GitRepository repository;
     private final boolean pushNeeded, pullNeeded;
 
+    @OnThread(Tag.Any)
     public GitStatusHandle(GitRepository repository, boolean pushNeeded, boolean pullNeeded)
     {
         this.repository = repository;
@@ -60,6 +65,7 @@ public class GitStatusHandle implements StatusHandle
     }
 
     @Override
+    @OnThread(Tag.FXPlatform)
     public TeamworkCommand updateTo(UpdateListener listener, Set<File> files, Set<File> forceFiles)
     {
         return new GitUpdateToCommand(repository, listener, files, forceFiles);
@@ -78,12 +84,14 @@ public class GitStatusHandle implements StatusHandle
     }
 
     @Override
+    @OnThread(Tag.Any)
     public boolean pushNeeded()
     {
         return pushNeeded;
     }
 
-    //@Override
+    @Override
+    @OnThread(Tag.Any)
     public boolean pullNeeded()
     {
         return pullNeeded;

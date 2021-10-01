@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2014,2016  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2014,2016,2017  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -21,123 +21,104 @@
  */
 package bluej.groupwork.actions;
 
-import java.awt.event.ActionEvent;
-
-import javax.swing.AbstractAction;
-import javax.swing.Icon;
-
-import threadchecker.OnThread;
-import threadchecker.Tag;
 import bluej.Config;
-import bluej.groupwork.TeamUtils;
-import bluej.groupwork.TeamworkCommandResult;
 import bluej.pkgmgr.PkgMgrFrame;
-import bluej.pkgmgr.actions.PkgMgrAction;
 
+import javafx.beans.property.BooleanProperty;
+import javafx.beans.property.SimpleBooleanProperty;
+import javafx.beans.property.SimpleStringProperty;
+import javafx.beans.property.StringProperty;
+import javafx.scene.control.ButtonBase;
+import javafx.scene.control.MenuItem;
+import javafx.scene.control.Tooltip;
 
 /**
- * An abstract class for team actions. 
+ * An abstract class for team actions.
+ *
+ * This is similar to FXAbstractAction but is different in that each
+ * button or menu item is not constructed here, but is instead
+ * adapted with an explicit reference to the PkgMgrFrame
+ * (see useButton, useMenuItem)
  * 
  * @author fisker
  */
-public abstract class TeamAction extends AbstractAction
+public abstract class TeamAction
 {
-    private final PkgMgrFrame pkgMgrFrame;
+    private final StringProperty name = new SimpleStringProperty();
 
-    /**
-     * Constructor for a team action.
-     * 
-     * @param name  The key for the action name (team.xxx.yyy)
-     */
-    public TeamAction(PkgMgrFrame pmf, String name)
-    {
-        this(pmf, Config.getString(name), false);
-    }
-    
+    private final BooleanProperty disabled = new SimpleBooleanProperty(false);
+    protected String shortDescription;
+
     /**
      * Constructor for a team action which shows a dialog. An ellipsis
      * is added to the action text.
      * 
-     * @param name   The key for action text
+     * @param label   The key for action text
      * @param showsDialog  True if an ellipsis should be appended
      */
-    public TeamAction(PkgMgrFrame pmf, String name, boolean showsDialog)
+    public TeamAction(String label, boolean showsDialog)
     {
-        super(showsDialog ? Config.getString(name) + "..." : Config.getString(name));
-        this.pkgMgrFrame = pmf;
-        if (!Config.isMacOS()){
-            // Mnemonic keys are against the apple gui guidelines.
-            putValue(MNEMONIC_KEY, new Integer(Config.getMnemonicKey(name)));
-        }
-        if (Config.hasAcceleratorKey(name)){
-            putValue(ACCELERATOR_KEY, Config.getAcceleratorKey(name));
-        }
+        setName(Config.getString(label), showsDialog);
     }
 
-    /* (non-Javadoc)
-     * @see java.awt.event.ActionListener#actionPerformed(java.awt.event.ActionEvent)
-     */
-    @OnThread(Tag.Swing)
-    public void actionPerformed(ActionEvent e)
-    {
-        actionPerformed(pkgMgrFrame);
-    }
-    
-    /**
-     * Invoked when the action occurs.
-     * 
-     * @param pmf The PkgMgrFrame in which the action occurred.
-     */
-    @OnThread(Tag.Swing)
-    public abstract void actionPerformed(PkgMgrFrame pmf);
-    
-    /**
-     * Handle a server response in an appropriate fashion, i.e. if the response
-     * indicates an error, then display an error dialog. 
-     * 
-     * @param basicServerResponse  The response to handle
-     */
-    @OnThread(Tag.FXPlatform)
-    protected void handleServerResponse(TeamworkCommandResult result)
-    {
-        TeamUtils.handleServerResponseFX(result, pkgMgrFrame.getFXWindow());
-    }
-
-    /**
-     * Start the activity indicator. This can be called from any thread.
-     */
-    protected void startProgressBar()
-    {
-        pkgMgrFrame.startProgress();
-    }
-
-    /**
-     * Stop the activity indicator. This can be called from any thread.
-     */
-    protected void stopProgressBar()
-    {
-        pkgMgrFrame.stopProgress();
-    }
-    
-    protected void setStatus(String statusMessage)
-    {
-        pkgMgrFrame.setStatus(statusMessage);
-    }
-
-    protected void clearStatus()
-    {
-        pkgMgrFrame.clearStatus();
-    }
-    
     /**
      * changes the name of the action.
      * @param name 
      */
-    @OnThread(Tag.Swing)
-    public void setName(String name)
+    public void setName(String name, boolean showsDialog)
     {
-        if (name != null){
-            putValue("Name", name);
+    	this.name.set(showsDialog && !name.endsWith("...") ? (name + "...") : name);
+    }
+
+    public void setEnabled(boolean enabled)
+    {
+        disabled.set(!enabled);
+    }
+
+    public boolean isDisabled()
+    {
+        return disabled.get();
+    }
+
+    public BooleanProperty disabledProperty()
+    {
+        return disabled;
+    }
+
+    public void setShortDescription(String shortDescription)
+    {
+        this.shortDescription = shortDescription;
+    }
+
+    /**
+     * Sets the given button to activate this action on click,
+     * and use this action's title and disabled state
+     */
+    public void useButton(PkgMgrFrame pmf, ButtonBase button)
+    {
+        button.textProperty().unbind();
+        button.textProperty().bind(name);
+        button.disableProperty().unbind();
+        button.disableProperty().bind(disabled);
+        button.setOnAction(e -> actionPerformed(pmf));
+        if (shortDescription != null)
+        {
+            Tooltip.install(button, new Tooltip(shortDescription));
         }
     }
+
+    /**
+     * Sets the given menu item to activate this action,
+     * and use this action's title and disabled state
+     */
+    public void useMenuItem(PkgMgrFrame pmf, MenuItem menuItem)
+    {
+        menuItem.textProperty().unbind();
+        menuItem.textProperty().bind(name);
+        menuItem.disableProperty().unbind();
+        menuItem.disableProperty().bind(disabled);
+        menuItem.setOnAction(e -> actionPerformed(pmf));
+    }
+
+    protected abstract void actionPerformed(PkgMgrFrame pmf);
 }

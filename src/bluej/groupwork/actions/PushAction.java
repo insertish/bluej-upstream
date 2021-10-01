@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2016  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2016,2017  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -28,17 +28,13 @@ import bluej.groupwork.TeamUtils;
 import bluej.groupwork.TeamworkCommand;
 import bluej.groupwork.TeamworkCommandResult;
 import bluej.groupwork.ui.CommitAndPushInterface;
-import bluej.groupwork.ui.TeamSettingsDialog;
 import bluej.pkgmgr.PkgMgrFrame;
 import bluej.pkgmgr.Project;
-import bluej.utility.SwingWorker;
-import java.awt.EventQueue;
-import java.awt.Window;
-import java.awt.event.ActionEvent;
+import bluej.utility.FXWorker;
+
 import java.io.File;
 import java.util.HashSet;
 import java.util.Set;
-import javax.swing.AbstractAction;
 import javafx.application.Platform;
 
 import threadchecker.OnThread;
@@ -48,17 +44,18 @@ import threadchecker.Tag;
  * This class implements the push action.
  * @author Fabio Heday
  */
-public class PushAction extends AbstractAction
+@OnThread(Tag.FXPlatform)
+public class PushAction extends TeamAction
 {
-
     private CommitAndPushInterface commitCommentsFrame;
     private Set<File> filesToPush;
     private PushWorker worker;
+    @OnThread(value = Tag.Any, requireSynchronized = true)
     private StatusHandle statusHandle;
 
     public PushAction(CommitAndPushInterface frame)
     {
-        super(Config.getString("team.push"));
+        super(Config.getString("team.push"), false);
         commitCommentsFrame = frame;
         this.filesToPush = new HashSet<>();
     }
@@ -93,17 +90,14 @@ public class PushAction extends AbstractAction
      * Set the status handle to use in order to perform the commit operation.
      * @param statusHandle
      */
-    @OnThread(Tag.Any)
-    public void setStatusHandle(StatusHandle statusHandle)
+    @OnThread(Tag.Worker)
+    public synchronized void setStatusHandle(StatusHandle statusHandle)
     {
         this.statusHandle = statusHandle;
     }
 
-    /* (non-Javadoc)
-     * @see java.awt.event.ActionListener#actionPerformed(java.awt.event.ActionEvent)
-     */
     @Override
-    public void actionPerformed(ActionEvent event)
+    protected void actionPerformed(PkgMgrFrame pkgMgrFrame)
     {
         Project project = commitCommentsFrame.getProject();
 
@@ -123,7 +117,7 @@ public class PushAction extends AbstractAction
      *
      * @author Fabio Heday
      */
-    private class PushWorker extends SwingWorker
+    private class PushWorker extends FXWorker
     {
 
         private TeamworkCommand command;
@@ -131,7 +125,7 @@ public class PushAction extends AbstractAction
         private final boolean hasPassword;
         private boolean aborted;
 
-        @OnThread(Tag.Swing)
+        @OnThread(Tag.FXPlatform)
         public PushWorker(Project project)
         {
             command = statusHandle.pushAll(filesToPush);
@@ -139,7 +133,7 @@ public class PushAction extends AbstractAction
             //check if we have the password.
             if (!project.getTeamSettingsController().hasPasswordString()) {
                 //ask for the password.
-                if (project.getTeamSettingsDialog().doTeamSettings() == TeamSettingsDialog.CANCEL) {
+                if ( ! project.getTeamSettingsDialog().showAndWait().isPresent() ) {
                     //user cancelled.
                     commitCommentsFrame.setVisible(true);
                     hasPassword = false;
@@ -152,11 +146,12 @@ public class PushAction extends AbstractAction
         }
 
         @Override
+        @OnThread(Tag.Worker)
         public Object construct()
         {
             if (!hasPassword)
             {
-                abort();
+                Platform.runLater(this::abort);
                 return null;
             }
             result = command.getResult();
@@ -176,15 +171,18 @@ public class PushAction extends AbstractAction
 
             if (!aborted) {
                 commitCommentsFrame.stopProgress();
-                if (!result.isError() && !result.wasAborted()) {
-                    DataCollector.teamCommitProject(project, statusHandle.getRepository(), filesToPush);
-                    EventQueue.invokeLater(() -> {
+                if (!result.isError()) {
+                    if ( !result.wasAborted()) {
+                        DataCollector.teamCommitProject(project, statusHandle.getRepository(), filesToPush);
                         commitCommentsFrame.displayMessage(Config.getString("team.push.statusDone"));
-                    });
+                    }
+                }
+                else { // result is Error
+                    commitCommentsFrame.displayMessage(Config.getString("team.push.error"));
                 }
             }
 
-            Platform.runLater(() -> TeamUtils.handleServerResponseFX(result, commitCommentsFrame.asWindow()));
+            TeamUtils.handleServerResponseFX(result, commitCommentsFrame.asWindow());
 
             if (!aborted) {
                 setEnabled(true);
@@ -198,5 +196,4 @@ public class PushAction extends AbstractAction
             }
         }
     }
-
 }

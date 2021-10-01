@@ -37,7 +37,6 @@ import java.util.stream.Stream;
 
 import bluej.collect.StrideEditReason;
 import bluej.editor.stride.FrameCatalogue;
-import bluej.editor.stride.FrameEditorTab;
 import bluej.stride.framedjava.ast.links.PossibleLink;
 import javafx.application.Platform;
 import javafx.beans.binding.BooleanBinding;
@@ -52,6 +51,7 @@ import javafx.beans.value.ObservableBooleanValue;
 import javafx.collections.FXCollections;
 import javafx.collections.ListChangeListener;
 import javafx.collections.ObservableList;
+import javafx.geometry.BoundingBox;
 import javafx.scene.Node;
 import javafx.scene.control.Menu;
 import javafx.scene.control.MenuItem;
@@ -75,10 +75,8 @@ import bluej.stride.generic.Frame.View;
 import bluej.stride.generic.FrameContentRow;
 import bluej.stride.generic.InteractionManager;
 import bluej.stride.slots.SuggestionList.SuggestionListListener;
-import bluej.utility.Debug;
 import bluej.utility.javafx.AnnotatableTextField;
 import bluej.utility.javafx.ErrorUnderlineCanvas;
-import bluej.utility.javafx.FXConsumer;
 import bluej.utility.javafx.FXPlatformConsumer;
 import bluej.utility.javafx.JavaFXUtil;
 import bluej.utility.javafx.SharedTransition;
@@ -218,7 +216,7 @@ public abstract class TextSlot<SLOT_FRAGMENT extends TextSlotFragment> implement
 
                 @Override
                 @OnThread(Tag.FXPlatform)
-                public Response suggestionListKeyTyped(KeyEvent event, int highlighted)
+                public Response suggestionListKeyTyped(SuggestionList suggestionList, KeyEvent event, int highlighted)
                 {
                     // Space completes single selections and moves to next slot:
                     if (event.getCharacter().equals(" ") && completeIfPossible(highlighted))
@@ -542,7 +540,7 @@ public abstract class TextSlot<SLOT_FRAGMENT extends TextSlotFragment> implement
         {
             String prefix = getCurWord();
             suggestionDisplayProperty.get().calculateEligible(prefix, true, initialState);
-            suggestionDisplayProperty.get().updateVisual(prefix, false);
+            suggestionDisplayProperty.get().updateVisual(prefix);
             lastBeforePrefix = getText().substring(0, getStartOfCurWord());
         }
 
@@ -559,7 +557,7 @@ public abstract class TextSlot<SLOT_FRAGMENT extends TextSlotFragment> implement
                 updateSuggestions(true);
                 suggestionDisplayProperty.get().highlightFirstEligible();
                 //Debug.time("!!! Showing");
-                suggestionDisplayProperty.get().show(field.getNode(), suggestionXOffset, field.heightProperty());
+                suggestionDisplayProperty.get().show(field.getNode(), new BoundingBox(suggestionXOffset.get(), 0, 0, field.heightProperty().get()));
                 //Debug.time("!!! Shown");
                 field.setFakeCaretShowing(true);
             };
@@ -1078,7 +1076,7 @@ public abstract class TextSlot<SLOT_FRAGMENT extends TextSlotFragment> implement
         JavaFXUtil.bindList(f.getStyleClass(), field.getStyleClass());
         JavaFXUtil.bindPseudoclasses(f, field.getPseudoClassStates());
         JavaFXUtil.setPseudoclass("bj-pinned", true, f);
-        f.styleProperty().bind(field.styleProperty().concat("-fx-font-size:").concat(editor.getFontSizeCSS()).concat(";"));
+        f.styleProperty().bind(field.styleProperty().concat(editor.getFontCSS()));
         return Stream.of(f);
     }
 

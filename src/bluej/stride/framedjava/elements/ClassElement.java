@@ -34,10 +34,8 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import javax.swing.SwingUtilities;
-import javax.swing.text.BadLocationException;
-
 import bluej.debugger.gentype.ConstructorReflective;
+import bluej.editor.moe.ScopeColors;
 import bluej.parser.AssistContent.CompletionKind;
 import bluej.parser.AssistContent.ParamInfo;
 import bluej.parser.entity.PackageResolver;
@@ -74,7 +72,6 @@ import bluej.stride.framedjava.frames.ClassFrame;
 import bluej.stride.framedjava.frames.ConstructorFrame;
 import bluej.stride.framedjava.slots.ExpressionSlot;
 import bluej.stride.generic.Frame.ShowReason;
-import bluej.utility.Debug;
 import bluej.utility.Utility;
 
 /**
@@ -216,11 +213,13 @@ public class ClassElement extends DocumentContainerCodeElement implements TopLev
     }
     
     @Override
+    @OnThread(Tag.FXPlatform)
     public JavaSource toJavaSource()
     {
         return getDAP(null).java;
     }
 
+    @OnThread(Tag.FXPlatform)
     private JavaSource generateJavaSource()
     {
         List<JavaFragment> header = new ArrayList<>();
@@ -390,7 +389,7 @@ public class ClassElement extends DocumentContainerCodeElement implements TopLev
     }
     
     @Override
-    @OnThread(Tag.Swing)
+    @OnThread(Tag.FXPlatform)
     public CodeSuggestions getCodeSuggestions(PosInSourceDoc pos, ExpressionSlot<?> completing)
     {
         // Must get document before getting position:
@@ -400,18 +399,10 @@ public class ClassElement extends DocumentContainerCodeElement implements TopLev
                           .orElse(null);
     }
     
-    @OnThread(Tag.Swing)
+    @OnThread(Tag.FXPlatform)
     private Optional<Integer> resolvePos(MoeSyntaxDocument doc, PosInSourceDoc pos)
     {
-        DocAndPositions docAndPositions = null;
-        try
-        {
-            docAndPositions = documentCache.get(doc.getText(0, doc.getLength()));
-        }
-        catch (BadLocationException e)
-        {
-            Debug.reportError(e);
-        }
+        DocAndPositions docAndPositions = documentCache.get(doc.getText(0, doc.getLength()));
         Optional<Integer> resolvedPos = Optional.ofNullable(docAndPositions.fragmentPositions.get(pos.getFragment()));
         return resolvedPos.map(p -> p + pos.offset);
     }
@@ -423,6 +414,7 @@ public class ClassElement extends DocumentContainerCodeElement implements TopLev
     }
 
     @Override
+    @OnThread(Tag.FXPlatform)
     public EntityResolver getResolver()
     {
         return getSourceDocument(null).getParser();
@@ -440,13 +432,13 @@ public class ClassElement extends DocumentContainerCodeElement implements TopLev
         frame.show(reason);        
     }
 
-    @OnThread(Tag.Swing)
+    @OnThread(Tag.FXPlatform)
     private MoeSyntaxDocument getSourceDocument(ExpressionSlot completing)
     {
         return getDAP(completing).getDocument(projectResolver);
     }
     
-    @OnThread(Tag.Any)
+    @OnThread(Tag.FXPlatform)
     private synchronized DocAndPositions getDAP(ExpressionSlot completing)
     {
         if (sourceDocument == null || sourceDocumentCompleting != completing)
@@ -490,7 +482,7 @@ public class ClassElement extends DocumentContainerCodeElement implements TopLev
         return methods.stream();
     }
 
-    @OnThread(Tag.Swing)
+    @OnThread(Tag.FXPlatform)
     public Reflective qualifyType(String name, PosInSourceDoc pos)
     {
         final MoeSyntaxDocument doc = getSourceDocument(null);
@@ -508,7 +500,7 @@ public class ClassElement extends DocumentContainerCodeElement implements TopLev
         return null;
     }
 
-    @OnThread(Tag.Swing)
+    @OnThread(Tag.FXPlatform)
     private Reflective getClassNode()
     {
         // Must get document before getting position:
@@ -522,7 +514,7 @@ public class ClassElement extends DocumentContainerCodeElement implements TopLev
     }
 
     // Returns name of uppermost class with this method:
-    @OnThread(Tag.Swing)
+    @OnThread(Tag.FXPlatform)
     public Reflective findSuperMethod(String name, List<String> qualParamTypes)
     {
         if (classKeyword == null)
@@ -552,9 +544,10 @@ public class ClassElement extends DocumentContainerCodeElement implements TopLev
     }
 
     @Override
+    @OnThread(Tag.FXPlatform)
     public void updateSourcePositions()
     {
-        SwingUtilities.invokeLater(() -> getSourceDocument(null));
+        getSourceDocument(null);
     }
 
     public boolean isAbstract()
@@ -587,7 +580,7 @@ public class ClassElement extends DocumentContainerCodeElement implements TopLev
         return constructors;
     }
 
-    @OnThread(Tag.Swing)
+    @OnThread(Tag.FXPlatform)
     @Override
     public List<ConstructorReflective> getSuperConstructors()
     {
@@ -634,20 +627,13 @@ public class ClassElement extends DocumentContainerCodeElement implements TopLev
             this.fragmentPositions = fragmentPositions;
         }
         
-        @OnThread(Tag.Swing)
+        @OnThread(Tag.FXPlatform)
         public MoeSyntaxDocument getDocument(EntityResolver projectResolver)
         {
             if (document == null)
             {
                 document = new MoeSyntaxDocument(projectResolver);
-                try
-                {
-                    document.insertString(0, src, null);
-                }
-                catch (BadLocationException e)
-                {
-                    Debug.reportError(e);
-                }
+                document.insertString(0, src);
                 document.enableParser(true);
             }
             return document;
@@ -655,6 +641,7 @@ public class ClassElement extends DocumentContainerCodeElement implements TopLev
     }
 
     @Override
+    @OnThread(Tag.FXPlatform)
     public Stream<SyntaxCodeError> findEarlyErrors()
     {
         return findEarlyErrors(toXML().buildLocationMap());

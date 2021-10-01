@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2011,2013,2016  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2011,2013,2016,2017  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -21,35 +21,27 @@
  */
 package bluej.pkgmgr.target;
 
-import java.awt.BasicStroke;
-import java.awt.Color;
-import java.io.File;
-import java.lang.reflect.Array;
-import java.util.Properties;
-
-import javax.swing.SwingUtilities;
-
-import bluej.utility.javafx.JavaFXUtil;
-import bluej.utility.javafx.ResizableCanvas;
-import javafx.application.Platform;
-import javafx.scene.control.ContextMenu;
-import javafx.scene.control.Label;
-import javafx.scene.control.MenuItem;
-
 import bluej.Config;
 import bluej.pkgmgr.Package;
 import bluej.pkgmgr.PackageEditor;
 import bluej.pkgmgr.PkgMgrFrame;
 import bluej.utility.Debug;
 import bluej.utility.DialogManager;
-import javafx.scene.layout.AnchorPane;
+import bluej.utility.javafx.JavaFXUtil;
+
+import java.io.File;
+import java.lang.reflect.Array;
+import java.util.Properties;
+
+import javafx.scene.control.ContextMenu;
+import javafx.scene.control.Label;
+import javafx.scene.control.MenuItem;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.Pane;
-import javafx.scene.layout.Region;
-import javafx.scene.layout.VBox;
-import javafx.scene.shape.Rectangle;
+
 import threadchecker.OnThread;
 import threadchecker.Tag;
+
 
 /**
  * A sub package (or parent package)
@@ -66,11 +58,6 @@ public class PackageTarget extends Target
     static final String openStr = Config.getString("pkgmgr.packagemenu.open");
     static final String removeStr = Config.getString("pkgmgr.packagemenu.remove");
 
-    static final Color envOpColour = Config.ENV_COLOUR;
-
-    static final BasicStroke normalStroke = new BasicStroke(1);
-    static final BasicStroke selectedStroke = new BasicStroke(3);
-
     @OnThread(Tag.FXPlatform)
     private boolean isMoveable = true;
 
@@ -78,56 +65,53 @@ public class PackageTarget extends Target
     {
         super(pkg, baseName);
 
-        Platform.runLater(() -> {
-            JavaFXUtil.addStyleClass(pane, "package-target");
+        JavaFXUtil.addStyleClass(pane, "package-target");
 
-            Label name = new Label(baseName);
-            JavaFXUtil.addStyleClass(name, "package-target-name");
-            name.setMaxWidth(9999.0);
-            pane.setTop(name);
-            setSize(calculateWidth(baseName), DEF_HEIGHT + TAB_HEIGHT);
+        Label name = new Label(baseName);
+        JavaFXUtil.addStyleClass(name, "package-target-name");
+        name.setMaxWidth(9999.0);
+        pane.setTop(name);
+        setSize(calculateWidth(name, baseName), DEF_HEIGHT + TAB_HEIGHT);
 
-            Pane center = new Pane();
-            BorderPane centerWrapper = new BorderPane(center);
-            pane.setCenter(centerWrapper);
-            JavaFXUtil.addStyleClass(centerWrapper, "package-target-preview-wrapper");
-            JavaFXUtil.addStyleClass(center, "package-target-preview");
+        Pane center = new Pane();
+        BorderPane centerWrapper = new BorderPane(center);
+        pane.setCenter(centerWrapper);
+        JavaFXUtil.addStyleClass(centerWrapper, "package-target-preview-wrapper");
+        JavaFXUtil.addStyleClass(center, "package-target-preview");
 
-            double pos[] = new double[] {0.25,0.5,  0.75, 0.2,   0.6,0.8};
-            for (int i = 0; i < 3; i++)
-            {
-                Pane r = new Pane();
-                r.setMouseTransparent(true);
-                // was: 15, 10
-                r.prefWidthProperty().bind(center.widthProperty().multiply(0.2));
-                r.prefHeightProperty().bind(center.heightProperty().multiply(0.2));
-                r.layoutXProperty().bind(center.widthProperty().multiply(pos[i*2+0]-0.1));
-                r.layoutYProperty().bind(center.heightProperty().multiply(pos[i*2+1]-0.1));
-                /*
-                //r.setMaxWidth(Region.USE_PREF_SIZE);
-                //r.setMaxHeight(Region.USE_PREF_SIZE);
-                r.setMinWidth(10);
-                r.setMinHeight(5);
-                AnchorPane.setLeftAnchor(r, pos[i * 2 + 0] * center.getWidth());
-                AnchorPane.setRightAnchor(r, (pos[i * 2 + 0]+0.2) * center.getWidth());
-                AnchorPane.setTopAnchor(r, pos[i * 2 + 1] * center.getHeight());
-                AnchorPane.setBottomAnchor(r, (pos[i * 2 + 1]+0.2) * center.getHeight());
-                int iFinal = i;
-                JavaFXUtil.addChangeListener(center.widthProperty(), w -> {
-                    AnchorPane.setLeftAnchor(r, pos[iFinal * 2 + 0] * w.doubleValue());
-                    AnchorPane.setRightAnchor(r, (pos[iFinal * 2 + 0]+0.2) * w.doubleValue());
-                });
-                JavaFXUtil.addChangeListener(center.heightProperty(), h -> {
-                    AnchorPane.setTopAnchor(r, pos[iFinal * 2 + 1] * h.doubleValue());
-                    AnchorPane.setBottomAnchor(r, (pos[iFinal * 2 + 1]+0.2) * h.doubleValue());
-                });*/
+        double pos[] = new double[] {0.25,0.5,  0.75, 0.2,   0.6,0.8};
+        for (int i = 0; i < 3; i++)
+        {
+            Pane r = new Pane();
+            r.setMouseTransparent(true);
+            // was: 15, 10
+            r.prefWidthProperty().bind(center.widthProperty().multiply(0.2));
+            r.prefHeightProperty().bind(center.heightProperty().multiply(0.2));
+            r.layoutXProperty().bind(center.widthProperty().multiply(pos[i*2+0]-0.1));
+            r.layoutYProperty().bind(center.heightProperty().multiply(pos[i*2+1]-0.1));
+            /*
+            //r.setMaxWidth(Region.USE_PREF_SIZE);
+            //r.setMaxHeight(Region.USE_PREF_SIZE);
+            r.setMinWidth(10);
+            r.setMinHeight(5);
+            AnchorPane.setLeftAnchor(r, pos[i * 2 + 0] * center.getWidth());
+            AnchorPane.setRightAnchor(r, (pos[i * 2 + 0]+0.2) * center.getWidth());
+            AnchorPane.setTopAnchor(r, pos[i * 2 + 1] * center.getHeight());
+            AnchorPane.setBottomAnchor(r, (pos[i * 2 + 1]+0.2) * center.getHeight());
+            int iFinal = i;
+            JavaFXUtil.addChangeListener(center.widthProperty(), w -> {
+                AnchorPane.setLeftAnchor(r, pos[iFinal * 2 + 0] * w.doubleValue());
+                AnchorPane.setRightAnchor(r, (pos[iFinal * 2 + 0]+0.2) * w.doubleValue());
+            });
+            JavaFXUtil.addChangeListener(center.heightProperty(), h -> {
+                AnchorPane.setTopAnchor(r, pos[iFinal * 2 + 1] * h.doubleValue());
+                AnchorPane.setBottomAnchor(r, (pos[iFinal * 2 + 1]+0.2) * h.doubleValue());
+            });*/
 
-                JavaFXUtil.addStyleClass(r, "package-target-preview-item");
+            JavaFXUtil.addStyleClass(r, "package-target-preview-item");
 
-                center.getChildren().add(r);
-            }
-
-        });
+            center.getChildren().add(r);
+        }
     }
 
     /**
@@ -213,7 +197,7 @@ public class PackageTarget extends Target
     @OnThread(Tag.FXPlatform)
     public void doubleClick()
     {
-        SwingUtilities.invokeLater(() -> {getPackage().getEditor().raiseOpenPackageEvent(this, getOpenPkgName());});
+        getPackage().getEditor().raiseOpenPackageEvent(this, getOpenPkgName());
     }
 
     /**
@@ -237,19 +221,19 @@ public class PackageTarget extends Target
     private ContextMenu createMenu()
     {
         MenuItem open = new MenuItem(openStr);
-        open.setOnAction(e -> SwingUtilities.invokeLater(() -> {
+        open.setOnAction(e -> {
             getPackage().getEditor().raiseOpenPackageEvent(this, getOpenPkgName());
-        }));
+        });
         JavaFXUtil.addStyleClass(open, "class-action-inbuilt");
         ContextMenu contextMenu = new ContextMenu(open);
 
         if (isRemovable())
         {
             MenuItem remove = new MenuItem(removeStr);
-            remove.setOnAction(e -> SwingUtilities.invokeLater(() ->
+            remove.setOnAction(e ->
             {
                 getPackage().getEditor().raiseRemoveTargetEvent(this);
-            }));
+            });
             JavaFXUtil.addStyleClass(remove, "class-action-inbuilt");
             contextMenu.getItems().add(remove);
         }
@@ -277,29 +261,23 @@ public class PackageTarget extends Target
         String name = getQualifiedName();
         PkgMgrFrame[] f = PkgMgrFrame.getAllProjectFrames(pmf.getProject(), name);
 
-        Platform.runLater(() ->
+        if (f != null)
         {
-            if (f != null)
-            {
-                DialogManager.showErrorFX(pmf.getFXWindow(), "remove-package-open");
-            }
-            else
-            {
-                // Check they realise that this will delete ALL the files.
-                int response = DialogManager.askQuestionFX(pmf.getFXWindow(), "really-remove-package");
+            DialogManager.showErrorFX(pmf.getFXWindow(), "remove-package-open");
+        }
+        else
+        {
+            // Check they realise that this will delete ALL the files.
+            int response = DialogManager.askQuestionFX(pmf.getFXWindow(), "really-remove-package");
 
-                // if they agree
-                if (response == 0)
-                {
-                    SwingUtilities.invokeLater(() ->
-                    {
-                        deleteFiles();
-                        getPackage().getProject().removePackage(getQualifiedName());
-                        getPackage().removeTarget(this);
-                    });
-                }
+            // if they agree
+            if (response == 0)
+            {
+                deleteFiles();
+                getPackage().getProject().removePackage(getQualifiedName());
+                getPackage().removeTarget(this);
             }
-        });
+        }
     }
 
     /**

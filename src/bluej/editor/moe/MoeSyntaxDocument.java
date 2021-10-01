@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2011,2012,2013,2014,2015,2016  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2011,2012,2013,2014,2015,2016,2017  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -21,18 +21,25 @@
  */
 package bluej.editor.moe;
 
-import java.awt.Color;
-import java.util.Iterator;
-import java.util.LinkedList;
-import java.util.List;
+import java.util.*;
+import java.util.Map.Entry;
+import java.util.function.Function;
 
 import javax.swing.event.DocumentEvent;
-import javax.swing.event.DocumentEvent.EventType;
-import javax.swing.text.AttributeSet;
-import javax.swing.text.BadLocationException;
-import javax.swing.text.Element;
-import javax.swing.text.MutableAttributeSet;
+import javax.swing.text.Segment;
 
+import bluej.editor.moe.BlueJSyntaxView.ParagraphAttribute;
+import bluej.editor.moe.BlueJSyntaxView.ScopeInfo;
+import bluej.editor.moe.Token.TokenType;
+import bluej.utility.Utility;
+import bluej.utility.javafx.JavaFXUtil;
+import com.google.common.collect.ImmutableSet;
+import javafx.beans.binding.BooleanExpression;
+import org.fxmisc.richtext.model.*;
+import org.fxmisc.richtext.model.TwoDimensional.Bias;
+import org.fxmisc.richtext.model.TwoDimensional.Position;
+import org.reactfx.Subscription;
+import org.reactfx.collection.LiveList;
 import threadchecker.OnThread;
 import threadchecker.Tag;
 import bluej.Config;
@@ -43,7 +50,6 @@ import bluej.parser.nodes.NodeTree.NodeAndPosition;
 import bluej.parser.nodes.ParsedCUNode;
 import bluej.parser.nodes.ParsedNode;
 import bluej.utility.Debug;
-import bluej.utility.PersistentMarkDocument;
 
 
 /**
@@ -53,48 +59,101 @@ import bluej.utility.PersistentMarkDocument;
  * @author Bruce Quig
  * @author Jo Wood (Modified to allow user-defined colours, March 2001)
  */
-@OnThread(value = Tag.Swing, ignoreParent = true)
-public class MoeSyntaxDocument extends PersistentMarkDocument
+@OnThread(Tag.FXPlatform)
+public class MoeSyntaxDocument
 {
-    @OnThread(value = Tag.Any, requireSynchronized = true)
-    private static Color[] colors = null;
+    public static final String MOE_FIND_RESULT = "moe-find-result";
+    public static final String MOE_BRACKET_HIGHLIGHT = "moe-bracket-highlight";
 
-    @OnThread(value = Tag.Any, requireSynchronized = true)
-    private static Color defaultColour = null;
-    @OnThread(value = Tag.Any, requireSynchronized = true)
-    private static Color backgroundColour = null;
+    /**
+     * A RichTextFX document can have paragraph styles, and text-segment styles.
+     *
+     * We use RichTextFX such that one RichTextFX paragraph = one line of Java source code.
+     * Our paragraph styles are thus line styles, and we use this to store information
+     * about the scope boxes that need painting on the background for scope highlighting.
+     *
+     * Our text-segment styles are a set of style-classes to apply to a text-segment.
+     * This is usually a single token-style (our tokens never overlap), and possibly
+     * the error state class and/or search highlight class.
+     */
+    private final SimpleEditableStyledDocument<ScopeInfo, ImmutableSet<String>> document;
     
     /** Maximum amount of document to reparse in one hit (advisory) */
     private final static int MAX_PARSE_PIECE = 8000;
-    
+    private final int tabSize;
+
     private ParsedCUNode parsedNode;
     private EntityResolver parentResolver;
     private NodeTree<ReparseRecord> reparseRecordTree;
-    
-    private MoeDocumentListener listener;
-    
-    /** Tasks scheduled for when we are not locked */ 
-    private Runnable[] scheduledUpdates;
+
+    /**
+     * We want to avoid repaint flicker by letting the user see partly-updated
+     * backgrounds when processing the reparse queue.  So we store new backgrounds
+     * in this map until we're ready to show all new backgrounds, which typically
+     * happens when the reparse queue is empty (and is done by the applyPendingScopeBackgrounds()
+     * method)
+     */
+    private final Map<Integer, ScopeInfo> pendingScopeBackgrounds = new HashMap<>();
+    private boolean applyingScopeBackgrounds = false;
+
     protected boolean inNotification = false;
-    protected boolean runningScheduledUpdates = false;
-    
-    private class PendingError
+    // Can be null if we are not being used for an editor pane:
+    private final BlueJSyntaxView syntaxView;
+    private boolean hasFindHighlights = false;
+    // null means not cached, non-null means cached
+    private String cachedContent = null;
+    // null means not cached, non-null means cached
+    // lineStarts[0] is 0, lineStarts[1] is the index of beginning of the next line (i.e. just after \n), and so on.
+    private int[] lineStarts = null;
+    // package-visible:
+    boolean notYetShown = true;
+
+
+    public Position createPosition(int initialPos)
     {
-        int position;
-        int size;
-        String errCode;
-        
-        PendingError(int position, int size, String errCode)
+        return new Position(initialPos);
+    }
+
+    public void markFindResult(int start, int end)
+    {
+        hasFindHighlights = true;
+        document.setStyleSpans(start, document.getStyleSpans(start, end).mapStyles(ss -> {
+            // Add special/non-special and remove the converse:
+            return Utility.setAdd(ss, MOE_FIND_RESULT);
+
+        }));
+    }
+
+    public void removeSearchHighlights()
+    {
+        if (hasFindHighlights)
         {
-            this.position = position;
-            this.size = size;
-            this.errCode = errCode;
+            removeStyleThroughout(MOE_FIND_RESULT);
+            hasFindHighlights = false;
         }
     }
-    
-    /** A list of parse errors which have been detected but not yet indicated to the listener. */
-    private List<PendingError> pendingErrors = new LinkedList<PendingError>();
-    
+
+    public void removeStyleThroughout(String spanStyle)
+    {
+        // Goes paragraph by paragraph, and only alters the style if necessary.
+        LiveList<Paragraph<ScopeInfo, StyledText<ImmutableSet<String>>, ImmutableSet<String>>> paragraphs = document.getParagraphs();
+        for (int i = 0; i < paragraphs.size(); i++)
+        {
+            Paragraph<ScopeInfo, StyledText<ImmutableSet<String>>, ImmutableSet<String>> para = paragraphs.get(i);
+            StyleSpans<ImmutableSet<String>> styleSpans = para.getStyleSpans();
+            boolean present = styleSpans.stream().anyMatch(s -> s.getStyle().contains(spanStyle));
+            if (present)
+            {
+                document.setStyleSpans(i, 0, styleSpans.mapStyles(ss -> Utility.setMinus(ss, spanStyle)));
+            }
+        }
+    }
+
+    public void addStyle(int start, int end, String style)
+    {
+        document.setStyleSpans(start, document.getStyleSpans(start, end).mapStyles(ss -> Utility.setAdd(ss, style)));
+    }
+
     /*
      * We'll keep track of recent events, to aid in hunting down bugs in the event
      * that we get an unexpected exception. 
@@ -102,6 +161,92 @@ public class MoeSyntaxDocument extends PersistentMarkDocument
     
     private static int EDIT_INSERT = 0;
     private static int EDIT_DELETE = 1;
+
+    public void copyFrom(MoeSyntaxDocument from)
+    {
+        document.replace(0, document.getLength(), from.document);
+    }
+
+    public TwoDimensional.Position offsetToPosition(int startOffset)
+    {
+        if (lineStarts == null)
+        {
+            return document.offsetToPosition(startOffset, Bias.Forward);
+        }
+        else
+        {
+            // No need to check first line:
+            int line = 1;
+            for (; line < lineStarts.length; line++)
+            {
+                if (startOffset < lineStarts[line])
+                    break;
+
+            }
+            line -= 1; // We went just past it, so now go back one
+            int lineFinal = line;
+            int column = startOffset - lineStarts[lineFinal];
+            return new TwoDimensional.Position()
+            {
+                @Override
+                public TwoDimensional getTargetObject()
+                {
+                    return document;
+                }
+
+                @Override
+                public int getMajor()
+                {
+                    return lineFinal;
+                }
+
+                @Override
+                public int getMinor()
+                {
+                    return column;
+                }
+
+                @Override
+                public boolean sameAs(TwoDimensional.Position other)
+                {
+                    return getTargetObject() == other.getTargetObject() && getMajor() == other.getMajor() && getMinor() == other.getMinor();
+                }
+
+                @Override
+                public TwoDimensional.Position clamp()
+                {
+                    return this;
+                }
+
+                @Override
+                public TwoDimensional.Position offsetBy(int offset, Bias bias)
+                {
+                    // Just fall back to document, don't think we call this anyway:
+                    return document.offsetToPosition(startOffset + offset, Bias.Forward);
+                }
+
+                @Override
+                public int toOffset()
+                {
+                    return startOffset;
+                }
+            };
+        }
+    }
+
+    private int getAbsolutePosition(int lineIndex, int columnIndex)
+    {
+        if (lineStarts == null || lineIndex >= lineStarts.length) // Second part shouldn't happen, but just in case
+        {
+            return document.getAbsolutePosition(lineIndex, columnIndex);
+        }
+        else
+        {
+            return lineStarts[lineIndex] + columnIndex;
+        }
+    }
+
+    @OnThread(Tag.Any)
     private static class EditEvent
     {
         int type; //  edit type - INSERT or DELETE
@@ -134,22 +279,97 @@ public class MoeSyntaxDocument extends PersistentMarkDocument
             recentEdits.remove(0);
         }
     }
+
+    // Have to pass construction function because "this" isn't
+    // available to other constructor callers:
+    private MoeSyntaxDocument(Function<MoeSyntaxDocument, BlueJSyntaxView> makeSyntaxView)
+    {
+        // defaults to 4 if cannot read property
+        tabSize = Config.getPropInteger("bluej.editor.tabsize", 4);
+        document = new SimpleEditableStyledDocument<>(null, ImmutableSet.of());
+        this.syntaxView = makeSyntaxView.apply(this);
+
+        document.plainChanges().subscribe(c -> {
+            invalidateCache();
+            // Must fire remove before insert:
+            if (!c.getRemoved().isEmpty())
+            {
+                fireRemoveUpdate(c.getPosition(), c.getRemovalEnd() - c.getPosition());
+            }
+            if (!c.getInserted().isEmpty())
+            {
+                fireInsertUpdate(c.getPosition(), c.getInsertionEnd() - c.getPosition());
+            }
+            // Apply backgrounds from simple update, as it may not even
+            // trigger a reparse.  This must be done later, after the document has finished
+            // doing all the updates to the content, before we can mess with paragraph styles:
+            JavaFXUtil.runAfterCurrent(() -> {
+                invalidateCache();
+                applyPendingScopeBackgrounds();
+            });
+        });
+    }
+
+    private void invalidateCache()
+    {
+        cachedContent = null;
+        lineStarts = null;
+    }
+
+    private void cacheContent()
+    {
+        if (cachedContent == null)
+            cachedContent = document.getText();
+        if (lineStarts == null)
+        {
+            lineStarts = new int[document.getParagraphs().size()];
+            lineStarts[0] = 0;
+            int curLine = 0;
+            for (int character = 0; character < cachedContent.length(); character++)
+            {
+                if (cachedContent.charAt(character) == '\n')
+                {
+                    curLine += 1;
+                    lineStarts[curLine] = character + 1;
+                }
+            }
+        }
+    }
+
+    public MoeSyntaxDocument()
+    {
+        this(d -> null);
+    }
     
     /**
      * Create an empty MoeSyntaxDocument.
      */
-    public MoeSyntaxDocument()
+    @OnThread(Tag.FXPlatform)
+    public MoeSyntaxDocument(ScopeColors scopeColors)
     {
-        getUserColors();
-        // defaults to 4 if cannot read property
-        int tabSize = Config.getPropInteger("bluej.editor.tabsize", 4);
-        putProperty(tabSizeAttribute, Integer.valueOf(tabSize));
+        this(d -> new BlueJSyntaxView(d, scopeColors));
     }
     
     /**
      * Create an empty MoeSyntaxDocument, which uses the given entity resolver
      * to resolve symbols.
      */
+    @OnThread(Tag.FXPlatform)
+    public MoeSyntaxDocument(EntityResolver parentResolver, ScopeColors scopeColors)
+    {
+        this(scopeColors);
+        // parsedNode = new ParsedCUNode(this);
+        this.parentResolver = parentResolver;
+        if (parentResolver != null) {
+            reparseRecordTree = new NodeTree<ReparseRecord>();
+        }
+    }
+
+    /**
+     * Create an empty MoeSyntaxDocument, which uses the given entity resolver
+     * to resolve symbols.
+     */
+    @OnThread(Tag.FXPlatform)
     public MoeSyntaxDocument(EntityResolver parentResolver)
     {
         this();
@@ -158,16 +378,6 @@ public class MoeSyntaxDocument extends PersistentMarkDocument
         if (parentResolver != null) {
             reparseRecordTree = new NodeTree<ReparseRecord>();
         }
-    }
-    
-    /**
-     * Create an empty MoeSyntaxDocument, which uses the given entity resolver to
-     * resolve symbols, and which sends parser events to the specified listener.
-     */
-    public MoeSyntaxDocument(EntityResolver parentResolver, MoeDocumentListener listener)
-    {
-        this(parentResolver);
-        this.listener = listener;
     }
 
     /**
@@ -193,6 +403,7 @@ public class MoeSyntaxDocument extends PersistentMarkDocument
      * @param force  whether to force-enable the parser. If false, the parser will only
      *                be enabled if an entity resolver is available.
      */
+    @OnThread(Tag.FXPlatform)
     public void enableParser(boolean force)
     {
         if (parentResolver != null || force) {
@@ -213,7 +424,13 @@ public class MoeSyntaxDocument extends PersistentMarkDocument
      */
     public boolean pollReparseQueue()
     {
-        return pollReparseQueue(MAX_PARSE_PIECE);
+        boolean wasParsed = pollReparseQueue(MAX_PARSE_PIECE);
+        // If queue is empty, apply backgrounds:
+        if (!wasParsed)
+        {
+            applyPendingScopeBackgrounds();
+        }
+        return wasParsed;
     }
     
     /**
@@ -221,7 +438,8 @@ public class MoeSyntaxDocument extends PersistentMarkDocument
      * parse the specified amount of document (approximately). Return true if
      * a queued re-parse was processed or false if the queue was empty.
      */
-    public boolean pollReparseQueue(int maxParse)
+    @OnThread(Tag.FXPlatform)
+    private boolean pollReparseQueue(int maxParse)
     {
         try {
             if (reparseRecordTree == null) {
@@ -249,8 +467,13 @@ public class MoeSyntaxDocument extends PersistentMarkDocument
                         }
                     }
 
-                    MoeSyntaxEvent mse = new MoeSyntaxEvent(this);
+                    //Debug.message("Reparsing: " + ppos + " " + pos);
+                    MoeSyntaxEvent mse = new MoeSyntaxEvent(this, -1, -1, false, false);
                     pn.reparse(this, ppos, pos, maxParse, mse);
+                    // Dump tree (for debugging):
+                    //Debug.message("Dumping tree:");
+                    //dumpTree(parsedNode.getChildren(0), "");
+
                     fireChangedUpdate(mse);
                     return true;
                 }
@@ -265,24 +488,143 @@ public class MoeSyntaxDocument extends PersistentMarkDocument
                 eventStr += "offset=" + event.offset + " length=" + event.length;
                 Debug.message(eventStr);
             }
-            
-            try {
-                Debug.message("--- Source code ---");
-                Debug.message(getText(0, getLength()));
-                Debug.message("--- Source ends ---");
-            }
-            catch (BadLocationException ble) { }
+
+            Debug.message("--- Source code ---");
+            Debug.message(getText(0, getLength()));
+            Debug.message("--- Source ends ---");
             
             throw e;
         }
     }
-    
+
+    private void dumpTree(Iterator<NodeAndPosition<ParsedNode>> iterator, String indent)
+    {
+        for (NodeAndPosition<ParsedNode> nap2 : (Iterable<NodeAndPosition<ParsedNode>>)(() -> iterator))
+        {
+            Debug.message(indent + "Node: " + nap2.getPosition() + " -> " + nap2.getEnd());
+            dumpTree(nap2.getNode().getChildren(nap2.getPosition()), indent + "  ");
+        }
+    }
+
+    /**
+     * Sets the step-line (paused line in debugger) indicator on that line,
+     * and clears it from all other lines.
+     *
+     * Line number starts at one.
+     */
+    public void showStepLine(int lineNumber)
+    {
+        for (int i = 0; i < document.getParagraphs().size(); i++)
+        {
+            // Line numbers start at 1:
+            setParagraphAttributesForLineNumber(i + 1, Collections.singletonMap(ParagraphAttribute.STEP_MARK, i + 1 == lineNumber));
+        }
+    }
+
+    void fireChangedUpdate(MoeSyntaxEvent mse)
+    {
+        if (syntaxView != null)
+            syntaxView.updateDamage(mse);
+        if (mse == null)
+        {
+            // Width change, so apply new backgrounds:
+            applyPendingScopeBackgrounds();
+        }
+    }
+
+    void recalculateAllScopes()
+    {
+        if (notYetShown)
+            return;
+
+        recalculateScopesForLinesInRange(0, document.getParagraphs().size() - 1);
+        applyPendingScopeBackgrounds();
+    }
+
+    void recalculateScopesForLinesInRange(int firstLineIncl, int lastLineIncl)
+    {
+        if (syntaxView == null)
+            return;
+        cacheContent();
+        List<ScopeInfo> paragraphScopeInfo = syntaxView.recalculateScopes(firstLineIncl, lastLineIncl);
+        if (paragraphScopeInfo.isEmpty())
+            return; // Not initialised yet
+        for (int i = 0; i < paragraphScopeInfo.size(); i++)
+        {
+            pendingScopeBackgrounds.put(i + firstLineIncl, paragraphScopeInfo.get(i));
+        }
+    }
+
+    // Called if the reparse queue is empty:
+    private void applyPendingScopeBackgrounds()
+    {
+        // Prevent re-entry, which can it seems can occur when applying
+        // token highlight styles:
+        if (applyingScopeBackgrounds)
+            return;
+        // No point doing scopes (in fact, not possible) if there's no editor involved:
+        if (syntaxView == null || syntaxView.editorPane == null)
+            return;
+        applyingScopeBackgrounds = true;
+        // Setting paragraph styles can cause RichTextFX to scroll the window, which we
+        // don't want.  So we save and restore the scroll Y:
+        double scrollY = syntaxView.editorPane.getEstimatedScrollY();
+
+        // Take a copy of backgrounds to avoid concurrent modification:
+        Set<Entry<Integer, ScopeInfo>> pendingBackgrounds = new HashMap<>(pendingScopeBackgrounds).entrySet();
+        pendingScopeBackgrounds.clear();
+
+        for (Entry<Integer, ScopeInfo> pending : pendingBackgrounds)
+        {
+            if (pending.getKey() >= document.getParagraphs().size())
+                continue; // Line doesn't exist any more
+
+            ScopeInfo old = document.getParagraphStyle(pending.getKey());
+            ScopeInfo newStyle = pending.getValue();
+            if (((old == null) != (newStyle == null)) || !old.equals(newStyle))
+            {
+                setParagraphStyle(pending.getKey(), newStyle);
+
+            }
+
+            StyleSpans<ImmutableSet<String>> styleSpans = syntaxView.getTokenStylesFor(pending.getKey(), this);
+            // Applying style spans is expensive, so don't do it if they're already correct:
+            if (styleSpans != null && !styleSpans.equals(document.getStyleSpans(pending.getKey())))
+            {
+                document.setStyleSpans(pending.getKey(), 0, document.getStyleSpans(pending.getKey()).overlay(styleSpans, MoeSyntaxDocument::setTokenStyles));
+            }
+        }
+
+        // The setParagraphStyle causes a layout-request with request-follow-caret.  We have to
+        // purge that layout request by executing it, before we restore the scroll Y:
+        syntaxView.editorPane.layout();
+        syntaxView.editorPane.setEstimatedScrollY(scrollY);
+        syntaxView.editorPane.layout();
+
+        applyingScopeBackgrounds = false;
+    }
+
+    /**
+     * Removes any existing token styles from allStyles, then adds them in from newTokenStyle.
+     */
+    private static ImmutableSet<String> setTokenStyles(ImmutableSet<String> allStyles, ImmutableSet<String> newTokenStyle)
+    {
+        return Utility.setUnion(Utility.setMinus(allStyles, TokenType.allCSSClasses()), newTokenStyle);
+    }
+
+    private void setParagraphStyle(int i, ScopeInfo newStyle)
+    {
+        document.setParagraphStyle(i, newStyle);
+    }
+
     /**
      * Process all of the re-parse queue.
      */
     public void flushReparseQueue()
     {
         while (pollReparseQueue(getLength())) ;
+        // Queue now empty, so flush backgrounds:
+        applyPendingScopeBackgrounds();
     }
     
     /**
@@ -326,21 +668,7 @@ public class MoeSyntaxDocument extends PersistentMarkDocument
     public void markSectionParsed(int pos, int size)
     {
         repaintLines(pos, size);
-        
-        // We must first report the range reparsed, and then report and parse errors in the range
-        // to the listener.
-        if (listener != null) {
-            listener.reparsingRange(pos, size);
-            Iterator<PendingError> i = pendingErrors.iterator();
-            while (i.hasNext()) {
-                PendingError pe = i.next();
-                if (pe.position >= pos && pe.position <= pos + size) {
-                    listener.parseError(pe.position, pe.size, pe.errCode);
-                    i.remove();
-                }
-            }
-        }
-        
+
         NodeAndPosition<ReparseRecord> existing = reparseRecordTree.findNodeAtOrAfter(pos);
         while (existing != null && existing.getPosition() <= pos) {
             NodeAndPosition<ReparseRecord> next = existing.nextSibling();
@@ -389,147 +717,48 @@ public class MoeSyntaxDocument extends PersistentMarkDocument
      */
     public void parseError(int position, int size, String message)
     {
-        if (listener != null) {
-            pendingErrors.add(new PendingError(position, size, message));
-        }
     }
-    
+
     /**
-     * Sets attributes for a paragraph.  This method was added to 
-     * provide the ability to replicate DefaultStyledDocument's ability to 
-     * set each lines attributes easily.
-     * This is an added method for the BlueJ adaption of jedit's Syntax
-     * package   
      *
-     * @param offset the offset into the paragraph >= 0
-     * @param length the number of characters affected >= 0
-     * @param s the attributes
-     * @param replace whether to replace existing attributes, or merge them
-     * @return A (Swing-thread) Runnable which will remove all the attributes passed.
-     *         Note: it does just remove them, regardless of whether they were already in there.
+     * @param lineNumber Line number (starts at 1)
+     * @param alterAttr The attributes to alter (mapped to true means add, mapped to false means remove, not present means don't alter)
      */
-    public Runnable setParagraphAttributes(int offset, AttributeSet s)
+    public void setParagraphAttributesForLineNumber(int lineNumber, Map<ParagraphAttribute, Boolean> alterAttr)
     {
-        // modified version of method from DefaultStyleDocument
-        try {
-            writeLock();
-            
-            Element paragraph = getParagraphElement(offset);
-            MutableAttributeSet attr = 
-                    (MutableAttributeSet) paragraph.getAttributes();
-            attr.addAttributes(s);
-            return () -> {
-                try {
-                    writeLock();
-                    attr.removeAttributes(s);
-                }
-                finally
+        if (syntaxView == null)
+            return;
+        Map<Integer, EnumSet<ParagraphAttribute>> changedLines = syntaxView.setParagraphAttributes(lineNumber, alterAttr);
+        updateScopesAfterParaAttrChange(changedLines);
+    }
+
+    private void updateScopesAfterParaAttrChange(Map<Integer, EnumSet<ParagraphAttribute>> changedLines)
+    {
+        for (Entry<Integer, EnumSet<ParagraphAttribute>> changedLine : changedLines.entrySet())
+        {
+            if (changedLine.getKey() - 1 < document.getParagraphs().size())
+            {
+                // Paragraph numbering starts at zero, but line numbers start at 1 so adjust:
+                ScopeInfo prevStyle = document.getParagraphStyle(changedLine.getKey() - 1);
+                if (prevStyle != null)
                 {
-                    writeUnlock();
+                    setParagraphStyle(changedLine.getKey() - 1, prevStyle.withAttributes(changedLine.getValue()));
                 }
-            };
-        } finally {
-            writeUnlock();
+            }
         }
     }
-    
+
     /**
-     * Get the default colour for MoeSyntaxDocuments.
+     * Sets attributes for all paragraphs.
+     *
+     * @param alterAttr the attributes to set the value for (other attributes will be unaffected)
      */
-    public static synchronized Color getDefaultColor()
+    public void setParagraphAttributes(Map<ParagraphAttribute, Boolean> alterAttr)
     {
-        return defaultColour;
-    }
-    
-    /**
-     * Get the background colour for MoeSyntaxDocuments.
-     */
-    @OnThread(Tag.Any)
-    public static synchronized Color getBackgroundColor()
-    {
-        return backgroundColour;
-    }
-    
-    /**
-     * Get an array of colours as specified in the configuration file for different
-     * token types. The indexes for each token type are defined in the Token class.
-     */
-    @OnThread(Tag.Any)
-    public static Color[] getColors()
-    {
-        return getUserColors();
-    }
-    
-    /**
-     * Allows user-defined colours to be set for syntax highlighting. The file
-     * containing the colour values is 'lib/moe.defs'. If this file is
-     * not found, or not all colours are defined, the BlueJ default colours are
-     * used.
-     * 
-     * @author This method was added by Jo Wood (jwo@soi.city.ac.uk), 9th March,
-     *         2001.
-     */
-    @OnThread(Tag.Any)
-    private static synchronized Color[] getUserColors()
-    { 
-        if(colors == null) {
-            // Replace with user-defined colours.
-            int    colorInt;
-                        
-            // First determine default colour and background colour
-            colorInt = getPropHexInt("other", 0x000000);
-            defaultColour = new Color(colorInt);
-            
-            colorInt = getPropHexInt("background", 0x000000);
-            backgroundColour = new Color(colorInt);
-
-            // Build colour table.     
-            colors = new Color[Token.ID_COUNT];
-
-            // Comments.
-            colorInt = getPropHexInt("comment", 0x1a1a80);
-            colors[Token.COMMENT1] = new Color(colorInt);    
-
-            // Javadoc comments.
-            colorInt = getPropHexInt("javadoc", 0x1a1a80);
-            colors[Token.COMMENT2] = new Color(colorInt);
-
-            // Stand-out comments (/*#).
-            colorInt = getPropHexInt("stand-out", 0xee00bb);
-            colors[Token.COMMENT3] = new Color(colorInt);
-
-            // Java keywords.
-            colorInt = getPropHexInt("keyword1", 0x660033);
-            colors[Token.KEYWORD1] = new Color(colorInt);
-
-            // Class-based keywords.
-            colorInt = getPropHexInt("keyword2", 0xcc8033);
-            colors[Token.KEYWORD2] = new Color(colorInt);
-
-            // Other Java keywords (true, false, this, super).
-            colorInt = getPropHexInt("keyword3", 0x006699);
-            colors[Token.KEYWORD3] = new Color(colorInt);
-
-            // Primitives.
-            colorInt = getPropHexInt("primitive", 0xcc0000);
-            colors[Token.PRIMITIVE] = new Color(colorInt);
-
-            // String literals.
-            colorInt = getPropHexInt("string", 0x339933);
-            colors[Token.LITERAL1] = new Color(colorInt);
-
-            // Labels
-            colorInt = getPropHexInt("label", 0x999999);
-            colors[Token.LABEL] = new Color(colorInt);
-            
-            // Invalid (eg unclosed string literal)
-            colorInt = getPropHexInt("invalid", 0xff3300);
-            colors[Token.INVALID] = new Color(colorInt);
-            
-            // Operator is not produced by token marker
-            colors[Token.OPERATOR] = new Color(0xcc9900);
-        }
-        return colors;
+        if (syntaxView == null)
+            return;
+        Map<Integer, EnumSet<ParagraphAttribute>> changedLines = syntaxView.setParagraphAttributes(alterAttr);
+        updateScopesAfterParaAttrChange(changedLines);
     }
     
     /**
@@ -543,128 +772,61 @@ public class MoeSyntaxDocument extends PersistentMarkDocument
         int length = lineEl.getEndOffset() - pos - 1;
         return parsedNode.getMarkTokensFor(pos, length, 0, this);
     }
-    
-    /**
-     * Schedule a document update to be run at a suitable time (after all current
-     * document notifications have been dispatched to listeners). This can be
-     * used to avoid locking issues (AbstractDocument does not allow document
-     * modifications to be made from within listener callbacks).
-     */
-    public void scheduleUpdate(Runnable r)
-    {
-        if (! inNotification) {
-            // If we're not actually in the listener notification, just run the update immediately:
-            r.run();
-            return;
-        }
-        
-        if (scheduledUpdates == null) {
-            scheduledUpdates = new Runnable[1];
-        }
-        else {
-            Runnable[] newScheduledTasks = new Runnable[scheduledUpdates.length + 1];
-            System.arraycopy(scheduledUpdates, 0, newScheduledTasks, 0, scheduledUpdates.length);
-            scheduledUpdates = newScheduledTasks;
-        }
-        
-        scheduledUpdates[scheduledUpdates.length - 1] = r;        
-    }
 
-    /**
-     * Run any scheduled document updates. This is called from update handlers.
-     */
-    private void runScheduledUpdates()
-    {
-        // Sometimes a callback wants to modify the document. AbstractDocument doesn't allow that;
-        // we have 'scheduled updates' to work around the problem.
-        if (scheduledUpdates != null && ! runningScheduledUpdates) {
-            // Mark the queue as running, to avoid running it twice:
-            runningScheduledUpdates = true;
-            for (int i = 0; i < scheduledUpdates.length; i++) {
-                // Note the callback may schedule further updates!
-                // They will be appended to the array, and so will be
-                // processed after any updates that are already pending.
-                scheduledUpdates[i].run();
-            }
-            scheduledUpdates = null;
-            runningScheduledUpdates = false;
-        }
-    }
-    
-    /**
-     * Check if scheduled updates are being run presently. This might be used as a cue to
-     * recognize that document updates do not need processing in the normal fashion,
-     * because they have been generated automatically rather than being due to user input. 
-     * 
-     * @return  true if scheduled updates are currently being run
-     */
-    public boolean isRunningScheduledUpdates()
-    {
-        return runningScheduledUpdates;
-    }
-    
-    /**
-     * Get an integer value from a property whose value is hex-encoded.
-     * @param propName  The name of the property
-     * @param def       The default value if the property is undefined or
-     *                  not parseable as a hexadecimal
-     * @return  The value
-     */
-    @OnThread(Tag.Any)
-    private static int getPropHexInt(String propName, int def)
-    {
-        String strVal = Config.getPropString(propName, null, Config.moeUserProps);
-        try {
-            return Integer.parseInt(strVal, 16);
-        }
-        catch (NumberFormatException nfe) {
-            return def;
-        }
-    }
-    
     /* 
      * If text was inserted, the reparse-record tree needs to be updated.
      */
-    @Override
-    protected void fireInsertUpdate(DocumentEvent e)
+    protected void fireInsertUpdate(int offset, int length)
     {
         inNotification = true;
         if (reparseRecordTree != null) {
-            NodeAndPosition<ReparseRecord> napRr = reparseRecordTree.findNodeAtOrAfter(e.getOffset());
+            NodeAndPosition<ReparseRecord> napRr = reparseRecordTree.findNodeAtOrAfter(offset);
             if (napRr != null) {
-                if (napRr.getPosition() <= e.getOffset()) {
-                    napRr.getNode().resize(napRr.getSize() + e.getLength());
+                if (napRr.getPosition() <= offset) {
+                    napRr.getNode().resize(napRr.getSize() + length);
                 }
                 else {
-                    napRr.getNode().slide(e.getLength());
+                    napRr.getNode().slide(length);
                 }
             }
         }
-        
-        MoeSyntaxEvent mse = new MoeSyntaxEvent(this, e);
-        if (parsedNode != null) {
-            parsedNode.textInserted(this, 0, e.getOffset(), e.getLength(), mse);
-        }
-        recordEvent(e);
-        super.fireInsertUpdate(mse);
-        inNotification = false;
 
-        runScheduledUpdates();
+        MoeSyntaxEvent mse = new MoeSyntaxEvent(this, offset, length, true, false);
+        if (parsedNode != null) {
+            parsedNode.textInserted(this, 0, offset, length, new NodeStructureListener()
+            {
+                @Override
+                public void nodeRemoved(NodeAndPosition<ParsedNode> node)
+                {
+
+                }
+
+                @Override
+                public void nodeChangedLength(NodeAndPosition<ParsedNode> node, int oldPos, int oldSize)
+                {
+
+                }
+            });
+        }
+        fireChangedUpdate(mse);
+        int startLine = document.offsetToPosition(offset, Bias.Forward).getMajor();
+        int endLine = document.offsetToPosition(offset + length, Bias.Forward).getMajor();
+        recalculateScopesForLinesInRange(startLine, endLine);
+        inNotification = false;
     }
     
     
     /* 
      * If part of the document was removed, the reparse-record tree needs to be updated.
      */
-    @Override
-    protected void fireRemoveUpdate(DocumentEvent e)
+    protected void fireRemoveUpdate(int offset, int length)
     {
         inNotification = true;
         NodeAndPosition<ReparseRecord> napRr = (reparseRecordTree != null) ?
-                reparseRecordTree.findNodeAtOrAfter(e.getOffset()) :
+                reparseRecordTree.findNodeAtOrAfter(offset) :
                     null;
-        int rpos = e.getOffset();
-        int rlen = e.getLength();
+        int rpos = offset;
+        int rlen = length;
         if (napRr != null && napRr.getEnd() == rpos) {
             // Boundary condition
             napRr = napRr.nextSibling();
@@ -694,7 +856,7 @@ public class MoeSyntaxDocument extends PersistentMarkDocument
                 else {
                     // remove whole node
                     napRr.getNode().remove();
-                    napRr = reparseRecordTree.findNodeAtOrAfter(e.getOffset());
+                    napRr = reparseRecordTree.findNodeAtOrAfter(offset);
                     continue;
                 }
             }
@@ -720,31 +882,245 @@ public class MoeSyntaxDocument extends PersistentMarkDocument
                 }
             }
         }
-        
-        MoeSyntaxEvent mse = new MoeSyntaxEvent(this, e);
+
+        MoeSyntaxEvent mse = new MoeSyntaxEvent(this, offset, length, false, true);
         if (parsedNode != null) {
-            parsedNode.textRemoved(this, 0, e.getOffset(), e.getLength(), mse);
+            parsedNode.textRemoved(this, 0, offset, length, new NodeStructureListener()
+            {
+                @Override
+                public void nodeRemoved(NodeAndPosition<ParsedNode> node)
+                {
+
+                }
+
+                @Override
+                public void nodeChangedLength(NodeAndPosition<ParsedNode> node, int oldPos, int oldSize)
+                {
+
+                }
+            });
         }
-        recordEvent(e);
-        super.fireRemoveUpdate(mse);
+        fireChangedUpdate(mse);
+        int line = document.offsetToPosition(offset, Bias.Forward).getMajor();
+        recalculateScopesForLinesInRange(line, line);
         inNotification = false;
-        
-        runScheduledUpdates();
     }
-    
+
     /**
-     * Notify that the whole document potentially needs repainting.
+     * Gets the RichTextFX document wrapped by this class.
+     * The styles are deliberately wildcards as the actual types are
+     * an implementation detail private to this class.
+     * @return
      */
-    public void documentChanged()
+    public SimpleEditableStyledDocument<?, ?> getDocument()
     {
-        repaintLines(0, getLength());
+        return document;
     }
-    
+
+    /**
+     * Placed in this class so we don't have to expose document's
+     * inner types.
+     * @return Creates a new MoeEditorPane for this document
+     */
+    @OnThread(Tag.FXPlatform)
+    public MoeEditorPane makeEditorPane(MoeEditor editor, BooleanExpression compiledStatus)
+    {
+        return new MoeEditorPane(editor, document, syntaxView, compiledStatus);
+    }
+
     /**
      * Notify that a certain area of the document needs repainting.
      */
     public void repaintLines(int offset, int length)
     {
-        fireChangedUpdate(new DefaultDocumentEvent(offset, length, EventType.CHANGE));
+        int startLine = offsetToPosition(offset).getMajor();
+        int endLine = offsetToPosition(offset + length).getMajor();
+        recalculateScopesForLinesInRange(startLine, endLine);
+    }
+
+    public int getLength()
+    {
+        return document.getLength();
+    }
+
+    public String getText(int start, int length)
+    {
+        if (cachedContent == null)
+        {
+            return document.getText(start, start + length);
+        }
+        else
+        {
+            return cachedContent.substring(start, start + length);
+        }
+    }
+
+    public void getText(int startOffset, int length, Segment segment)
+    {
+        String s = getText(startOffset, length);
+        segment.array = s.toCharArray();
+        segment.offset = 0;
+        segment.count = s.length();
+    }
+
+    public void insertString(int start, String text)
+    {
+        replace(start, 0, text);
+    }
+
+    public void replace(int start, int length, String text)
+    {
+        document.replace(start, start + length, ReadOnlyStyledDocument.fromString(text, null, ImmutableSet.of(), StyledText.textOps()));
+    }
+
+    public void remove(int start, int length)
+    {
+        if (length != 0)
+            document.replace(start, start + length, new SimpleEditableStyledDocument<>(null, ImmutableSet.of()));
+    }
+
+
+    /**
+     * First line is one
+     */
+    public EnumSet<ParagraphAttribute> getParagraphAttributes(int lineNo)
+    {
+        if (syntaxView != null)
+            return syntaxView.getParagraphAttributes(lineNo);
+        else
+            return EnumSet.noneOf(ParagraphAttribute.class);
+    }
+
+    @OnThread(Tag.FXPlatform)
+    public static interface Element
+    {
+        public Element getElement(int index);
+        public int getStartOffset();
+        public int getEndOffset();
+        public int getElementIndex(int offset);
+        public int getElementCount();
+    }
+
+    public Element getDefaultRootElement()
+    {
+        // This is a different kind of element, which is only there to return a wrapper for the paragraphs:
+        return new Element()
+        {
+            @Override
+            public Element getElement(int index)
+            {
+                if (index >= (lineStarts != null ? lineStarts.length : document.getParagraphs().size()))
+                    return null;
+
+                boolean lastPara = lineStarts != null ? (index == lineStarts.length - 1) : (index == document.getParagraphs().size() - 1);
+                int paraLength;
+                if (lineStarts == null)
+                {
+                    paraLength = document.getParagraph(index).length() + (lastPara ? 0 : 1 /* newline */);
+                }
+                else
+                {
+                    paraLength = lastPara ? (document.getLength() - lineStarts[index]) : lineStarts[index + 1] - lineStarts[index];
+                }
+                int pos = getAbsolutePosition(index, 0);
+                return new Element()
+                {
+                    @Override
+                    public Element getElement(int index)
+                    {
+                        return null;
+                    }
+
+                    @Override
+                    public int getStartOffset()
+                    {
+                        return pos;
+                    }
+
+                    @Override
+                    public int getEndOffset()
+                    {
+                        return pos + paraLength;
+                    }
+
+                    @Override
+                    public int getElementIndex(int offset)
+                    {
+                        return -1;
+                    }
+
+                    @Override
+                    public int getElementCount()
+                    {
+                        return 0;
+                    }
+                };
+            }
+
+            @Override
+            public int getStartOffset()
+            {
+                return 0;
+            }
+
+            @Override
+            public int getEndOffset()
+            {
+                return document.getLength();
+            }
+
+            @Override
+            public int getElementIndex(int offset)
+            {
+                return offsetToPosition(offset).getMajor();
+            }
+
+            @Override
+            public int getElementCount()
+            {
+                if (lineStarts != null)
+                    return lineStarts.length;
+                else
+                    return document.getParagraphs().size();
+            }
+        };
+    }
+
+    @OnThread(Tag.Any)
+    public class Position
+    {
+        private final Subscription subscription;
+        private int position;
+
+        public Position(int initial)
+        {
+            this.position = initial;
+            subscription = document.plainChanges().subscribe(this::changed);
+        }
+
+        private void changed(PlainTextChange c)
+        {
+            if (c.getPosition() <= position)
+            {
+                // Insertion was before us, we need to adjust
+
+                // First, adjust for removal.
+                // If we are in removed section, go to start of removal, otherwise subtract length of removed section
+                position -= Math.min(c.getRemovalEnd() - c.getPosition(), position - c.getPosition());
+                // Now adjust for insertion
+                position += (c.getInsertionEnd() - c.getPosition());
+            }
+            // Otherwise it's after us; we can ignore it
+        }
+
+        public void dispose()
+        {
+            subscription.unsubscribe();
+        }
+
+        public int getOffset()
+        {
+            return position;
+        }
     }
 }

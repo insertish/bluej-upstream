@@ -23,10 +23,12 @@ package bluej.parser;
 
 import java.lang.reflect.Modifier;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
+import bluej.utility.Utility;
 import threadchecker.OnThread;
 import threadchecker.Tag;
 import bluej.stride.generic.InteractionManager.Kind;
@@ -39,13 +41,15 @@ import java.util.function.Supplier;
  * 
  * @author Marion Zalk
  */
-@OnThread(Tag.Swing)
+@OnThread(Tag.FXPlatform)
 public abstract class AssistContent
 {
+    @OnThread(Tag.Any)
     public static enum Access
     {
         PRIVATE, PROTECTED, PACKAGE, PUBLIC;
     }
+    @OnThread(Tag.Any)
     public static enum CompletionKind
     {
         METHOD, CONSTRUCTOR, FIELD, LOCAL_VAR, FORMAL_PARAM, TYPE;
@@ -55,7 +59,8 @@ public abstract class AssistContent
             return new HashSet<>(Arrays.asList(METHOD, FIELD));
         }
     }
-    
+
+    @OnThread(Tag.Any)
     public static class ParamInfo
     {
         private final String fullType;
@@ -180,6 +185,7 @@ public abstract class AssistContent
     
     /** Will return empty list if it's a method with no parameters,
      *  but null if it is a variable or type and thus can't have parameters */
+    @OnThread(Tag.FXPlatform)
     public abstract List<ParamInfo> getParams();
 
     /** Get the type for this completion (as a string).
@@ -204,6 +210,7 @@ public abstract class AssistContent
      * delimiters (slash-star at the start and star-slash at the end) and intermediate
      * star characters.
      */
+    @OnThread(Tag.FXPlatform)
     public abstract String getJavadoc();
     
     /**
@@ -255,6 +262,7 @@ public abstract class AssistContent
      * @return  true if the javadoc is already available, false otherwise
      *           (notification is pending).
      */
+    @OnThread(Tag.FXPlatform)
     public abstract boolean getJavadocAsync(JavadocCallback callback, Executor executor);
 
 
@@ -270,5 +278,13 @@ public abstract class AssistContent
             return Access.PUBLIC;
         }
         return Access.PACKAGE;
+    }
+
+    public static Comparator<AssistContent> getComparator()
+    {
+        return Comparator.comparing(AssistContent::getName)
+            .thenComparing(AssistContent::getKind)
+            .thenComparing(AssistContent::getParams,
+                Utility.listComparator(Comparator.comparing(ParamInfo::getQualifiedType)));
     }
 }

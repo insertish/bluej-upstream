@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2014,2016  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2014,2016,2017  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -21,34 +21,33 @@
  */
 package bluej.groupwork.ui;
 
-import bluej.prefmgr.PrefMgr;
-import java.awt.Dimension;
-import java.awt.EventQueue;
-
-import javax.swing.JComponent;
-import javax.swing.JLabel;
-import javax.swing.JProgressBar;
-import javax.swing.OverlayLayout;
+import javafx.animation.Animation;
+import javafx.animation.KeyFrame;
+import javafx.animation.KeyValue;
+import javafx.animation.Timeline;
+import javafx.scene.control.Label;
+import javafx.scene.control.ProgressBar;
+import javafx.scene.layout.StackPane;
+import javafx.util.Duration;
 
 import threadchecker.OnThread;
 import threadchecker.Tag;
 
-public class ActivityIndicator extends JComponent
+@OnThread(Tag.FXPlatform)
+public class ActivityIndicator extends StackPane
 {
-    private JProgressBar progressBar;
-    private JLabel messageLabel;
+    private ProgressBar progressBar;
+    private Label messageLabel;
+    private Timeline animation;
+
     public ActivityIndicator()
     {
-        setBorder(null);
-        setLayout(new OverlayLayout(this));
-        progressBar = new JProgressBar(0, 100);
-        progressBar.setIndeterminate(true);
+        progressBar = new ProgressBar();
         progressBar.setVisible(false);
-        add(progressBar);
-        messageLabel = new JLabel();
-        messageLabel.setFont(PrefMgr.getStandardFont());
+        getChildren().add(progressBar);
+        messageLabel = new Label();
         messageLabel.setVisible(false);
-        add(messageLabel);
+        getChildren().add(messageLabel);
     }
     
     /**
@@ -57,45 +56,35 @@ public class ActivityIndicator extends JComponent
      * 
      * @param running  The new running state
      */
-    @OnThread(Tag.Any)
     public void setRunning(boolean running)
     {
-        EventQueue.invokeLater(() -> {
-            messageLabel.setVisible(!running);
-            progressBar.setVisible(running);
-                });
+        messageLabel.setVisible(!running);
+        progressBar.setVisible(running);
+        if (animation != null)
+        {
+            // Either way, we stop the animation (later we restart, or leave stopped):
+            animation.stop();
+            animation = null;
+        }
+        
+        if (running)
+        {
+            animation = new Timeline(
+                new KeyFrame(Duration.ZERO, new KeyValue(progressBar.progressProperty(), 0.0)),
+                new KeyFrame(Duration.millis(1000), new KeyValue(progressBar.progressProperty(), 1.0)));
+            animation.setAutoReverse(true);
+            animation.setCycleCount(Animation.INDEFINITE);
+            animation.playFromStart();
+        }
     }
     /**
      * Set message to display when the activity indicator is not in a running state.
      * @param msg 
      */
-    @OnThread(Tag.Any)
     public void setMessage(String msg)
     {
-        EventQueue.invokeLater(() -> {
-            if (msg != null){
-                messageLabel.setText(msg);
-            }
-        });
-    }
-    
-    public Dimension getPreferredSize()
-    {
-        return progressBar.getPreferredSize();
-    }
-    
-    public Dimension getMinimumSize()
-    {
-        return progressBar.getMinimumSize();
-    }
-    
-    public Dimension getMaximumSize()
-    {
-        return progressBar.getMaximumSize();
-    }
-    
-    public boolean isValidateRoot()
-    {
-        return true;
+        if (msg != null){
+            messageLabel.setText(msg);
+        }
     }
 }

@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2016  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2016,2017  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -35,20 +35,18 @@ public class UpdateDialogAction extends TeamAction
 {
     private Project project;
     
-    public UpdateDialogAction(PkgMgrFrame pmf)
+    public UpdateDialogAction()
     {
-        super(pmf, "team.update", true);
-        putValue(SHORT_DESCRIPTION, Config.getString("tooltip.update"));
+        super("team.update", true);
+        shortDescription = Config.getString("tooltip.update");
     }
 
-    /* (non-Javadoc)
-     * @see java.awt.event.ActionListener#actionPerformed(java.awt.event.ActionEvent)
-     */
+    @Override
     public void actionPerformed(PkgMgrFrame pmf)
     {
         project = pmf.getProject();
-        if (project != null) {
-            project.getUpdateDialog().setVisible(true);
+        if (project != null && project.getTeamSettingsController().initRepository()) {
+            project.getUpdateDialog(pmf).setVisible(true);
         }
     }
 }

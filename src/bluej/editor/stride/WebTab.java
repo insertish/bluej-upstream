@@ -84,6 +84,7 @@ public class WebTab extends FXTab
             ));
 
             @Override
+            @OnThread(Tag.FXPlatform)
             List<Menu> getMenus()
             {
                 updateMoveMenus();
@@ -109,12 +110,14 @@ public class WebTab extends FXTab
     }
 
     @Override
+    @OnThread(Tag.FXPlatform)
     List<Menu> getMenus()
     {
         return menuManager.getMenus();
     }
 
     @Override
+    @OnThread(Tag.FXPlatform)
     String getWebAddress()
     {
         return browser.getEngine().getLocation();

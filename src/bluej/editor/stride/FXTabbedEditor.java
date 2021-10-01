@@ -45,6 +45,8 @@ import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleDoubleProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.beans.property.StringProperty;
+import javafx.beans.value.ChangeListener;
+import javafx.beans.value.ObservableValue;
 import javafx.collections.ListChangeListener;
 import javafx.collections.ObservableList;
 import javafx.geometry.Bounds;
@@ -68,27 +70,20 @@ import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.Pane;
 import javafx.scene.layout.StackPane;
 import javafx.scene.paint.Color;
+import javafx.scene.shape.Rectangle;
 import javafx.stage.Stage;
 import javafx.stage.Window;
 import javafx.util.Duration;
 import threadchecker.OnThread;
 import threadchecker.Tag;
 
-import javax.swing.JComponent;
-import javax.swing.KeyStroke;
-import java.awt.AWTKeyStroke;
-import java.awt.KeyboardFocusManager;
-import java.awt.Rectangle;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 
 /**
@@ -138,14 +133,10 @@ public @OnThread(Tag.FX) class FXTabbedEditor
     /** Cached so it can be read from any thread.  Written to once on Swing thread in initialise,
      * then effectively final thereafter */
     @OnThread(Tag.Any) private String projectTitle;
-    @OnThread(Tag.Any)
-    private final AtomicBoolean stageShowingSwing = new AtomicBoolean(false);
     private StringProperty titleStatus = new SimpleStringProperty("");
     private UntitledCollapsiblePane collapsibleCatalogueScrollPane;
     private FrameShelf shelf;
     private boolean dragFromShelf;
-    @OnThread(Tag.FXPlatform)
-    private FXPlatformRunnable cancelWiggle;
 
 
     // Neither the constructor nor any initialisers should do any JavaFX work until
@@ -155,22 +146,6 @@ public @OnThread(Tag.FX) class FXTabbedEditor
     {
         this.project = project;
         this.startSize = startSize;
-    }
-
-    @OnThread(Tag.Swing)
-    public static void disableCtrlTabTraversal(JComponent component)
-    {
-        KeyStroke ctrlTab = KeyStroke.getKeyStroke("ctrl TAB");
-        KeyStroke ctrlShiftTab = KeyStroke.getKeyStroke("ctrl shift TAB");
-        // Remove ctrl-tab from normal focus traversal
-        Set<AWTKeyStroke> forwardKeys = new HashSet<AWTKeyStroke>(component.getFocusTraversalKeys(KeyboardFocusManager.FORWARD_TRAVERSAL_KEYS));
-        forwardKeys.remove(ctrlTab);
-        component.setFocusTraversalKeys(KeyboardFocusManager.FORWARD_TRAVERSAL_KEYS, forwardKeys);
-
-        // Remove ctrl-shift-tab from normal focus traversal
-        Set<AWTKeyStroke> backwardKeys = new HashSet<AWTKeyStroke>(component.getFocusTraversalKeys(KeyboardFocusManager.BACKWARD_TRAVERSAL_KEYS));
-        backwardKeys.remove(ctrlShiftTab);
-        component.setFocusTraversalKeys(KeyboardFocusManager.BACKWARD_TRAVERSAL_KEYS, backwardKeys);
     }
 
     static boolean isUselessDrag(FrameCursor dragTarget, List<Frame> dragging, boolean copying)
@@ -189,7 +164,6 @@ public @OnThread(Tag.FX) class FXTabbedEditor
         //add the greenfoot icon to the Stride editor.
         BlueJTheme.setWindowIconFX(stage);
 
-        JavaFXUtil.addChangeListener(stage.showingProperty(), stageShowingSwing::set);
         initialiseFX();
     }
 
@@ -260,32 +234,38 @@ public @OnThread(Tag.FX) class FXTabbedEditor
 
         tabPane.getStyleClass().add("tabbed-editor");
 
-        tabPane.getSelectionModel().selectedItemProperty().addListener((a, prevSel, selTab) -> {
-            if (selTab != null)
-                updateMenusForTab((FXTab)selTab);
-
-            if (prevSel != null && prevSel != selTab)
-                ((FXTab)prevSel).notifyUnselected();
-
-            if (selTab != null && stage.isFocused())
-                ((FXTab)selTab).notifySelected();
-
-            if (selTab != null && ((FXTab)selTab).shouldShowCatalogue())
+        tabPane.getSelectionModel().selectedItemProperty().addListener(new ChangeListener<Tab>()
+        {
+            @Override
+            @OnThread(value = Tag.FXPlatform, ignoreParent = true)
+            public void changed(ObservableValue<? extends Tab> a, Tab prevSel, Tab selTab)
             {
-                collapsibleCatalogueScrollPane.setVisible(true);
-                collapsibleCatalogueScrollPane.setManaged(true);
-            }
-            else
-            {
-                collapsibleCatalogueScrollPane.setVisible(false);
-                collapsibleCatalogueScrollPane.setManaged(false);
-            }
-            
-            if (isWindowVisible())
-            {
-                if (!(selTab instanceof FrameEditorTab))
+                if (selTab != null)
+                    FXTabbedEditor.this.updateMenusForTab((FXTab) selTab);
+
+                if (prevSel != null && prevSel != selTab)
+                    ((FXTab) prevSel).notifyUnselected();
+
+                if (selTab != null && stage.isFocused())
+                    ((FXTab) selTab).notifySelected();
+
+                if (selTab != null && ((FXTab) selTab).shouldShowCatalogue())
                 {
-                    JavaFXUtil.runPlatformLater(() -> scheduleUpdateCatalogue(null, null, CodeCompletionState.NOT_POSSIBLE, false, Frame.View.NORMAL, Collections.emptyList(), Collections.emptyList()));
+                    collapsibleCatalogueScrollPane.setVisible(true);
+                    collapsibleCatalogueScrollPane.setManaged(true);
+                }
+                else
+                {
+                    collapsibleCatalogueScrollPane.setVisible(false);
+                    collapsibleCatalogueScrollPane.setManaged(false);
+                }
+
+                if (FXTabbedEditor.this.isWindowVisible())
+                {
+                    if (!(selTab instanceof FrameEditorTab))
+                    {
+                        JavaFXUtil.runPlatformLater(() -> FXTabbedEditor.this.scheduleUpdateCatalogue(null, null, CodeCompletionState.NOT_POSSIBLE, false, Frame.View.NORMAL, Collections.emptyList(), Collections.emptyList()));
+                    }
                 }
             }
         });
@@ -306,7 +286,7 @@ public @OnThread(Tag.FX) class FXTabbedEditor
             tabs.forEach(t -> close((FXTab)t));
         });
 
-        JavaFXUtil.addChangeListener(stage.focusedProperty(), focused -> {
+        JavaFXUtil.addChangeListenerPlatform(stage.focusedProperty(), focused -> {
             if (focused) {
                 ((FXTab) tabPane.getSelectionModel().getSelectedItem()).notifySelected();
             }
@@ -325,7 +305,7 @@ public @OnThread(Tag.FX) class FXTabbedEditor
                 ((FXTab)tabPane.getSelectionModel().getSelectedItem()).notifyUnselected();
         });
 
-        JavaFXUtil.addChangeListener(tabPane.focusedProperty(), focused -> {
+        JavaFXUtil.addChangeListenerPlatform(tabPane.focusedProperty(), focused -> {
             // Very specific work around for Moe editor inside JavaFX SwingNode on Linux:
             // Must make sure focus doesn't remain in the tab header area.
             if (focused)
@@ -404,19 +384,11 @@ public @OnThread(Tag.FX) class FXTabbedEditor
         });
 
         stage.titleProperty().bind(Bindings.concat(
-            JavaFXUtil.apply(tabPane.getSelectionModel().selectedItemProperty(), t -> ((FXTab)t).windowTitleProperty(), "Unknown")
+            JavaFXUtil.applyPlatform(tabPane.getSelectionModel().selectedItemProperty(), t -> ((FXTab)t).windowTitleProperty(), "Unknown")
                 ," - ", projectTitle, titleStatus));
-
-        JavaFXUtil.addChangeListenerPlatform(stage.widthProperty(), w -> {
-            if (Config.isWinOS() && tabPane.getSelectionModel().getSelectedItem() instanceof MoeFXTab)
-                scheduleWindowWiggle();
-        });
-        JavaFXUtil.addChangeListenerPlatform(stage.heightProperty(), h -> {
-            if (Config.isWinOS() && tabPane.getSelectionModel().getSelectedItem() instanceof MoeFXTab)
-                scheduleWindowWiggle();
-        });
     }
 
+    @OnThread(Tag.FXPlatform)
     private void updateMenusForTab(FXTab selTab)
     {
         menuBar.getMenus().setAll(selTab.getMenus());
@@ -451,12 +423,6 @@ public @OnThread(Tag.FX) class FXTabbedEditor
         //Debug.time("initialisedFX");
         if (!tabPane.getTabs().contains(panel)) {
             tabPane.getTabs().add(panel);
-            // Do a size up and down for Moe tabs because SwingNode seems to
-            // have problems painting initially on some Windows systems.
-            if (panel instanceof MoeFXTab && !stage.isMaximized() && !stage.isIconified() && Config.isWinOS())
-            {
-                scheduleWindowWiggle();
-            }
             if (toFront)
             {
                 setWindowVisible(visible, panel);
@@ -464,25 +430,6 @@ public @OnThread(Tag.FX) class FXTabbedEditor
                 Platform.runLater(panel::focusWhenShown);
             }
         }
-    }
-
-    @OnThread(Tag.FXPlatform)
-    private void scheduleWindowWiggle()
-    {
-        if (cancelWiggle != null)
-        {
-            cancelWiggle.run();
-        }
-        cancelWiggle = JavaFXUtil.runAfter(Duration.seconds(0.5),() -> {
-            if (!stage.isMaximized() && !stage.isIconified())
-            {
-                // Left and right one pixel:
-                final double x = stage.getX();
-                stage.setX(x + 1);
-                // Must wait before reversing, so that SwingNode sees change:
-                JavaFXUtil.runAfterCurrent(() -> stage.setX(x));
-            }
-        });
     }
 
     /** 
@@ -587,15 +534,6 @@ public @OnThread(Tag.FX) class FXTabbedEditor
     }
 
     /**
-     * Version of isWindowVisible to be called on the Swing thread.
-     */
-    @OnThread(Tag.Swing)
-    public boolean isWindowVisibleSwing()
-    {
-        return stageShowingSwing.get();
-    }
-
-    /**
      * Brings the tab to the front: unminimises window, brings window to the front, and selects the tab
      */
     public void bringToFront(Tab tab)
@@ -617,11 +555,13 @@ public @OnThread(Tag.FX) class FXTabbedEditor
     /**
      * Removes the given tab from this tabbed editor window
      */
+    @OnThread(Tag.FXPlatform)
     public void close(FXTab tab)
     {
         close(tab, false);
     }
 
+    @OnThread(Tag.FXPlatform)
     private void close(FXTab tab, boolean partOfMove)
     {
         tabPane.getTabs().remove(tab);
@@ -993,6 +933,7 @@ public @OnThread(Tag.FX) class FXTabbedEditor
         destination.addTab(tab, true, true, true);
     }
 
+    @OnThread(Tag.FXPlatform)
     public void updateMoveMenus()
     {
         tabPane.getTabs().forEach(t -> updateMenusForTab((FXTab)t));

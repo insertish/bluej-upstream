@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2014,2015,2016  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2014,2015,2016,2017  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -23,19 +23,14 @@ package bluej.groupwork.actions;
 
 import java.io.File;
 
-import bluej.utility.javafx.FXPlatformConsumer;
-import javafx.application.Platform;
-
-import threadchecker.OnThread;
-import threadchecker.Tag;
 import bluej.Config;
 import bluej.groupwork.Repository;
+import bluej.groupwork.RepositoryOrError;
 import bluej.groupwork.TeamSettingsController;
 import bluej.groupwork.TeamUtils;
 import bluej.groupwork.TeamworkCommand;
 import bluej.groupwork.TeamworkCommandResult;
 import bluej.groupwork.ui.ModuleSelectDialog;
-import bluej.groupwork.ui.TeamSettingsDialog;
 import bluej.pkgmgr.Import;
 import bluej.pkgmgr.Package;
 import bluej.pkgmgr.PkgMgrFrame;
@@ -43,9 +38,11 @@ import bluej.pkgmgr.Project;
 import bluej.utility.Debug;
 import bluej.utility.DialogManager;
 import bluej.utility.FileUtility;
-import bluej.utility.SwingWorker;
+import bluej.utility.FXWorker;
+import bluej.utility.javafx.FXPlatformConsumer;
 
-import javax.swing.SwingUtilities;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 
 /**
  * An action to perform a checkout of a module in CVS. The module is checked
@@ -54,94 +51,86 @@ import javax.swing.SwingUtilities;
  *
  * @author Kasper
  */
+@OnThread(Tag.FXPlatform)
 public class CheckoutAction extends TeamAction
 {
-    public CheckoutAction(PkgMgrFrame pmf)
+    public CheckoutAction()
     {
-        super(pmf, "team.checkout");
+        super("team.checkout", true);
     }
 
-    /*
-     * (non-Javadoc)
-     *
-     * @see java.awt.event.ActionListener#actionPerformed(java.awt.event.ActionEvent)
-     */
     public void actionPerformed(PkgMgrFrame oldFrame)
     {
         //TeamSettingsController tsc = new TeamSettingsController(projectDir);
         // Create a TeamSettingsController for the current project directory,
         // switch it to the new one once it's been created
         final TeamSettingsController tsc = new TeamSettingsController(new File(".").getAbsoluteFile());
-        TeamSettingsDialog tsd = tsc.getTeamSettingsDialog();
-        Platform.runLater(() -> tsd.setLocationRelativeTo(oldFrame.getFXWindow()));
 
-        if (tsd.doTeamSettings() == TeamSettingsDialog.OK) {
+        if (tsc.getTeamSettingsDialog().showAndWait().isPresent()) {
+            RepositoryOrError repositoryOrError = tsc.trytoEstablishRepository(true);
+            if (repositoryOrError == null)
+                return; // user canceled
+
+            if (repositoryOrError.getRepository() == null) {
+                // The repository can't be established, so no need to establish the worker
+                TeamUtils.handleServerResponseFX(repositoryOrError.getError(), oldFrame.getFXWindow());
+                return;
+            }
+
+            Repository repository = repositoryOrError.getRepository();
+
             FXPlatformConsumer<File> finishCheckout = projectDir -> {
+                PkgMgrFrame newFrame;
+                if (oldFrame.isEmptyFrame())
+                {
+                    newFrame = oldFrame;
+                }
+                else
+                {
+                    newFrame = PkgMgrFrame.createFrame();
+                    newFrame.setVisible(true);
+                }
 
-                SwingUtilities.invokeLater(() -> {
-                    PkgMgrFrame newFrame;
-                    if (oldFrame.isEmptyFrame())
-                    {
-                        newFrame = oldFrame;
-                    } else
-                    {
-                        newFrame = PkgMgrFrame.createFrame();
-                        newFrame.setVisible(true);
-                    }
-
-                    new CheckoutWorker(newFrame, tsc.getRepository(true), projectDir, tsc).start();
-                });
+                new CheckoutWorker(newFrame, repository, projectDir, tsc).start();
             };
 
             if (!tsc.isDVCS()) {
                 //if not DVCS, we need to select module.
-                ModuleSelectDialog moduleDialog = new ModuleSelectDialog(oldFrame::getFXWindow, tsc.getRepository(true));
-                Platform.runLater(() -> moduleDialog.setLocationRelativeTo(oldFrame.getFXWindow()));
-                moduleDialog.setVisible(true);
+                ModuleSelectDialog moduleDialog = new ModuleSelectDialog(oldFrame::getFXWindow, repository);
+                moduleDialog.setLocationRelativeTo(oldFrame.getFXWindow());
+                moduleDialog.showAndWait();
 
                 String moduleName = moduleDialog.getModuleName();
-                if (moduleName != null) {
-                    Platform.runLater(() ->
-                    {
-                        File parentDir = FileUtility.getSaveProjectFX(oldFrame.getFXWindow(), Config.getString("team.checkout.filechooser.title"));
+                if (moduleName == null)
+                    return; //null module.
 
-                        if (parentDir == null)
-                            return; // User cancelled
+                File parentDir = FileUtility.getSaveProjectFX(oldFrame.getFXWindow(), Config.getString("team.checkout.filechooser.title"));
+                if (parentDir == null)
+                    return; // User cancelled
 
-                        if (Package.isPackage(parentDir))
-                        {
-                            Debug.message("Attempted to checkout a project into an existing project: " + parentDir);
-                            DialogManager.showErrorFX(null, "team-cannot-import-into-existing-project");
-                            return;
-                        }
-                        finishCheckout.accept(new File(parentDir, moduleName));
-                    });
-                } else {
-                    //null module.
+                if (Package.isPackage(parentDir))
+                {
+                    Debug.message("Attempted to checkout a project into an existing project: " + parentDir);
+                    DialogManager.showErrorFX(null, "team-cannot-import-into-existing-project");
                     return;
                 }
-            } else {
-
+                finishCheckout.accept(new File(parentDir, moduleName));
+            }
+            else {
                 //it is a DVCS project.
                 //there is no module selection in a DVCS project. Therefore,
                 //the selected file is the project dir.
-                Platform.runLater(() -> {
-                    File projectDir = FileUtility.getSaveProjectFX(oldFrame.getFXWindow(), Config.getString("team.checkout.DVCS.filechooser.title"));
-                    if (projectDir != null)
-                    {
-                        if (Package.isPackage(projectDir))
-                        {
-                            Debug.message("Attempted to checkout a project into an existing project: " + projectDir);
-                            DialogManager.showErrorFX(null, "team-cannot-import-into-existing-project");
-                            return;
-                        }
-                        finishCheckout.accept(projectDir);
-                    } else
-                    {
-                        //no project dir. nothing to do.
-                        return;
-                    }
-                });
+                File projectDir = FileUtility.getSaveProjectFX(oldFrame.getFXWindow(), Config.getString("team.checkout.DVCS.filechooser.title"));
+                if (projectDir == null)
+                    return;//no project dir. nothing to do.
+
+                if (Package.isPackage(projectDir))
+                {
+                    Debug.message("Attempted to checkout a project into an existing project: " + projectDir);
+                    DialogManager.showErrorFX(null, "team-cannot-import-into-existing-project");
+                    return;
+                }
+                finishCheckout.accept(projectDir);
             }
         }
     }
@@ -151,7 +140,7 @@ public class CheckoutAction extends TeamAction
      *
      * @author Davin McCall
      */
-    private class CheckoutWorker extends SwingWorker
+    private class CheckoutWorker extends FXWorker
     {
         private Repository repository;
         private PkgMgrFrame newFrame;
@@ -171,12 +160,15 @@ public class CheckoutAction extends TeamAction
 
         /*
          * Get the files from the repository.
-         * @see bluej.utility.SwingWorker#construct()
+         * @see bluej.utility.FXWorker#construct()
          */
+        @OnThread(Tag.Worker)
         public Object construct()
         {
             newFrame.setStatus(Config.getString("team.checkingout"));
             newFrame.startProgress();
+
+            // Repository can't be null; checked before constructing the worker
             TeamworkCommand checkoutCmd = repository.checkout(projDir);
             response = checkoutCmd.getResult();
 
@@ -194,7 +186,7 @@ public class CheckoutAction extends TeamAction
 
         /*
          * Now open the directory as a BlueJ project.
-         * @see bluej.utility.SwingWorker#finished()
+         * @see bluej.utility.FXWorker#finished()
          */
         public void finished()
         {
@@ -214,22 +206,19 @@ public class CheckoutAction extends TeamAction
                 newFrame.openPackage(initialPackage, newFrame);
             }
             else {
-                Platform.runLater(() -> {
-                    TeamUtils.handleServerResponseFX(response, newFrame.getFXWindow());
-                    SwingUtilities.invokeLater(() -> cleanup());
-                });
+                TeamUtils.handleServerResponseFX(response, newFrame.getFXWindow());
+                cleanup();
             }
         }
 
         /**
          * Clean up after failed checkout.
          */
-        @OnThread(Tag.Swing)
         public void cleanup()
         {
             deleteDirectory(projDir);
             projDir.delete();
-            Platform.runLater(() -> newFrame.doClose(true, false));
+            newFrame.doClose(true, false);
         }
         
         /**
@@ -247,5 +236,7 @@ public class CheckoutAction extends TeamAction
                 }
             }
         }
+
+        public void abort() {}
     }
 }

@@ -21,75 +21,78 @@
  */
 package bluej.editor.stride;
 
-import java.awt.EventQueue;
-import java.io.File;
-import java.io.IOException;
-import java.lang.ref.WeakReference;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.Set;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Future;
-import java.util.concurrent.locks.ReadWriteLock;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
-import java.util.function.BiFunction;
-import java.util.function.Consumer;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
-
+import bluej.Config;
 import bluej.collect.StrideEditReason;
 import bluej.compiler.CompileReason;
 import bluej.compiler.CompileType;
 import bluej.debugger.DebuggerThread;
+import bluej.editor.stride.ErrorOverviewBar.ErrorInfo;
+import bluej.editor.stride.ErrorOverviewBar.ErrorState;
+import bluej.editor.stride.FXTabbedEditor.CodeCompletionState;
 import bluej.editor.stride.FrameCatalogue.Hint;
 import bluej.parser.AssistContent;
+import bluej.parser.AssistContent.CompletionKind;
 import bluej.parser.AssistContent.ParamInfo;
 import bluej.parser.ConstructorCompletion;
+import bluej.parser.PrimitiveTypeCompletion;
+import bluej.parser.entity.EntityResolver;
+import bluej.parser.entity.PackageOrClass;
+import bluej.pkgmgr.JavadocResolver;
+import bluej.pkgmgr.Project;
+import bluej.pkgmgr.target.ClassTarget;
+import bluej.pkgmgr.target.Target;
 import bluej.prefmgr.PrefMgr;
+import bluej.stride.framedjava.ast.ASTUtility;
 import bluej.stride.framedjava.ast.HighlightedBreakpoint;
+import bluej.stride.framedjava.ast.JavaFragment.PosInSourceDoc;
 import bluej.stride.framedjava.ast.SlotFragment;
-import bluej.stride.framedjava.ast.links.PossibleLink;
 import bluej.stride.framedjava.ast.links.PossibleKnownMethodLink;
+import bluej.stride.framedjava.ast.links.PossibleLink;
 import bluej.stride.framedjava.ast.links.PossibleMethodUseLink;
 import bluej.stride.framedjava.ast.links.PossibleTypeLink;
 import bluej.stride.framedjava.ast.links.PossibleVarLink;
+import bluej.stride.framedjava.elements.CallElement;
+import bluej.stride.framedjava.elements.ClassElement;
+import bluej.stride.framedjava.elements.CodeElement;
 import bluej.stride.framedjava.elements.LocatableElement.LocationMap;
-import bluej.stride.framedjava.frames.ImportFrame;
-import bluej.stride.framedjava.frames.StrideCategory;
-import bluej.stride.framedjava.frames.StrideDictionary;
-import bluej.stride.generic.ExtensionDescription;
+import bluej.stride.framedjava.elements.MethodWithBodyElement;
+import bluej.stride.framedjava.elements.NormalMethodElement;
+import bluej.stride.framedjava.elements.TopLevelCodeElement;
+import bluej.stride.framedjava.errors.CodeError;
+import bluej.stride.framedjava.errors.ErrorAndFixDisplay;
+import bluej.stride.framedjava.frames.*;
+import bluej.stride.framedjava.slots.ExpressionSlot;
+import bluej.stride.generic.*;
+import bluej.stride.generic.Frame.ShowReason;
+import bluej.stride.generic.Frame.View;
+import bluej.stride.operations.UndoRedoManager;
+import bluej.stride.slots.EditableSlot;
+import bluej.stride.slots.LinkedIdentifier;
 import bluej.stride.slots.SuggestionList;
+import bluej.stride.slots.SuggestionList.SuggestionListParent;
+import bluej.stride.slots.SuggestionList.SuggestionShown;
 import bluej.utility.BackgroundConsumer;
+import bluej.utility.Debug;
+import bluej.utility.Utility;
 import bluej.utility.javafx.CircleCountdown;
+import bluej.utility.javafx.FXConsumer;
 import bluej.utility.javafx.FXPlatformConsumer;
 import bluej.utility.javafx.FXPlatformRunnable;
+import bluej.utility.javafx.FXRunnable;
 import bluej.utility.javafx.FXSupplier;
+import bluej.utility.javafx.JavaFXUtil;
+import bluej.utility.javafx.SharedTransition;
+import bluej.utility.javafx.binding.ViewportHeightBinding;
 import javafx.animation.KeyFrame;
 import javafx.animation.KeyValue;
 import javafx.animation.Timeline;
 import javafx.application.Platform;
 import javafx.beans.Observable;
+import javafx.beans.binding.Bindings;
 import javafx.beans.binding.DoubleExpression;
 import javafx.beans.binding.StringBinding;
 import javafx.beans.binding.StringExpression;
-import javafx.beans.property.BooleanProperty;
-import javafx.beans.property.IntegerProperty;
-import javafx.beans.property.ObjectProperty;
-import javafx.beans.property.Property;
-import javafx.beans.property.ReadOnlyObjectProperty;
-import javafx.beans.property.ReadOnlyStringWrapper;
-import javafx.beans.property.SimpleBooleanProperty;
-import javafx.beans.property.SimpleObjectProperty;
-import javafx.beans.property.SimpleStringProperty;
-import javafx.beans.property.StringProperty;
+import javafx.beans.property.*;
 import javafx.beans.value.ChangeListener;
 import javafx.beans.value.ObservableBooleanValue;
 import javafx.beans.value.ObservableStringValue;
@@ -110,7 +113,11 @@ import javafx.scene.control.Label;
 import javafx.scene.control.Menu;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.image.ImageView;
-import javafx.scene.input.*;
+import javafx.scene.input.KeyCode;
+import javafx.scene.input.KeyEvent;
+import javafx.scene.input.MouseButton;
+import javafx.scene.input.MouseEvent;
+import javafx.scene.input.ScrollEvent;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Pane;
@@ -124,63 +131,21 @@ import javafx.scene.text.TextFlow;
 import javafx.stage.Stage;
 import javafx.util.Duration;
 import javafx.util.Pair;
-
-import javax.swing.SwingUtilities;
-
-import bluej.utility.javafx.SharedTransition;
-import bluej.utility.javafx.binding.ViewportHeightBinding;
 import threadchecker.OnThread;
 import threadchecker.Tag;
-import bluej.Config;
-import bluej.editor.stride.ErrorOverviewBar.ErrorInfo;
-import bluej.editor.stride.ErrorOverviewBar.ErrorState;
-import bluej.editor.stride.FXTabbedEditor.CodeCompletionState;
-import bluej.parser.AssistContent.CompletionKind;
-import bluej.parser.PrimitiveTypeCompletion;
-import bluej.parser.entity.EntityResolver;
-import bluej.parser.entity.PackageOrClass;
-import bluej.pkgmgr.JavadocResolver;
-import bluej.pkgmgr.Project;
-import bluej.pkgmgr.target.ClassTarget;
-import bluej.pkgmgr.target.Target;
-import bluej.stride.framedjava.ast.ASTUtility;
-import bluej.stride.framedjava.ast.JavaFragment.PosInSourceDoc;
-import bluej.stride.slots.LinkedIdentifier;
-import bluej.stride.framedjava.elements.CallElement;
-import bluej.stride.framedjava.elements.ClassElement;
-import bluej.stride.framedjava.elements.CodeElement;
-import bluej.stride.framedjava.elements.MethodWithBodyElement;
-import bluej.stride.framedjava.elements.NormalMethodElement;
-import bluej.stride.framedjava.elements.TopLevelCodeElement;
-import bluej.stride.framedjava.errors.CodeError;
-import bluej.stride.framedjava.errors.ErrorAndFixDisplay;
-import bluej.stride.framedjava.frames.CallFrame;
-import bluej.stride.framedjava.frames.CodeFrame;
-import bluej.stride.framedjava.frames.ConstructorFrame;
-import bluej.stride.framedjava.frames.GreenfootFrameUtil;
-import bluej.stride.framedjava.frames.MethodFrameWithBody;
-import bluej.stride.framedjava.frames.NormalMethodFrame;
-import bluej.stride.framedjava.frames.TopLevelFrame;
-import bluej.stride.framedjava.slots.ExpressionSlot;
-import bluej.stride.generic.AssistContentThreadSafe;
-import bluej.stride.generic.CanvasParent;
-import bluej.stride.generic.Frame;
-import bluej.stride.generic.Frame.ShowReason;
-import bluej.stride.generic.Frame.View;
-import bluej.stride.generic.FrameCanvas;
-import bluej.stride.generic.FrameCursor;
-import bluej.stride.generic.FrameDictionary;
-import bluej.stride.generic.FrameState;
-import bluej.stride.generic.InteractionManager;
-import bluej.stride.generic.RecallableFocus;
-import bluej.stride.generic.SuggestedFollowUpDisplay;
-import bluej.stride.operations.UndoRedoManager;
-import bluej.stride.slots.EditableSlot;
-import bluej.utility.Debug;
-import bluej.utility.Utility;
-import bluej.utility.javafx.FXConsumer;
-import bluej.utility.javafx.FXRunnable;
-import bluej.utility.javafx.JavaFXUtil;
+
+import java.io.File;
+import java.io.IOException;
+import java.lang.ref.WeakReference;
+import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Future;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.function.BiFunction;
+import java.util.function.Consumer;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * The big central editor class for the frame editor.  The frames analogue of MoeEditor.
@@ -189,7 +154,7 @@ import bluej.utility.javafx.JavaFXUtil;
  * (frames, slots, etc) via the InteractionManager interface, so that class is a good place
  * to understand the public interface of this class.
  */
-public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements InteractionManager
+public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements InteractionManager, SuggestionListParent
 {
     @OnThread(Tag.Any)
     private final static List<Future<List<AssistContentThreadSafe>>> popularImports = new ArrayList<>();
@@ -198,7 +163,7 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
     // This static field can be accessed by any thread from an instance, but is initialised once
     // in the FrameEditorTab constructor by the first constructed instance, so is thread safe:
     @OnThread(Tag.Any) private static Future<List<AssistContentThreadSafe>> javaLangImports;
-    @OnThread(Tag.Swing) private static List<AssistContentThreadSafe> prims;
+    @OnThread(Tag.FX) private static List<AssistContentThreadSafe> prims;
     // We keep track ourselves of which item is focused.  Only focusable things in the editor
     // should be frame cursors and slots:
     private final SimpleObjectProperty<CursorOrSlot> focusedItem = new SimpleObjectProperty<>(null);
@@ -256,6 +221,7 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
     private Frame stackHighlight;
     private EditableSlot showingUnderlinesFor = null;
     private ErrorOverviewBar errorOverviewBar;
+    @OnThread(Tag.FX)
     private boolean loading = false;
     // True when we are part way through an animation to set the scroll value:
     private boolean animatingScroll = false;
@@ -268,7 +234,7 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
     private final SimpleBooleanProperty debugVarVisibleProperty = new SimpleBooleanProperty(false);
     private List<HighlightedBreakpoint> latestExecHistory;
     private StringBinding strideFontSizeAsString;
-    private StringExpression strideFontSizeAsStringPT;
+    private StringExpression strideFontCSS;
 
     public FrameEditorTab(Project project, EntityResolver resolver, FrameEditor editor, TopLevelCodeElement initialSource)
     {
@@ -313,6 +279,7 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
                     Config.isGreenfoot() ? null : "javafx.scene.*",
                     Config.isGreenfoot() ? null : "javafx.scene.control.*",
                     Config.isGreenfoot() ? null : "javafx.scene.input.*",
+                    Config.isGreenfoot() ? null : "javafx.scene.layout.*",
                     Config.isGreenfoot() ? null : "javafx.stage.*",
                     Config.isGreenfoot() ? null : "javax.swing.*",
                     Config.isGreenfoot() ? null : "javax.swing.event.*"
@@ -639,22 +606,22 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
                 TopLevelFrame<? extends TopLevelCodeElement> frame = initialSource.createTopLevelFrame(FrameEditorTab.this);
                 frame.regenerateCode();
                 TopLevelCodeElement el = frame.getCode();
-                el.updateSourcePositions();
                 // Finish on the platform thread:
                 JavaFXUtil.runPlatformLater(() ->
                 {
+                    el.updateSourcePositions();
                     FrameEditorTab.this.topLevelFrameProperty.setValue(frame);
                     nameProperty.bind(getTopLevelFrame().nameProperty());
                     // Whenever name changes, trigger recompile even without leaving slot:
                     JavaFXUtil.addChangeListener(getTopLevelFrame().nameProperty(), n ->
                     {
-                        editor.codeModified();
-                        EventQueue.invokeLater(() ->
-                        {
+                        JavaFXUtil.runNowOrLater(() -> {
+                            editor.codeModified();
                             try
                             {
                                 editor.save();
-                            } catch (IOException e)
+                            }
+                            catch (IOException e)
                             {
                                 Debug.reportError("Problem saving after name change", e);
                             }
@@ -976,9 +943,7 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
     private void saveAfterAutomatedEdit()
     {
         modifiedFrame(null, true);
-        SwingUtilities.invokeLater(() ->
-                editor.getWatcher().scheduleCompilation(false, CompileReason.MODIFIED, CompileType.INDIRECT_USER_COMPILE)
-        );
+        editor.getWatcher().scheduleCompilation(false, CompileReason.MODIFIED, CompileType.INDIRECT_USER_COMPILE);
     }
 
     @OnThread(Tag.Any)
@@ -1012,7 +977,7 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
         continueIcon.setRotate(90);
         Button continueButton = new Button("Continue", continueIcon);
         continueButton.setOnAction(e -> {thread.cont(); hideDebuggerControls(); });
-        Button haltButton = new Button("Halt", new ImageView(Config.getFixedImageAsFXImage("stop.gif")));
+        Button haltButton = new Button("Halt", Config.makeStopIcon(true));
         // Halt does nothing at the moment
         Label showVarLabel = new Label("Show variables: ");
         ComboBox<ShowVars> showVars = new ComboBox<>(FXCollections.observableArrayList(ShowVars.values()));
@@ -1102,79 +1067,76 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
         if (link instanceof PossibleTypeLink)
         {
             String name = ((PossibleTypeLink)link).getTypeName();
-            SwingUtilities.invokeLater(() -> {
-                bluej.pkgmgr.Package pkg = project.getPackage("");
-                if (pkg.getAllClassnamesWithSource().contains(name))
+
+            bluej.pkgmgr.Package pkg = project.getPackage("");
+            if (pkg.getAllClassnamesWithSource().contains(name))
+            {
+                Target t = pkg.getTarget(name);
+                if (t instanceof ClassTarget)
                 {
-                    Target t = pkg.getTarget(name);
-                    if (t instanceof ClassTarget)
+                    callback.accept(Optional.of(new LinkedIdentifier(name, link.getStartPosition(), link.getEndPosition(), link.getSlot(), () -> {
+                        link.getSlot().removeAllUnderlines();
+                        ((ClassTarget) t).open();
+                    })));
+                    return;
+                }
+            } else
+            {
+                TopLevelCodeElement code = topLevelFrame.getCode();
+                if (code != null)
+                {
+                    PackageOrClass resolved = code.getResolver().resolvePackageOrClass(name, null);
+                    // Slightly hacky way of deciding if it's in the standard API:
+                    if (resolved.getName().startsWith("java.") || resolved.getName().startsWith("javax."))
                     {
-                        callback.accept(Optional.of(new LinkedIdentifier(name, link.getStartPosition(), link.getEndPosition(), link.getSlot(), () -> {
-                            link.getSlot().removeAllUnderlines();
-                            SwingUtilities.invokeLater(() -> ((ClassTarget) t).open());
-                        })));
+                        callback.accept(Optional.of(new LinkedIdentifier(name, link.getStartPosition(), link.getEndPosition(), link.getSlot(), () -> getParent().openJavaCoreDocTab(resolved.getName()))));
+                        return;
+                    } else if (resolved.getName().startsWith("greenfoot."))
+                    {
+                        callback.accept(Optional.of(new LinkedIdentifier(name, link.getStartPosition(), link.getEndPosition(), link.getSlot(), () -> getParent().openGreenfootDocTab(resolved.getName()))));
                         return;
                     }
-                } else
-                {
-                    TopLevelCodeElement code = topLevelFrame.getCode();
-                    if (code != null)
-                    {
-                        PackageOrClass resolved = code.getResolver().resolvePackageOrClass(name, null);
-                        // Slightly hacky way of deciding if it's in the standard API:
-                        if (resolved.getName().startsWith("java.") || resolved.getName().startsWith("javax."))
-                        {
-                            callback.accept(Optional.of(new LinkedIdentifier(name, link.getStartPosition(), link.getEndPosition(), link.getSlot(), () -> getParent().openJavaCoreDocTab(resolved.getName()))));
-                            return;
-                        } else if (resolved.getName().startsWith("greenfoot."))
-                        {
-                            callback.accept(Optional.of(new LinkedIdentifier(name, link.getStartPosition(), link.getEndPosition(), link.getSlot(), () -> getParent().openGreenfootDocTab(resolved.getName()))));
-                            return;
-                        }
-                    }
                 }
-                callback.accept(Optional.empty());
-            });
+            }
+            callback.accept(Optional.empty());
         }
         else if (link instanceof PossibleKnownMethodLink)
         {
             PossibleKnownMethodLink pml = (PossibleKnownMethodLink) link;
             final String qualClassName = pml.getQualClassName();
             final String urlSuffix = pml.getURLMethodSuffix();
-            SwingUtilities.invokeLater(() -> searchMethodLink(topLevelFrame.getCode(), link, qualClassName, pml.getDisplayName(), pml.getDisplayName(), urlSuffix, callback));
+            searchMethodLink(topLevelFrame.getCode(), link, qualClassName, pml.getDisplayName(), pml.getDisplayName(), urlSuffix, callback);
         }
         else if (link instanceof PossibleMethodUseLink)
         {
             PossibleMethodUseLink pmul = (PossibleMethodUseLink) link;
-            SwingUtilities.invokeLater(() -> {
-                // Need to find which method it is:
-                List<AssistContent> candidates = editor.getAvailableMembers(topLevelFrame.getCode(), pmul.getSourcePositionSupplier().get(), Collections.singleton(CompletionKind.METHOD), true)
-                    .stream()
-                    .filter(ac -> ac.getName().equals(pmul.getMethodName()))
-                    .collect(Collectors.toList());
-                if (candidates.size() > 1)
+            // Need to find which method it is:
+            List<AssistContent> candidates = editor.getAvailableMembers(topLevelFrame.getCode(), pmul.getSourcePositionSupplier().get(), Collections.singleton(CompletionKind.METHOD), true)
+                .stream()
+                .filter(ac -> ac.getName().equals(pmul.getMethodName()))
+                .collect(Collectors.toList());
+            if (candidates.size() > 1)
+            {
+                // Try to narrow down the list to those with the right number of parameters.
+                // but only if at least one match (otherwise leave them all in):
+                if (candidates.stream().anyMatch(ac -> ac.getParams().size() == pmul.getNumParams()))
                 {
-                    // Try to narrow down the list to those with the right number of parameters.
-                    // but only if at least one match (otherwise leave them all in):
-                    if (candidates.stream().anyMatch(ac -> ac.getParams().size() == pmul.getNumParams()))
-                    {
-                        candidates.removeIf(ac -> ac.getParams().size() != pmul.getNumParams());
-                    }
+                    candidates.removeIf(ac -> ac.getParams().size() != pmul.getNumParams());
                 }
+            }
 
-                // At this point, just pick the first in the list if any are available:
-                if (candidates.size() >= 1)
-                {
-                    AssistContent ac = candidates.get(0);
-                    String displayName = ac.getName() + "(" + ac.getParams().stream().map(ParamInfo::getUnqualifiedType).collect(Collectors.joining(", ")) + ")";
-                    searchMethodLink(topLevelFrame.getCode(), link, ac.getDeclaringClass(), ac.getName(), displayName, PossibleKnownMethodLink.encodeSuffix(ac.getName(), Utility.mapList(ac.getParams(), ParamInfo::getQualifiedType)), callback);
-                }
-                else
-                {
-                    // Otherwise, can't find it anywhere:
-                    callback.accept(Optional.empty());
-                }
-            });
+            // At this point, just pick the first in the list if any are available:
+            if (candidates.size() >= 1)
+            {
+                AssistContent ac = candidates.get(0);
+                String displayName = ac.getName() + "(" + ac.getParams().stream().map(ParamInfo::getUnqualifiedType).collect(Collectors.joining(", ")) + ")";
+                searchMethodLink(topLevelFrame.getCode(), link, ac.getDeclaringClass(), ac.getName(), displayName, PossibleKnownMethodLink.encodeSuffix(ac.getName(), Utility.mapList(ac.getParams(), ParamInfo::getQualifiedType)), callback);
+            }
+            else
+            {
+                // Otherwise, can't find it anywhere:
+                callback.accept(Optional.empty());
+            }
         }
         else if (link instanceof PossibleVarLink)
         {
@@ -1194,7 +1156,7 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
         }
     }
 
-    @OnThread(Tag.Swing)
+    @OnThread(Tag.FXPlatform)
     private void searchMethodLink(TopLevelCodeElement code, PossibleLink link, String qualClassName, String methodName, String methodDisplayName, String urlSuffix, Consumer<Optional<LinkedIdentifier>> callback)
     {
         bluej.pkgmgr.Package pkg = project.getPackage("");
@@ -1206,10 +1168,8 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
                 ClassTarget classTarget = (ClassTarget) t;
                 callback.accept(Optional.of(new LinkedIdentifier(methodDisplayName, link.getStartPosition(), link.getEndPosition(), link.getSlot(), () -> {
                     link.getSlot().removeAllUnderlines();
-                    SwingUtilities.invokeLater(() -> {
-                        classTarget.open();
-                        classTarget.getEditor().focusMethod(methodName);
-                    });
+                    classTarget.open();
+                    classTarget.getEditor().focusMethod(methodName, null);
                 })));
                 return;
             }
@@ -1376,11 +1336,14 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
     }
 
     @Override
+    @OnThread(Tag.FXPlatform)
     public BooleanProperty cheatSheetShowingProperty()
     {
         return getParent().catalogueShowingProperty();
     }
-    
+
+    @OnThread(Tag.FXPlatform)
+    @Override
     public void focusWhenShown()
     {
         withTopLevelFrame(f -> f.focusOnBody(TopLevelFrame.BodyFocus.BEST_PICK));
@@ -1449,6 +1412,7 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
      * currently active tab.
      */
     //package-visible
+    @OnThread(Tag.FXPlatform)
     void draggedToTab(List<Frame> dragSourceFrames, double sceneX, double sceneY, boolean copying)
     {
         Bounds scrollBounds = scroll.localToScene(scroll.getBoundsInLocal());
@@ -1491,6 +1455,7 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
      * We just have to tidy up any display of potential drag targets.
      */
     //package-visible
+    @OnThread(Tag.FXPlatform)
     void draggedToAnotherTab()
     {
         if (dragTarget != null)
@@ -1816,11 +1781,22 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
         if (f != null)
             f.trackBlank(); // Do this even if loading
 
-        if ( (!isLoading() && getParent() != null) || force) {
-            editor.codeModified();
-            registerStackHighlight(null);
-            JavaFXUtil.runNowOrLater(() -> updateErrorOverviewBar(true));
-            SuggestedFollowUpDisplay.modificationIn(this);
+
+        // If we are loading, we'll thread hop
+        if (!isLoading() || force)
+        {
+            // After loading, this should always be on the FXPlatform thread,
+            // so should always run now:
+            JavaFXUtil.runNowOrLater(() ->
+            {
+                if ((!isLoading() && getParent() != null) || force)
+                {
+                    editor.codeModified();
+                    registerStackHighlight(null);
+                    JavaFXUtil.runNowOrLater(() -> updateErrorOverviewBar(true));
+                    SuggestedFollowUpDisplay.modificationIn(this);
+                }
+            });
         }
     }
 
@@ -1839,6 +1815,7 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
             getParent().bringToFront(this);
     }
 
+    @OnThread(Tag.FXPlatform)
     public boolean isWindowVisible()
     {
         return getParent() != null && getParent().containsTab(this) && getParent().isWindowVisible();
@@ -1847,30 +1824,23 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
     @Override
     public void withCompletions(PosInSourceDoc pos, ExpressionSlot<?> completing, CodeElement codeEl, FXPlatformConsumer<List<AssistContentThreadSafe>> handler)
     {
-        withTopLevelFrame(_frame -> {
+        withTopLevelFrame(_frame -> JavaFXUtil.runNowOrLater(() -> {
             TopLevelCodeElement allCode = getSource();
-            JavaFXUtil.bindFuture(
-                // Over on the swing thread, get the completions and turn into FXAssistContent:
-                Utility.swingFuture(() ->
-                    Utility.mapList(Arrays.asList(
-                        editor.getCompletions(allCode, pos, completing, codeEl)
-                    ), AssistContentThreadSafe::copy)),
-                // Then afterwards, back on the FX thread, pass to the handler:
-                handler);
-        });
+            handler.accept(Utility.mapList(Arrays.asList(
+                editor.getCompletions(allCode, pos, completing, codeEl)
+            ), AssistContentThreadSafe::copy));
+        }));
     }
 
     @Override
     public void withSuperConstructors(FXPlatformConsumer<List<AssistContentThreadSafe>> handler)
     {
         TopLevelCodeElement codeEl = getSource();
-        JavaFXUtil.bindFuture(
-            Utility.swingFuture(() -> Utility.mapList(codeEl.getSuperConstructors(), c -> new AssistContentThreadSafe(new ConstructorCompletion(c, Collections.emptyMap(), editor.getJavadocResolver())))),
-            handler
-        );
+        JavaFXUtil.runNowOrLater(() -> handler.accept(Utility.mapList(codeEl.getSuperConstructors(), c -> new AssistContentThreadSafe(new ConstructorCompletion(c, Collections.emptyMap(), editor.getJavadocResolver())))));
     }
 
     @Override
+    @OnThread(Tag.FXPlatform)
     public List<AssistContentThreadSafe> getThisConstructors()
     {
         TopLevelCodeElement codeEl = getSource();
@@ -1999,16 +1969,9 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
             Set<CompletionKind> kinds, boolean includeOverriden, FXPlatformConsumer<List<AssistContentThreadSafe>> handler)
     {
         TopLevelCodeElement allCode = getSource();
-        JavaFXUtil.bindFuture(
-            // Over on the swing thread, get the completions and turn into FXAssistContent:
-            Utility.swingFuture(() -> {
-                return
-                    Utility.mapList(
-                        editor.getAvailableMembers(allCode, pos, kinds, includeOverriden)
-                        , AssistContentThreadSafe::copy);
-            }),
-            // Then afterwards, back on the FX thread, pass to the handler:
-            handler);
+        JavaFXUtil.runNowOrLater(() -> handler.accept(Utility.mapList(
+                editor.getAvailableMembers(allCode, pos, kinds, includeOverriden)
+                , AssistContentThreadSafe::copy)));
     }
 
     @OnThread(Tag.FXPlatform)
@@ -2036,6 +1999,7 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
         });
     }
 
+    @OnThread(Tag.FXPlatform)
     private void updateDisplays()
     {
         // Go through methods and set override tags:
@@ -2054,36 +2018,36 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
     private void updateFontSize()
     {
         // We don't bind because topLevelFrame may change
-        getTopLevelFrame().getNode().setStyle("-fx-font-size: " + getFontSizeCSS().get() + ";");
+        getTopLevelFrame().getNode().setStyle(getFontCSS().get());
 
         JavaFXUtil.runAfter(Duration.millis(500),
             () -> getTopLevelFrame().getAllFrames().forEach(Frame::fontSizeChanged));
     }
 
     //package-visible
+    @OnThread(Tag.FXPlatform)
     void decreaseFontSize()
     {
         final IntegerProperty fontSize = PrefMgr.strideFontSizeProperty();
-        int prev = fontSize.get();
-        fontSize.set(Math.max(PrefMgr.MIN_STRIDE_FONT_SIZE, prev >= 36 ? prev - 4 : (prev >= 16 ? prev - 2 : prev - 1)));
+        Utility.decreaseFontSize(fontSize);
     }
-    
+
     //package-visible
+    @OnThread(Tag.FXPlatform)
     void increaseFontSize()
     {
         final IntegerProperty fontSize = PrefMgr.strideFontSizeProperty();
-        int prev = fontSize.get();
-        fontSize.set(Math.min(PrefMgr.MAX_STRIDE_FONT_SIZE, prev < 32 ? (prev < 14 ? prev + 1 : prev + 2) : prev + 4));
+        Utility.increaseFontSize(fontSize);
     }
 
     @Override
-    public StringExpression getFontSizeCSS()
+    public StringExpression getFontCSS()
     {
         if (strideFontSizeAsString == null)
             strideFontSizeAsString = PrefMgr.strideFontSizeProperty().asString();
-        if (strideFontSizeAsStringPT == null)
-            strideFontSizeAsStringPT = strideFontSizeAsString.concat("pt");
-        return strideFontSizeAsStringPT;
+        if (strideFontCSS == null)
+            strideFontCSS = Bindings.concat("-fx-font-size:", strideFontSizeAsString, "pt;");
+        return strideFontCSS;
     }
 
     private void calculateBirdseyeRectangle()
@@ -2105,7 +2069,7 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
         ensureNodeVisible(birdseyeManager.getNodeForVisibility());
     }
     
-    @OnThread(Tag.Swing)
+    @OnThread(Tag.FXPlatform)
     private List<AssistContentThreadSafe> getPrimitiveTypes()
     {
         if (prims == null)
@@ -2119,14 +2083,12 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
     {
         final Map<String, AssistContentThreadSafe> r = new HashMap<>();
 
-        SwingUtilities.invokeLater(() -> {
-            if (kinds.contains(Kind.PRIMITIVE))
-                addAllToMap(r, getPrimitiveTypes());
-            addAllToMap(r, editor.getLocalTypes(superType, includeSelf, kinds));
-            Utility.runBackground(() -> {
-                addAllToMap(r, getImportedTypes(superType, includeSelf, kinds));
-                handler.accept(r);
-            });
+        if (kinds.contains(Kind.PRIMITIVE))
+            addAllToMap(r, getPrimitiveTypes());
+        addAllToMap(r, editor.getLocalTypes(superType, includeSelf, kinds));
+        Utility.runBackground(() -> {
+            addAllToMap(r, getImportedTypes(superType, includeSelf, kinds));
+            handler.accept(r);
         });
     }
 
@@ -2262,15 +2224,16 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
     {
         HashMap<String, Pair<SuggestionList.SuggestionShown, AssistContentThreadSafe>> imports = new HashMap();
         // Add popular:
-        Stream.concat(
+        Stream.<Pair<SuggestionShown, AssistContentThreadSafe>>concat(
             popularImports.stream().flatMap(imps -> getFutureList(imps).stream().map(ac -> new Pair<>(SuggestionList.SuggestionShown.COMMON, ac))),
             rarerImports.stream().flatMap(imps -> getFutureList(imps).stream().map(ac -> new Pair<>(SuggestionList.SuggestionShown.RARE, ac)))
         )
             .filter(imp -> imp.getValue().getPackage() != null)
             .forEach(imp -> {
                 String fullName = imp.getValue().getPackage() + ".";
-                if (imp.getValue().getDeclaringClass() != null)
+                if (imp.getValue().getDeclaringClass() != null) {
                     fullName += imp.getValue().getDeclaringClass() + ".";
+                }
                 fullName += imp.getValue().getName();
                 imports.put(fullName, imp);
             });
@@ -2314,7 +2277,7 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
         else
         {
             File[] files = project.getProjectDir().listFiles(name -> name.getName().toLowerCase().endsWith(".css"));
-            r.addAll(Utility.mapList(Arrays.asList(files), file -> new FileCompletion() {
+            r.addAll(Utility.<File,FileCompletion>mapList(Arrays.asList(files), file -> new FileCompletion() {
                 @Override
                 public File getFile()
                 {
@@ -2598,6 +2561,7 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
     }
 
     @Override
+    @OnThread(Tag.FX)
     public boolean isLoading()
     {
         return loading;
@@ -2617,11 +2581,13 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
     }
 
     @Override
+    @OnThread(Tag.FXPlatform)
     public Pane getDragTargetCursorPane()
     {
         return getParent().getDragCursorPane();
     }
 
+    @OnThread(Tag.FXPlatform)
     public void compiled()
     {
         if (getTopLevelFrame() != null)
@@ -2636,7 +2602,8 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
             getTopLevelFrame().ensureImportCanvasShowing();
     }
 
-    void ignoreEdits(FXRunnable during)
+    @OnThread(Tag.FXPlatform)
+    void ignoreEdits(FXPlatformRunnable during)
     {
         loading = true;
         during.run();
@@ -2650,6 +2617,7 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
     }
 
     //package-visible
+    @OnThread(Tag.FXPlatform)
     List<Menu> getMenus()
     {
         return menuManager.getMenus();
@@ -2737,18 +2705,20 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
         }
     }
 
+    @OnThread(Tag.FXPlatform)
     public void setParent(FXTabbedEditor parent, boolean partOfMove)
     {
         if (!partOfMove && parent != null)
-            SwingUtilities.invokeLater(() -> editor.getWatcher().recordOpen());
+            editor.getWatcher().recordOpen();
         else if (!partOfMove && parent == null)
-            SwingUtilities.invokeLater(() -> editor.getWatcher().recordClose());
+            editor.getWatcher().recordClose();
 
         this.parent.set(parent);
 
     }
 
     //package-visible
+    @OnThread(Tag.FXPlatform)
     FXTabbedEditor getParent()
     {
         return parent.get();
@@ -2778,9 +2748,10 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
     }
 
     @Override
+    @OnThread(Tag.FXPlatform)
     public void notifySelected()
     {
-        SwingUtilities.invokeLater(() -> editor.getWatcher().recordSelected());
+        editor.getWatcher().recordSelected();
     }
 
     @Override
@@ -2810,7 +2781,7 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
 
         LocationMap locationMap = getTopLevelFrame().getCode().toXML().buildLocationMap();
 
-        SwingUtilities.invokeLater(() -> editor.getWatcher().recordCodeCompletionStarted(null, null, locationMap.locationFor(element), index, stem));
+        editor.getWatcher().recordCodeCompletionStarted(null, null, locationMap.locationFor(element), index, stem);
     }
 
     @Override
@@ -2821,7 +2792,7 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
 
         LocationMap locationMap = getTopLevelFrame().getCode().toXML().buildLocationMap();
 
-        SwingUtilities.invokeLater(() -> editor.getWatcher().recordCodeCompletionEnded(null, null, locationMap.locationFor(element), index, stem, replacement));
+        editor.getWatcher().recordCodeCompletionEnded(null, null, locationMap.locationFor(element), index, stem, replacement);
     }
 
     @Override
@@ -2836,13 +2807,14 @@ public @OnThread(Tag.FX) class FrameEditorTab extends FXTab implements Interacti
 
         String xpath = (enclosingFrame instanceof CodeFrame) ? locationMap.locationFor(((CodeFrame<? extends CodeElement>)enclosingFrame).getCode()) : null;
 
-        SwingUtilities.invokeLater(() -> editor.getWatcher().recordUnknownCommandKey(xpath, cursorIndex, key));
+        editor.getWatcher().recordUnknownCommandKey(xpath, cursorIndex, key);
     }
 
     @Override
+    @OnThread(Tag.FXPlatform)
     public void recordErrorIndicatorShown(int identifier)
     {
-        SwingUtilities.invokeLater(() -> editor.getWatcher().recordShowErrorIndicator(identifier));
+        editor.getWatcher().recordShowErrorIndicator(identifier);
     }
 
     @Override

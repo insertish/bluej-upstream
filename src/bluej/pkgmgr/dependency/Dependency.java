@@ -63,7 +63,6 @@ public abstract class Dependency
     //    protected static final float strokeWithSelected = 2.0f;
     @OnThread(Tag.Swing)
     private BDependency singleBDependency; // every Dependency has none or one BDependency
-
     static final int SELECT_DIST = 4;
 
     @OnThread(Tag.Any)
@@ -109,7 +108,7 @@ public abstract class Dependency
         return (DependentTarget) to;
     }
 
-    @OnThread(Tag.Swing)
+    @OnThread(Tag.SwingIsFX)
     public BDependency getBDependency()
     {
         if (singleBDependency == null) {

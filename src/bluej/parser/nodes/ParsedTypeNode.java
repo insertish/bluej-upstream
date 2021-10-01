@@ -21,13 +21,6 @@
  */
 package bluej.parser.nodes;
 
-import java.util.Collections;
-import java.util.List;
-
-import javax.swing.text.Document;
-
-import threadchecker.OnThread;
-import threadchecker.Tag;
 import bluej.debugger.gentype.GenTypeClass;
 import bluej.debugger.gentype.Reflective;
 import bluej.editor.moe.MoeSyntaxDocument;
@@ -42,6 +35,11 @@ import bluej.parser.entity.ValueEntity;
 import bluej.parser.lexer.JavaTokenTypes;
 import bluej.parser.lexer.LocatableToken;
 import bluej.parser.nodes.NodeTree.NodeAndPosition;
+import threadchecker.OnThread;
+import threadchecker.Tag;
+
+import java.util.Collections;
+import java.util.List;
 
 
 
@@ -233,7 +231,7 @@ public class ParsedTypeNode extends IncrementalParsingNode
     }
     
     @Override
-    @OnThread(Tag.Swing)
+    @OnThread(Tag.FXPlatform)
     protected int doPartialParse(ParseParams params, int state)
     {
         if (state == 0) {
@@ -371,7 +369,7 @@ public class ParsedTypeNode extends IncrementalParsingNode
     }
     
     @Override
-    public CodeSuggestions getExpressionType(int pos, int nodePos, JavaEntity defaultType, Document document)
+    public CodeSuggestions getExpressionType(int pos, int nodePos, JavaEntity defaultType, MoeSyntaxDocument document)
     {
         valueEntityCache.clear();
         pocEntityCache.clear();

@@ -299,6 +299,15 @@ public class ExecServer
     }
 
     /**
+     * This method is used to show the terminal window in case
+     * the java program asks for input from the user.
+     */
+    public static void showTerminalOnInput()
+    {
+        // <<READING-REQUEST BREAKPOINT!>
+    }
+
+    /**
      * Add the object to our list of open windows
      *
      * @param   o   a window object which has just been opened
@@ -794,7 +803,7 @@ public class ExecServer
                                 // Use a preloader to be able to find out the Application reference:
                                 System.setProperty("javafx.preloader", FXPreloader.class.getName());
                                 Application.launch((Class<? extends Application>)loadAndInitClass(classToRun));
-                            }).start();
+                            }, "JavaFX BlueJ Helper").start();
                             // Return null if it takes too long to initialise.  This is most likely
                             // due to the Application class's constructor doing a lot of work,
                             // but it may also be related to a failure in loading.

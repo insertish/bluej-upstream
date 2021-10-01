@@ -39,7 +39,7 @@ import threadchecker.Tag;
  * The three subclasses of this class (at the moment) are FrameEditorTab for Stride classes,
  * MoeFXTab for Java classes, and WebTab for web browser (for documentation).
  */
-@OnThread(Tag.FX)
+@OnThread(Tag.FXPlatform)
 abstract class FXTab extends Tab
 {
     private final boolean showCatalogue;
@@ -74,6 +74,7 @@ abstract class FXTab extends Tab
      * @param parent The new window containing this tab, or null if the tab was closed.
      * @param partOfMove Whether this change is part of a move to another window
      */
+    @OnThread(Tag.FXPlatform)
     abstract void setParent(FXTabbedEditor parent, boolean partOfMove);
 
     /**
@@ -85,6 +86,7 @@ abstract class FXTab extends Tab
      * Gets the web address showing in this tab.
      * @return The URL of the web address showing, or null if this is not a web tab.
      */
+    @OnThread(Tag.FXPlatform)
     abstract String getWebAddress();
 
     /**
@@ -95,11 +97,13 @@ abstract class FXTab extends Tab
     /**
      * Called when the tab has been selected, and the window has been focused.
      */
+    @OnThread(Tag.FXPlatform)
     public abstract void notifySelected();
 
     /**
      * Called when the tab was selected, but now is no longer selected.
      */
+    @OnThread(Tag.FXPlatform)
     public abstract void notifyUnselected();
 
     /**

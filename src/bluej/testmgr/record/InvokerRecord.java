@@ -109,7 +109,8 @@ public abstract class InvokerRecord
      *  
      * @return a String reprenting the object initialisation
      *         src or null if there is none. 
-     */    
+     */
+    @OnThread(Tag.FXPlatform)
     public abstract String toFixtureSetup(String secondIndent);
 
     /**
@@ -118,7 +119,7 @@ public abstract class InvokerRecord
      * 
      * @return a String representing the test method src
      */
-    @OnThread(Tag.Swing)
+    @OnThread(Tag.FXPlatform)
     public abstract String toTestMethod(PkgMgrFrame pmf, String secondIndent);
 
     /**

@@ -21,7 +21,8 @@
  */
 package bluej.utility.javafx;
 
-import java.awt.AWTKeyStroke;
+import java.awt.*;
+import java.awt.event.MouseListener;
 import java.awt.image.RenderedImage;
 import java.io.File;
 import java.io.IOException;
@@ -30,13 +31,11 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.CompletableFuture;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
-import bluej.editor.stride.CodeOverlayPane.WidthLimit;
 import javafx.animation.Animation;
 import javafx.animation.FadeTransition;
 import javafx.animation.KeyFrame;
@@ -75,6 +74,8 @@ import javafx.event.EventHandler;
 import javafx.geometry.Bounds;
 import javafx.geometry.Insets;
 import javafx.geometry.Point2D;
+import javafx.print.Printer;
+import javafx.print.PrinterJob;
 import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.SnapshotParameters;
@@ -113,14 +114,16 @@ import javafx.stage.Stage;
 import javafx.stage.WindowEvent;
 import javafx.util.Duration;
 
+import bluej.Config;
+import bluej.editor.stride.CodeOverlayPane.WidthLimit;
 import bluej.editor.stride.FXTabbedEditor;
 import bluej.editor.stride.WindowOverlayPane;
-import threadchecker.OnThread;
-import threadchecker.Tag;
-import bluej.Config;
 import bluej.stride.generic.InteractionManager;
 import bluej.utility.Debug;
 import bluej.utility.Utility;
+
+import threadchecker.OnThread;
+import threadchecker.Tag;
 
 import javax.imageio.ImageIO;
 import javax.swing.Action;
@@ -178,18 +181,30 @@ public class JavaFXUtil
             JavaFXUtil.setPseudoclass(pseudoClasses[i], i == index, node);
         }
     }
+
     /**
      * Adds the given CSS style-class[es] to the node.
-     * 
+     *
+     * @param node The node to apply to
+     * @param styleClasses The CSS style-classes to be added.
+     */
+    public static void addStyleClass(Styleable node, String... styleClasses)
+    {
+        addStyleClass(node, FXCollections.observableArrayList(styleClasses));
+    }
+
+    /**
+     * Adds the given CSS style-class[es] to the node.
+     *
      * JavaFX doesn't usually care if you add the same class many times to a node.  In contrast, this method
-     * makes sure that a class is only applied once (effectively models the classes on a node as a 
+     * makes sure that a class is only applied once (effectively models the classes on a node as a
      * set, not a list).  Generally, you should try to avoid dynamically turning classes on
      * or off, anyway, and use pseudo-classes instead.
-     * 
+     *
      * @param node The node to apply to
      * @param styleClasses The list of CSS style-classes to add.
      */
-    public static void addStyleClass(Styleable node, String... styleClasses)
+    public static void addStyleClass(Styleable node, ObservableList<String> styleClasses)
     {
         for (String styleClass : styleClasses)
         {
@@ -241,7 +256,7 @@ public class JavaFXUtil
      * details on cache behaviour.
      */
     private static final FXCache<Font, FXCache<String, Double>> measured =
-        new FXCache<Font, FXCache<String, Double>>(f -> new FXCache<String, Double>(s -> {
+        new FXCache<>(f -> new FXCache<>(s -> {
             if (s == null || s.length() == 0)
                 return 0.0;
 
@@ -441,7 +456,7 @@ public class JavaFXUtil
         Label copy = new Label();
         copy.textProperty().bind(l.textProperty());
         bindList(copy.getStyleClass(), l.getStyleClass());
-        copy.styleProperty().bind(l.styleProperty().concat("-fx-font-size:").concat(fontSize).concat(";"));
+        copy.styleProperty().bind(l.styleProperty().concat(fontSize));
         bindPseudoclasses(copy, l.getPseudoClassStates());
         return copy;
     }
@@ -469,13 +484,14 @@ public class JavaFXUtil
      * @param <T> The type inside the property
      * @return An observable corresponding to object.property
      */
-    public static <S, T> ObservableValue<T> apply(ObservableValue<S> object, FXFunction<S, ObservableValue<T>> property, T def)
+    @OnThread(Tag.FXPlatform)
+    public static <S, T> ObservableValue<T> applyPlatform(ObservableValue<S> object, FXPlatformFunction<S, ObservableValue<T>> property, T def)
     {
         // Easier to create new property and use change listeners to update the binding than try
         // to make an all-in-one binding:
         ObjectProperty<T> r = new SimpleObjectProperty<>(object.getValue() == null ? def : property.apply(object.getValue()).getValue());
 
-        addChangeListener(object, value -> {
+        addChangeListenerPlatform(object, value -> {
             r.unbind();
 
             if (value == null)
@@ -625,6 +641,7 @@ public class JavaFXUtil
      */
     public static void bindPseudoclass(Node node, String pseudoClass, BooleanExpression on)
     {
+        setPseudoclass(pseudoClass, on.get(), node);
         addChangeListener(on, b -> setPseudoclass(pseudoClass, b, node));
     }
 
@@ -660,6 +677,48 @@ public class JavaFXUtil
     {
         // Defeat thread checker:
         return ((Supplier<T>)initCode::get).get();
+    }
+
+    /**
+     * Scales the points by the given scale, and snaps them to nearest integer
+     */
+    public static void scalePolygonPoints(javafx.scene.shape.Polygon polygon, double scale, boolean rotate90)
+    {
+        for (int i = 0; i < polygon.getPoints().size(); i += 2)
+        {
+            if (rotate90)
+            {
+                // Swapping, so we need a temporary:
+                double t = polygon.getPoints().get(i + 1) * scale;
+                polygon.getPoints().set(i + 1, polygon.getPoints().get(i) * scale);
+                polygon.getPoints().set(i, t);
+            }
+            else
+            {
+                polygon.getPoints().set(i, polygon.getPoints().get(i) * scale);
+                polygon.getPoints().set(i + 1, polygon.getPoints().get(i + 1) * scale);
+            }
+        }
+    }
+
+    /**
+     * Make a printer job.  By default, JavaFX tries to create a job with
+     * the default printer, and returns null if that printer is not available.
+     * If this happens, we try making a job with any other available printer.
+     */
+    public static PrinterJob createPrinterJob()
+    {
+        PrinterJob job = PrinterJob.createPrinterJob();
+        if (job == null)
+        {
+            for (Printer printer : Printer.getAllPrinters())
+            {
+                job = PrinterJob.createPrinterJob(printer);
+                if (job != null)
+                    return job;
+            }
+        }
+        return job;
     }
 
     /**
@@ -1165,21 +1224,6 @@ public class JavaFXUtil
     }
 
     /**
-     * When the given future completes, calls the given callback on the FX thread
-     * with the value.
-     * 
-     * This function is asynchronous; it does not block.
-     * 
-     * @param future The future to wait for completion on
-     * @param andThen The callback to pass the completed value to, on the FX thread.
-     * @param <T> The type inside the future.
-     */
-    public static <T> void bindFuture(CompletableFuture<T> future, FXPlatformConsumer<T> andThen)
-    {
-        future.thenAccept(x -> JavaFXUtil.runPlatformLater(() -> andThen.accept(x)));
-    }    
-    
-    /**
      * Takes a BooleanProperty and a list of item.  Gives back an observable list that contains
      * the list of items when (and only when) the BooleanProperty is true, but is empty in the case
      * that the BooleanProperty is false.  Uses JavaFX bindings to update the list's contents.
@@ -1491,13 +1535,16 @@ public class JavaFXUtil
     {
         private final FXPlatformSupplier<Menu> createFXMenu;
         private final List<JMenuItem> swingItems = new ArrayList<>();
+        @OnThread(value = Tag.Any, requireSynchronized = true)
         private final List<FXPlatformSupplier<MenuItem>> fxItems = new ArrayList<>();
+        @OnThread(value = Tag.Any, requireSynchronized = true)
         private final List<Integer> fxItemIndexes = new ArrayList<>();
         @OnThread(Tag.Swing)
         private int nextIndex = 0;
-        private Runnable atEnd;
+        @OnThread(value = Tag.Any, requireSynchronized = true)
+        private FXPlatformRunnable atEnd;
 
-        @OnThread(Tag.Swing)
+        @OnThread(Tag.Any)
         public FXPlusSwingMenu(FXPlatformSupplier<Menu> createMenu)
         {
             this.createFXMenu = createMenu;
@@ -1521,14 +1568,14 @@ public class JavaFXUtil
                 }
                 if (atEnd != null)
                 {
-                    SwingUtilities.invokeLater(atEnd);
+                    atEnd.run();
                 }
                 return fxMenu;
             };
         }
 
-        @OnThread(Tag.Swing)
-        public void addFX(FXPlatformSupplier<MenuItem> fxItem)
+        @OnThread(Tag.Any)
+        public synchronized void addFX(FXPlatformSupplier<MenuItem> fxItem)
         {
             fxItems.add(fxItem);
             fxItemIndexes.add(nextIndex++);
@@ -1541,8 +1588,8 @@ public class JavaFXUtil
             nextIndex += swingItems.size();
         }
 
-        @OnThread(Tag.Swing)
-        public void runAtEnd(Runnable runnable)
+        @OnThread(Tag.Any)
+        public synchronized void runAtEnd(FXPlatformRunnable runnable)
         {
             atEnd = runnable;
         }
@@ -1698,9 +1745,11 @@ public class JavaFXUtil
                 item.setSelected(selected);
                 // Clicking the icon crosses back to the Swing thread to attempt state change:
                 item.setOnAction(e -> {
+                    int x = (int)item.getParentPopup().getX();
+                    int y = (int)item.getParentPopup().getY();
                     SwingUtilities.invokeLater(() -> {
                         checkBoxMenuItem.setSelected(!checkBoxMenuItem.isSelected());
-                        fireSwingMenuItemAction(swingItem, source);
+                        fireSwingMenuItemAction(swingItem, source, x, y);
                     });
                 });
                 item.setAccelerator(swingKeyStrokeToFX(shortcut));
@@ -1749,7 +1798,12 @@ public class JavaFXUtil
             });
             
             return () -> {
-                item.setOnAction(e -> SwingUtilities.invokeLater(() -> fireSwingMenuItemAction(swingItem, source)));
+                item.setOnAction(e -> {
+                	ContextMenu menu = item.getParentPopup();
+                	int x = menu != null ? (int)menu.getX() : 0;
+                	int y = menu != null ? (int)menu.getY() : 0;
+                    SwingUtilities.invokeLater(() -> fireSwingMenuItemAction(swingItem, source, x, y));
+                });
                 item.setAccelerator(swingKeyStrokeToFX(shortcut));
                 return new MenuItemAndShow(item);
             };
@@ -1757,9 +1811,23 @@ public class JavaFXUtil
     }
 
     @OnThread(Tag.Swing)
-    private static void fireSwingMenuItemAction(JMenuItem swingItem, Object source)
+    private static void fireSwingMenuItemAction(JMenuItem swingItem, Object source, int x, int y)
     {
         String menuText = swingItem.getText();
+
+        // This is a bit hacky, but it is specifically to get the UML extension
+        // and Klassekarte extensions working again.  For that we only need Component.getLocationOnScreen
+        // to function correctly, and can have dummy values elsewhere:
+        for (MouseListener mouseListener : swingItem.getMouseListeners())
+        {
+            mouseListener.mousePressed(new java.awt.event.MouseEvent(new Component() {
+                @Override
+                public Point getLocationOnScreen()
+                {
+                    return new Point(x, y);
+                }
+            }, 0, 0, 0, 0, 0, 1, false));
+        }
 
         // Important we fetch action here not cache it earlier because
         // it may change after we make the menu item:
@@ -1808,7 +1876,7 @@ public class JavaFXUtil
     /**
      * Converts an integer AWT key code to a JavaFX enum.
      */
-    private static KeyCode awtKeyCodeToFX(int code)
+    public static KeyCode awtKeyCodeToFX(int code)
     {
         // There may be a better way of doing this:
         switch (code)
@@ -1851,10 +1919,14 @@ public class JavaFXUtil
             case java.awt.event.KeyEvent.VK_9: return KeyCode.DIGIT9;
             case java.awt.event.KeyEvent.VK_COMMA: return KeyCode.COMMA;
             case java.awt.event.KeyEvent.VK_PERIOD: return KeyCode.PERIOD;
+            case java.awt.event.KeyEvent.VK_MINUS: return KeyCode.MINUS;
             case java.awt.event.KeyEvent.VK_BACK_QUOTE: return KeyCode.BACK_QUOTE;
+            case java.awt.event.KeyEvent.VK_QUOTE: return KeyCode.QUOTE;
+            case java.awt.event.KeyEvent.VK_QUOTEDBL: return KeyCode.QUOTEDBL;
             case java.awt.event.KeyEvent.VK_BACK_SLASH: return KeyCode.BACK_SLASH;
             case java.awt.event.KeyEvent.VK_SLASH: return KeyCode.SLASH;
             case java.awt.event.KeyEvent.VK_TAB: return KeyCode.TAB;
+            case java.awt.event.KeyEvent.VK_SPACE: return KeyCode.SPACE;
             case java.awt.event.KeyEvent.VK_BACK_SPACE: return KeyCode.BACK_SPACE;
             case java.awt.event.KeyEvent.VK_F1: return KeyCode.F1;
             case java.awt.event.KeyEvent.VK_F2: return KeyCode.F2;
@@ -1880,6 +1952,7 @@ public class JavaFXUtil
             case java.awt.event.KeyEvent.VK_F22: return KeyCode.F22;
             case java.awt.event.KeyEvent.VK_F23: return KeyCode.F23;
             case java.awt.event.KeyEvent.VK_F24: return KeyCode.F24;
+            case java.awt.event.KeyEvent.VK_EQUALS: return KeyCode.EQUALS;
             case java.awt.event.KeyEvent.VK_SEMICOLON: return KeyCode.SEMICOLON;
             case java.awt.event.KeyEvent.VK_COLON: return KeyCode.COLON;
             case java.awt.event.KeyEvent.VK_NUMBER_SIGN: return KeyCode.NUMBER_SIGN;
@@ -1890,8 +1963,17 @@ public class JavaFXUtil
             case java.awt.event.KeyEvent.VK_END: return KeyCode.END;
             case java.awt.event.KeyEvent.VK_PAGE_UP: return KeyCode.PAGE_UP;
             case java.awt.event.KeyEvent.VK_PAGE_DOWN: return KeyCode.PAGE_DOWN;
+            case java.awt.event.KeyEvent.VK_UP: return KeyCode.UP;
+            case java.awt.event.KeyEvent.VK_DOWN: return KeyCode.DOWN;
+            case java.awt.event.KeyEvent.VK_LEFT: return KeyCode.LEFT;
+            case java.awt.event.KeyEvent.VK_RIGHT: return KeyCode.RIGHT;
+            case java.awt.event.KeyEvent.VK_OPEN_BRACKET: return KeyCode.OPEN_BRACKET;
+            case java.awt.event.KeyEvent.VK_CLOSE_BRACKET: return KeyCode.CLOSE_BRACKET;
+            case java.awt.event.KeyEvent.VK_LEFT_PARENTHESIS: return KeyCode.LEFT_PARENTHESIS;
+            case java.awt.event.KeyEvent.VK_RIGHT_PARENTHESIS: return KeyCode.RIGHT_PARENTHESIS;
 
         }
+        Debug.message("Unknown key code: " + code);
         return null;
     }
 

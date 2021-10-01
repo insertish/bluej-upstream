@@ -156,7 +156,7 @@ public final class PackageEditor extends StackPane implements MouseTrackingOverl
     /**
      * Construct a package editor for the given package.
      */
-    @OnThread(Tag.Any)
+    @OnThread(Tag.FXPlatform)
     public PackageEditor(PkgMgrFrame pmf, Package pkg, PackageEditorListener listener, BooleanProperty showUses, BooleanProperty showInherits, MouseTrackingOverlayPane overlay)
     {
         this.pmf = pmf;
@@ -166,47 +166,46 @@ public final class PackageEditor extends StackPane implements MouseTrackingOverl
         this.showUses = showUses;
         this.showExtends = showInherits;
         this.overlay = overlay;
-        Platform.runLater(() -> {
-            this.selectionController.addSelectionListener(sel -> SwingUtilities.invokeLater(() -> pmf.notifySelectionChanged(sel)));
-            JavaFXUtil.addStyleClass(this, "class-diagram");
-            // Both class layers have transparent background to see through to lower layers:
-            frontClassLayer.setBackground(null);
-            backClassLayer.setBackground(null);
-            // We need to be able to click through the holes in the front class layer
-            // in order to click on the back layer:
-            frontClassLayer.setPickOnBounds(false);
-            
-            JavaFXUtil.addChangeListenerPlatform(arrowLayer.widthProperty(), s -> repaint());
-            JavaFXUtil.addChangeListenerPlatform(arrowLayer.heightProperty(), s -> repaint());
-            selectionLayer = new Pane();
-            // The mouse events occur on us not on the selection layer.
-            // We don't want the display getting in the way of mouse events:
-            selectionLayer.setMouseTransparent(true);
-            javafx.scene.shape.Rectangle rect = selectionController.getMarquee().getRectangle();
-            JavaFXUtil.addStyleClass(rect, "marquee");
-            selectionLayer.getChildren().add(rect);
 
-            noClassesExistedMessage = new Label(Config.getString("pkgmgr.noClassesExisted.message"));
-            noClassesExistedMessage.setVisible(false);
-            JavaFXUtil.addStyleClass(noClassesExistedMessage, "pmf-no-classes-msg");
+        this.selectionController.addSelectionListener(sel -> pmf.notifySelectionChanged(sel));
+        JavaFXUtil.addStyleClass(this, "class-diagram");
+        // Both class layers have transparent background to see through to lower layers:
+        frontClassLayer.setBackground(null);
+        backClassLayer.setBackground(null);
+        // We need to be able to click through the holes in the front class layer
+        // in order to click on the back layer:
+        frontClassLayer.setPickOnBounds(false);
 
-            getChildren().addAll(arrowLayer, backClassLayer, frontClassLayer, selectionLayer, noClassesExistedMessage);
+        JavaFXUtil.addChangeListenerPlatform(arrowLayer.widthProperty(), s -> repaint());
+        JavaFXUtil.addChangeListenerPlatform(arrowLayer.heightProperty(), s -> repaint());
+        selectionLayer = new Pane();
+        // The mouse events occur on us not on the selection layer.
+        // We don't want the display getting in the way of mouse events:
+        selectionLayer.setMouseTransparent(true);
+        javafx.scene.shape.Rectangle rect = selectionController.getMarquee().getRectangle();
+        JavaFXUtil.addStyleClass(rect, "marquee");
+        selectionLayer.getChildren().add(rect);
 
-            JavaFXUtil.addChangeListener(showUses, e -> JavaFXUtil.runNowOrLater(this::repaint));
-            JavaFXUtil.addChangeListener(showExtends, e -> JavaFXUtil.runNowOrLater(this::repaint));
-            
-            addEventFilter(KeyEvent.KEY_PRESSED, e -> {
-                if (e.getCode() == KeyCode.ESCAPE && creatingExtends)
-                    stopNewInherits();
-                // Don't consume either way
-            });
+        noClassesExistedMessage = new Label(Config.getString("pkgmgr.noClassesExisted.message"));
+        noClassesExistedMessage.setVisible(false);
+        JavaFXUtil.addStyleClass(noClassesExistedMessage, "pmf-no-classes-msg");
+
+        getChildren().addAll(arrowLayer, backClassLayer, frontClassLayer, selectionLayer, noClassesExistedMessage);
+
+        JavaFXUtil.addChangeListener(showUses, e -> JavaFXUtil.runNowOrLater(this::repaint));
+        JavaFXUtil.addChangeListener(showExtends, e -> JavaFXUtil.runNowOrLater(this::repaint));
+
+        addEventFilter(KeyEvent.KEY_PRESSED, e -> {
+            if (e.getCode() == KeyCode.ESCAPE && creatingExtends)
+                stopNewInherits();
+            // Don't consume either way
         });
     }
 
     /**
      * Notify listener of an event.
      */
-    @OnThread(Tag.Swing)
+    @OnThread(Tag.FXPlatform)
     protected void fireTargetEvent(PackageEditorEvent e)
     {
         if (listener != null) {
@@ -214,49 +213,49 @@ public final class PackageEditor extends StackPane implements MouseTrackingOverl
         }
     }
 
-    @OnThread(Tag.Swing)
+    @OnThread(Tag.FXPlatform)
     public void raiseMethodCallEvent(Object src, CallableView cv)
     {
         fireTargetEvent(
             new PackageEditorEvent(src, PackageEditorEvent.TARGET_CALLABLE, cv));
     }
 
-    @OnThread(Tag.Swing)
+    @OnThread(Tag.FXPlatform)
     public void raiseRemoveTargetEvent(Target t)
     {
         fireTargetEvent(
             new PackageEditorEvent(t, PackageEditorEvent.TARGET_REMOVE));
     }
 
-    @OnThread(Tag.Swing)
+    @OnThread(Tag.FXPlatform)
     public void raiseBenchToFixtureEvent(Target t)
     {
         fireTargetEvent(
             new PackageEditorEvent(t, PackageEditorEvent.TARGET_BENCHTOFIXTURE));
     }
 
-    @OnThread(Tag.Swing)
+    @OnThread(Tag.FXPlatform)
     public void raiseFixtureToBenchEvent(Target t)
     {
         fireTargetEvent(
             new PackageEditorEvent(t, PackageEditorEvent.TARGET_FIXTURETOBENCH));
     }
 
-    @OnThread(Tag.Swing)
+    @OnThread(Tag.FXPlatform)
     public void raiseMakeTestCaseEvent(Target t)
     {
         fireTargetEvent(
             new PackageEditorEvent(t, PackageEditorEvent.TARGET_MAKETESTCASE));
     }
 
-    @OnThread(Tag.Swing)
+    @OnThread(Tag.FXPlatform)
     public void raiseRunTargetEvent(Target t, String name)
     {
         fireTargetEvent(
             new PackageEditorEvent(t, PackageEditorEvent.TARGET_RUN, name));
     }
 
-    @OnThread(Tag.Swing)
+    @OnThread(Tag.FXPlatform)
     public void raiseOpenPackageEvent(Target t, String packageName)
     {
         fireTargetEvent(
@@ -273,7 +272,7 @@ public final class PackageEditor extends StackPane implements MouseTrackingOverl
      * @param ir   The invoker record for the invocation used to create this object
      * @param animateFromScenePoint
      */
-    @OnThread(Tag.Swing)
+    @OnThread(Tag.FXPlatform)
     public void raisePutOnBenchEvent(Window src, DebuggerObject obj, GenTypeClass iType, InvokerRecord ir, boolean askForName, Optional<Point2D> animateFromScenePoint)
     {
         fireTargetEvent(
@@ -283,7 +282,7 @@ public final class PackageEditor extends StackPane implements MouseTrackingOverl
     /**
      * Notify of some interaction.
      */
-    @OnThread(Tag.Swing)
+    @OnThread(Tag.FXPlatform)
     public void recordInteraction(InvokerRecord ir)
     {
         listener.recordInteraction(ir);
@@ -317,38 +316,29 @@ public final class PackageEditor extends StackPane implements MouseTrackingOverl
         }
         MenuItem newClass = new MenuItem(Config.getString("menu.edit.newClass"));
         newClass.setOnAction(e -> {
-            SwingUtilities.invokeLater(() -> {
-                pmf.menuCall();
-                pmf.doCreateNewClass(graphLoc.getX(), graphLoc.getY());
-            });
+            pmf.menuCall();
+            pmf.doCreateNewClass(graphLoc.getX(), graphLoc.getY());
         });
         JavaFXUtil.addStyleClass(newClass, "class-action-inbuilt");
 
         MenuItem newPackage = new MenuItem(Config.getString("menu.edit.newPackage"));
         newPackage.setOnAction(e -> {
-            SwingUtilities.invokeLater(() ->
-            {
-                pmf.menuCall();
-                pmf.doCreateNewPackage(graphLoc.getX(), graphLoc.getY());
-            });
+            pmf.menuCall();
+            pmf.doCreateNewPackage(graphLoc.getX(), graphLoc.getY());
         });
         JavaFXUtil.addStyleClass(newPackage, "class-action-inbuilt");
         
         MenuItem newCSS = new MenuItem(Config.getString("menu.edit.newCSS"));
         newCSS.setOnAction(e -> {
-            SwingUtilities.invokeLater(() -> {
-                pmf.menuCall();
-                pmf.doCreateNewCSS(graphLoc.getX(), graphLoc.getY());
-            });
+            pmf.menuCall();
+            pmf.doCreateNewCSS(graphLoc.getX(), graphLoc.getY());
         });
         JavaFXUtil.addStyleClass(newCSS, "class-action-inbuilt");
 
         MenuItem addClassFromFile = new MenuItem(Config.getString("menu.edit.addClass"));
         addClassFromFile.setOnAction(e -> {
-            SwingUtilities.invokeLater(() -> {
-                pmf.menuCall();
-                pmf.doAddFromFile();
-            });
+            pmf.menuCall();
+            pmf.doAddFromFile();
         });
         JavaFXUtil.addStyleClass(addClassFromFile, "class-action-inbuilt");
 
@@ -480,7 +470,7 @@ public final class PackageEditor extends StackPane implements MouseTrackingOverl
             }
         }
 
-        SwingUtilities.invokeLater(() -> pmf.graphChanged());
+        pmf.graphChanged();
         
         //TODO make sure removed items aren't still in the selection
 
@@ -588,12 +578,14 @@ public final class PackageEditor extends StackPane implements MouseTrackingOverl
         private final Dependency.Line line;
         private final boolean selected;
         private final boolean creating;
+        private BDependency.Type type;
 
         public ExtendsDepInfo(Dependency d)
         {
             this.line = d.computeLine();
             this.selected = d.isSelected();
             this.creating = false;
+            this.type=d.getType();
         }
 
         // When we have a firm from, but the to point is not currently
@@ -673,7 +665,6 @@ public final class PackageEditor extends StackPane implements MouseTrackingOverl
         {
             g.setStroke(d.creating ? Color.BLUE : Color.BLACK);
             g.setLineWidth(d.selected ? 3.0 : 1.0);
-            g.setLineDashes();
             Dependency.Line line = d.line;
             double fromY = line.from.getY();
             double fromX = line.from.getX();
@@ -691,8 +682,16 @@ public final class PackageEditor extends StackPane implements MouseTrackingOverl
                     toX + (ARROW_SIZE * Math.cos(angle - ARROW_ANGLE))};
             double[] yPoints = {toY, toY - ((ARROW_SIZE) * Math.sin(angle + ARROW_ANGLE)),
                     toY - (ARROW_SIZE * Math.sin(angle - ARROW_ANGLE))};
-
+            g.setLineDashes();
             g.strokePolygon(xPoints, yPoints, 3);
+            if (d.type==BDependency.Type.IMPLEMENTS)
+            {
+                g.setLineDashes(DASHES);
+            }
+            else
+            {
+                g.setLineDashes();
+            }
             g.strokeLine(fromX, fromY, arrowJoinX, arrowJoinY);
         }
 
@@ -869,7 +868,7 @@ public final class PackageEditor extends StackPane implements MouseTrackingOverl
      * Add a dependency in this package. The dependency is also added to the
      * individual targets involved.
      */
-    @OnThread(Tag.Swing)
+    @OnThread(Tag.FXPlatform)
     // package-visible; see Package.addDependency proxy
     void addDependency(Dependency d, boolean recalc)
     {
@@ -904,15 +903,13 @@ public final class PackageEditor extends StackPane implements MouseTrackingOverl
         addDependencyHeadless(d, recalc, pkg);
     }
 
-    @OnThread(Tag.Swing)
+    @OnThread(Tag.FXPlatform)
     public static void addDependencyHeadless(Dependency d, boolean recalc, Package thePkg)
     {
         DependentTarget from = d.getFrom();
         DependentTarget to = d.getTo();
-        Platform.runLater(() -> {
-            from.addDependencyOut(d, recalc);
-            to.addDependencyIn(d, recalc);
-        });
+        from.addDependencyOut(d, recalc);
+        to.addDependencyIn(d, recalc);
 
         // Inform all listeners about the added dependency
         DependencyEvent event = new DependencyEvent(d, thePkg, DependencyEvent.Type.DEPENDENCY_ADDED);
@@ -923,7 +920,7 @@ public final class PackageEditor extends StackPane implements MouseTrackingOverl
      * Remove a dependency from this package. The dependency is also removed
      * from the individual targets involved.
      */
-    @OnThread(Tag.Swing)
+    @OnThread(Tag.FXPlatform)
     public void removeDependency(Dependency d, boolean recalc)
     {
         synchronized (this)
@@ -936,16 +933,14 @@ public final class PackageEditor extends StackPane implements MouseTrackingOverl
         removeDependencyHeadless(d, recalc, pkg);
     }
 
-    @OnThread(Tag.Swing)
+    @OnThread(Tag.FXPlatform)
     public static void removeDependencyHeadless(Dependency d, boolean recalc, Package thePkg)
     {
         DependentTarget from = d.getFrom();
         DependentTarget to = d.getTo();
-        
-        Platform.runLater(() -> {
-            from.removeDependencyOut(d, recalc);
-            to.removeDependencyIn(d, recalc);
-        });
+
+        from.removeDependencyOut(d, recalc);
+        to.removeDependencyIn(d, recalc);
 
         // Inform all listeners about the removed dependency
         DependencyEvent event = new DependencyEvent(d, thePkg, DependencyEvent.Type.DEPENDENCY_REMOVED);
@@ -1043,7 +1038,7 @@ public final class PackageEditor extends StackPane implements MouseTrackingOverl
      */
     public int snapToGrid(int x)
     {
-        int steps = x / PackageEditor.GRID_SIZE;
+        int steps = (int)Math.round((double)x / PackageEditor.GRID_SIZE);
         int new_x = steps * PackageEditor.GRID_SIZE;//new x-coor w/ respect to
         // grid
         return new_x;
@@ -1155,22 +1150,20 @@ public final class PackageEditor extends StackPane implements MouseTrackingOverl
                 // Take a copy because we're going to null it:
                 ClassTarget subClassFinal = this.extendsSubClass;
                 ClassTarget superClass = (ClassTarget)target;
-                SwingUtilities.invokeLater(() -> {
-                    if (subClassFinal.isInterface())
-                    {
-                        if (superClass.isInterface())
-                            pkg.userAddExtendsInterfaceDependency(subClassFinal, superClass);
-                        // TODO else give an error about why this won't work?
-                    }
+                if (subClassFinal.isInterface())
+                {
+                    if (superClass.isInterface())
+                        pkg.userAddExtendsInterfaceDependency(subClassFinal, superClass);
+                    // TODO else give an error about why this won't work?
+                }
+                else
+                {
+                    if (superClass.isInterface())
+                        pkg.userAddImplementsClassDependency(subClassFinal, superClass);
                     else
-                    {
-                        if (superClass.isInterface())
-                            pkg.userAddImplementsClassDependency(subClassFinal, superClass);
-                        else
-                            pkg.userAddExtendsClassDependency(subClassFinal, superClass);
-                    }
-                    pkg.compile(subClassFinal, CompileReason.MODIFIED, CompileType.INDIRECT_USER_COMPILE);
-                });
+                        pkg.userAddExtendsClassDependency(subClassFinal, superClass);
+                }
+                pkg.compile(subClassFinal, CompileReason.MODIFIED, CompileType.INDIRECT_USER_COMPILE);
                 
                 stopNewInherits();
             }

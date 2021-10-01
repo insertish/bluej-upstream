@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2014,2016  Michael Kolling and John Rosenberg
+ Copyright (C) 1999-2009,2014,2016,2017  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -21,8 +21,6 @@
  */
 package bluej.groupwork.actions;
 
-import threadchecker.OnThread;
-import threadchecker.Tag;
 import bluej.Config;
 import bluej.groupwork.ui.StatusFrame;
 import bluej.pkgmgr.PkgMgrFrame;
@@ -33,15 +31,14 @@ import bluej.pkgmgr.Project;
  * Action to show status.
  * 
  * @author bquig
- * @version $Id$
  */
 public class StatusAction extends TeamAction
 {
     /** Creates a new instance of StatusAction */
-    public StatusAction(PkgMgrFrame pmf)
+    public StatusAction()
     {
-        super(pmf, "team.status", false);
-        putValue(SHORT_DESCRIPTION, Config.getString("tooltip.status"));
+        super("team.status", false);
+        shortDescription = Config.getString("tooltip.status");
     }
 
     public void actionPerformed(PkgMgrFrame pmf)
@@ -52,12 +49,11 @@ public class StatusAction extends TeamAction
         doStatus(pmf);
     }
 
-    @OnThread(Tag.Swing)
     private void doStatus(PkgMgrFrame pmf)
     {
         if (pmf.getProject().getTeamSettingsController().initRepository()) {
             StatusFrame status = pmf.getProject().getStatusWindow(pmf::getFXWindow);
-            status.setVisible(true);
+            status.show();
             status.update();
         }
     }

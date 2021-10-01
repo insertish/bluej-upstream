@@ -21,19 +21,15 @@
  */
 package bluej.debugmgr.inspector;
 
-import javax.swing.SwingUtilities;
-import javax.swing.text.PlainDocument;
-import java.awt.event.ItemEvent;
-import java.awt.event.ItemListener;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Optional;
-import java.util.function.Function;
-
-import javafx.application.Platform;
+import bluej.Config;
+import bluej.collect.DataCollector;
+import bluej.debugger.gentype.JavaType;
+import bluej.pkgmgr.Package;
+import bluej.testmgr.record.InvokerRecord;
+import bluej.utility.javafx.FXPlatformSupplier;
+import bluej.utility.javafx.JavaFXUtil;
 import javafx.beans.binding.Bindings;
 import javafx.beans.binding.BooleanBinding;
-import javafx.beans.value.ObservableBooleanValue;
 import javafx.beans.value.ObservableValue;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
@@ -44,16 +40,11 @@ import javafx.scene.control.TextField;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Pane;
 import javafx.scene.layout.VBox;
-
-import bluej.Config;
-import bluej.collect.DataCollector;
-import bluej.debugger.gentype.JavaType;
-import bluej.pkgmgr.Package;
-import bluej.testmgr.record.InvokerRecord;
-import bluej.utility.Utility;
-import bluej.utility.javafx.JavaFXUtil;
 import threadchecker.OnThread;
 import threadchecker.Tag;
+
+import java.util.Optional;
+import java.util.function.Function;
 
 /**
  * A panel that can record assertion statements.
@@ -275,23 +266,21 @@ public class AssertPanel extends VBox
         }
     }
     
-    public void recordAssertion(Package pkg, Utility.SwingSupplier<Optional<Integer>> testIdentifier, int invocationIdentifier)
+    public void recordAssertion(Package pkg, FXPlatformSupplier<Optional<Integer>> testIdentifier, int invocationIdentifier)
     {
         AssertInfo info = assertCombo.getSelectionModel().getSelectedItem();
 
         String param1 = info.needsFirstField() ? assertData.getText() : null;
         String param2 = info.needsSecondField() ? deltaData.getText() : null;
-        SwingUtilities.invokeLater(() -> {
-            Optional<Integer> optTestId = testIdentifier.get();
-            optTestId.ifPresent(testId -> 
-                DataCollector.assertTestMethod(pkg,
-                    testId,
-                    invocationIdentifier,
-                    info.assertMethodName,
-                    param1,
-                    param2)
-            );
-        });
+        Optional<Integer> optTestId = testIdentifier.get();
+        optTestId.ifPresent(testId ->
+            DataCollector.assertTestMethod(pkg,
+                testId,
+                invocationIdentifier,
+                info.assertMethodName,
+                param1,
+                param2)
+        );
     }
     
 }

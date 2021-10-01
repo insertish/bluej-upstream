@@ -21,35 +21,23 @@
  */
 package bluej.pkgmgr.target;
 
-import java.awt.Color;
-import java.awt.Rectangle;
-import java.io.File;
-import java.io.IOException;
-import java.util.List;
-import java.util.Properties;
-
-import javax.swing.SwingUtilities;
-
-import javafx.application.Platform;
-import javafx.scene.control.ContextMenu;
-import javafx.scene.control.MenuItem;
-import javafx.scene.image.Image;
-import javafx.scene.image.ImageView;
-
 import bluej.Config;
-import bluej.collect.DiagnosticWithShown;
-import bluej.collect.StrideEditReason;
-import bluej.compiler.CompileReason;
-import bluej.compiler.CompileType;
 import bluej.editor.Editor;
 import bluej.editor.EditorManager;
-import bluej.extensions.SourceType;
 import bluej.pkgmgr.Package;
 import bluej.pkgmgr.PackageEditor;
 import bluej.utility.Debug;
 import bluej.utility.javafx.JavaFXUtil;
+import javafx.scene.control.ContextMenu;
+import javafx.scene.control.MenuItem;
+import javafx.scene.image.Image;
+import javafx.scene.image.ImageView;
 import threadchecker.OnThread;
 import threadchecker.Tag;
+
+import java.io.File;
+import java.io.IOException;
+import java.util.Properties;
 
 /**
  * A parent package
@@ -59,8 +47,7 @@ import threadchecker.Tag;
 public class ReadmeTarget extends NonCodeEditableTarget
 {
     private static final String openStr = Config.getString("pkgmgr.packagemenu.open");
-    private static final Color envOpColour = Config.ENV_COLOUR;
-    
+
     public static final String README_ID = "@README";
 
     // Images
@@ -76,23 +63,19 @@ public class ReadmeTarget extends NonCodeEditableTarget
         // create the target with an identifier name that cannot be
         // a valid java name
         super(pkg, README_ID);
-        
-        Platform.runLater(() -> {
-            if (readmeImage == null)
-                readmeImage = Config.getImageAsFXImage("image.readme");
-            if (selectedReadmeImage == null)
-                selectedReadmeImage= Config.getImageAsFXImage("image.readme-selected");
 
-            setPos(10, 10);
-            setSize((int)readmeImage.getWidth(), (int)readmeImage.getHeight());
-            JavaFXUtil.addStyleClass(pane, "readme-target");
-            pane.setTop(null);
-            imageView = new ImageView();
-            imageView.setImage(readmeImage);
-            pane.setCenter(imageView);
-        });
+        if (readmeImage == null)
+            readmeImage = Config.getImageAsFXImage("image.readme");
+        if (selectedReadmeImage == null)
+            selectedReadmeImage= Config.getImageAsFXImage("image.readme-selected");
 
-
+        setPos(10, 10);
+        setSize((int)readmeImage.getWidth(), (int)readmeImage.getHeight());
+        JavaFXUtil.addStyleClass(pane, "readme-target");
+        pane.setTop(null);
+        imageView = new ImageView();
+        imageView.setImage(readmeImage);
+        pane.setCenter(imageView);
     }
 
     @Override
@@ -158,7 +141,7 @@ public class ReadmeTarget extends NonCodeEditableTarget
         
        // now try again to open it
        if(getEditor() != null) {
-           editor.setVisible(true);
+           editor.setEditorVisible(true);
        }
     }
 
@@ -170,7 +153,7 @@ public class ReadmeTarget extends NonCodeEditableTarget
     @OnThread(Tag.FXPlatform)
     public void doubleClick()
     {
-        SwingUtilities.invokeLater(() -> openEditor());
+        openEditor();
     }
 
     /*
@@ -191,7 +174,7 @@ public class ReadmeTarget extends NonCodeEditableTarget
     private ContextMenu createMenu()
     {
         MenuItem open = new MenuItem(openStr);
-        open.setOnAction(e -> SwingUtilities.invokeLater(() -> openEditor()));
+        open.setOnAction(e -> openEditor());
         JavaFXUtil.addStyleClass(open, "class-action-inbuilt");
         return new ContextMenu(open);
     }

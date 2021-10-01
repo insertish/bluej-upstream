@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2013,2014  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2013,2014,2017  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -21,20 +21,17 @@
  */
 package bluej.editor.moe;
 
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-
-import javax.swing.event.DocumentEvent;
-import javax.swing.text.Element;
-
-import threadchecker.OnThread;
-import threadchecker.Tag;
 import bluej.parser.nodes.NodeStructureListener;
 import bluej.parser.nodes.NodeTree.NodeAndPosition;
 import bluej.parser.nodes.ParsedNode;
+import threadchecker.OnThread;
+import threadchecker.Tag;
+
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 /**
  * A representation of document events in a MoeSyntaxDocuments. As well as textual
@@ -43,27 +40,23 @@ import bluej.parser.nodes.ParsedNode;
  * @author Davin McCall
  */
 @OnThread(Tag.Any)
-public class MoeSyntaxEvent implements DocumentEvent, NodeStructureListener
+public class MoeSyntaxEvent implements NodeStructureListener
 {
-    private MoeSyntaxDocument document;
-    private DocumentEvent srcEvent;
-    private List<NodeAndPosition<ParsedNode>> removedNodes =
-        new LinkedList<NodeAndPosition<ParsedNode>>();
-    private Map<ParsedNode,NodeChangeRecord> changedNodes =
-        new HashMap<ParsedNode,NodeChangeRecord>();
-    private EventType eventType;
-    
-    public MoeSyntaxEvent(MoeSyntaxDocument document, DocumentEvent srcEvent)
+    private final int offset;
+    private final int length;
+    private final MoeSyntaxDocument document;
+    private final List<NodeAndPosition<ParsedNode>> removedNodes = new ArrayList<>();
+    private final Map<ParsedNode, NodeChangeRecord> changedNodes = new HashMap<>();
+    private final boolean insert;
+    private final boolean remove;
+
+    public MoeSyntaxEvent(MoeSyntaxDocument document, int offset, int length, boolean isInsert, boolean isRemove)
     {
         this.document = document;
-        this.srcEvent = srcEvent;
-        eventType = srcEvent.getType();
-    }
-    
-    public MoeSyntaxEvent(MoeSyntaxDocument document)
-    {
-        this.document = document;
-        eventType = EventType.CHANGE;
+        this.offset = offset;
+        this.length = length;
+        this.insert = isInsert;
+        this.remove = isRemove;
     }
     
     /**
@@ -81,42 +74,18 @@ public class MoeSyntaxEvent implements DocumentEvent, NodeStructureListener
     {
         return changedNodes.values();
     }
-    
-    // -------------- DocumentListener interface ------------------
-    
-    public ElementChange getChange(Element elem)
-    {
-        return srcEvent != null ? srcEvent.getChange(elem) : null;
-    }
-    
-    public MoeSyntaxDocument getDocument()
-    {
-        return document;
-    }
-    
-    public int getLength()
-    {
-        return srcEvent != null ? srcEvent.getLength() : 0;
-    }
 
-    public int getOffset()
-    {
-        return srcEvent != null ? srcEvent.getOffset() : 0;
-    }
-    
-    public EventType getType()
-    {
-        return eventType;
-    }
     
     // -------------- NodeStructureListener interface ------------------
-    
+
+    @OnThread(value = Tag.FXPlatform, ignoreParent = true)
     public void nodeRemoved(NodeAndPosition<ParsedNode> node)
     {
         removedNodes.add(node);
         changedNodes.remove(node.getNode());
     }
-    
+
+    @OnThread(value = Tag.FXPlatform, ignoreParent = true)
     public void nodeChangedLength(NodeAndPosition<ParsedNode> nap, int oldPos,
             int oldSize)
     {
@@ -142,7 +111,27 @@ public class MoeSyntaxEvent implements DocumentEvent, NodeStructureListener
             }
         }
     }
-    
+
+    public int getOffset()
+    {
+        return offset;
+    }
+
+    public int getLength()
+    {
+        return length;
+    }
+
+    public boolean isInsert()
+    {
+        return insert;
+    }
+
+    public boolean isRemove()
+    {
+        return remove;
+    }
+
     /**
      * Node change record. Purely used for passing data around, hence public fields.
      */

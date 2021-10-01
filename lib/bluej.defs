@@ -243,7 +243,7 @@ browserCmd2=firefox $
 #######################################################################
 
 #doctool.command=javadoc
-doctool.options=-author -version -nodeprecated -package
+doctool.options=-author -version -nodeprecated -package -Xdoclint:none
 doctool.outputdir=doc
 doctool.linkToStandardLib=true
 
@@ -318,20 +318,6 @@ bluej.classTemplates.stride = stdclass abstract interface
 #bluej.templatePath = F:\\shared\\bluej\\templates
 
 #######################################################################
-## BlueJ Look and Feel.
-## By default no option is specified, this means that BlueJ decides.
-## At present this means:
-## Windows: System look and feel
-## Linux: CrossPlatform look and feel (Metal)
-## Solaris: CrossPlatform look and feel (Metal)
-## Where a crossplatform look and feel has been specified, font 
-## customisation can be done through the use of the BlueJ theme option
-#######################################################################
-
-#bluej.lookAndFeel=system
-#bluej.lookAndFeel=crossplatform
-
-#######################################################################
 ## Fonts. You can choose a font size for most of the interface
 ## components, and a font face and size for the editor. The editor font
 ## size can be redefined by a user in their preference dialogue.
@@ -339,33 +325,11 @@ bluej.classTemplates.stride = stdclass abstract interface
 
 #######################################################################
 # Theme fonts for User Interface components
-# These specify font and font sizes for most of the interface components
-# if using a crossplatform setting for bluej.lookandfeel. When using a
-# system look-and-feel, UI fonts are derived from the OS settings.
-#
-# The font setting is specified as the name of a font face with an optional
-# "-bold" at the end.
-#
-# The theme fonts are only used if bluej.useTheme flag is true and the 
-# bluej.lookandfeel property has been uncommented and set to crossplatform.
-
-# Use theme, which means interface and menu fonts can be specified.
-bluej.useTheme=false
-
-bluej.fontsize=12
-bluej.font=SansSerif
-#bluej.font=Monospaced
-#bluej.font=SIMSUN
-
 # fonts for menus
 bluej.menu.font=SansSerif-bold
 bluej.menu.fontsize=12
 # END OF THEME FONTS
 #######################################################################
-
-# fonts for Targets (classes in display)
-bluej.target.font=SansSerif-bold
-bluej.target.fontsize=12
 
 # default fontsize for the editor (can be changed in Preferences dialog)
 bluej.editor.fontsize=12
@@ -375,25 +339,13 @@ bluej.editor.fontsize=12
 bluej.terminal.font=Monospaced
 #bluej.terminal.font=Monospaced-bold
 
+# The editor font. Only the font face is specified here, the font
+# size is specified in the BlueJ preference dialogue.  You can specify
+# any font name which has a corresponding TTF file in the lib/fonts directory:
 
-# fontsize for the codepad (defaults to editor font size if not specified here)
-#bluej.codepad.fontsize=12
+bluej.editor.font=Roboto Mono
+bluej.editor.MacOS.font=Roboto Mono
 
-# The editor font. This is the name of a font face with an optional
-# "-bold" at the end. Most used are monospaced fonts, such as Courier.
-# Good large fonts for screen projections are SansSerif-bold, 14pt, or
-# Courier-bold, 18pt. Only the font face is specified here, the font
-# size is specified in the BlueJ preference dialogue. Some examples:
-
-bluej.editor.font=Monospaced
-bluej.editor.MacOS.font=Monaco
-# bluej.editor.font=Monospaced-bold
-# bluej.editor.font=SansSerif
-# bluej.editor.font=SansSerif-bold
-# bluej.editor.font=Arial-bold
-
-# The font used in the code completion display (method list)
-bluej.codecompletion.font=Courier
 
 #######################################################################
 ## Printing settings.
@@ -411,8 +363,6 @@ bluej.print.scale=60
 #######################################################################
 ## Terminal settings. Height and width are in number of characters.
 #######################################################################
-bluej.terminal.height=22
-bluej.terminal.width=80
 
 bluej.terminal.clearscreen=false
 bluej.terminal.recordcalls=false
@@ -451,17 +401,6 @@ bluej.editor.codecompletion=true
 bluej.testing.showtools=false
 bluej.teamwork.showtools=false
 
-#######################################################################
-### Colours. All are specified as RGB values.
-#######################################################################
-
-#colour for selections (in text and otherwise)
-colour.selection=233,225,0
-colour.selection2=255,250,0
-
-#colour for highlights (in text editor)
-colour.highlight=180,220,255
-colour.highlight2=110,190,255
 
 #####################################################################
 ## Compiler options. 
@@ -511,7 +450,7 @@ bluej.compiler.unchecked=true
 ##            abcde\\\\fg => 1 argument: 'abcde\fg'
 #####################################################################
 
-bluej.vm.args=-ea -Djavafx.macosx.embedded=true
+bluej.vm.args=-ea
 
 # -ea : enable assertions
 
@@ -528,7 +467,7 @@ bluej.vm.args=-ea -Djavafx.macosx.embedded=true
 ## Java defaults need to be modified.  
 #####################################################################
 
-bluej.windows.vm.args=-Xmx512M
+bluej.windows.vm.args=-Xmx512M -Djavafx.embed.singleThread=true
 
 
 #####################################################################
@@ -561,10 +500,6 @@ bluej.debug=false
 image.readme=readme.png
 image.readme-selected=readme-selected.png
 
-# arrow buttons
-image.build.depends=arrow_black_uml.gif
-image.build.extends=darrow_black_uml.gif
-
 # editor breakpoint and step mark
 image.editor.breakmark=break.gif
 image.editor.stepmark=stepmark.gif
@@ -574,10 +509,6 @@ image.editor.breakstepmark=stepbreak.gif
 image.eval.prompt=prompt.gif
 image.eval.continue=prompt-continue.gif
 image.eval.object=small-object.gif
-image.eval.object.add=small-object-add.png
-image.eval.object.add.highlight=small-object-add-highlight.png
-image.eval.dragobject-plus=drag-object-plus.gif
-image.eval.dragobject-noplus=drag-object-noplus.gif
 
 #editor-divider panel
 image.editordivider.open=bluej_arrow_naviview_open.gif
@@ -588,11 +519,3 @@ image.extmgr.info=extmgr-info.gif
 
 #inspector object reference arrow
 image.inspector.objectref=objectref.gif
-
-
-#######################################################################
-## HiDPI screens.
-#######################################################################
-
-# Scaling factor needed to solve Swing issues on HiDPI screens
-screen.hidpi.scaling = 1

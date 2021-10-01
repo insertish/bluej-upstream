@@ -165,7 +165,7 @@ public class InfoParser extends EditorParser
      * Attempt to parse the specified source file, and resolve references via the specified
      * package (and its project). Returns null if the file could not be parsed.
      */
-    @OnThread(Tag.Swing)
+    @OnThread(Tag.FXPlatform)
     public static ClassInfo parseWithPkg(File f, Package pkg) throws FileNotFoundException
     {
         FileInputStream fis = new FileInputStream(f);
@@ -186,6 +186,7 @@ public class InfoParser extends EditorParser
      * resolver. The source should be assumed to reside in the specified package.
      * Returns null if the source could not be parsed.
      */
+    @OnThread(Tag.FXPlatform)
     public static ClassInfo parse(Reader r, EntityResolver resolver, String targetPkg)
     {
         InfoParser infoParser = null;
@@ -204,6 +205,7 @@ public class InfoParser extends EditorParser
     /**
      * Resolve the method parameter and return types to their fully qualified types.
      */
+    @OnThread(Tag.FXPlatform)
     protected void resolveMethodTypes()
     {
         methodLoop:
@@ -249,6 +251,7 @@ public class InfoParser extends EditorParser
      * All type references and method declarations are unresolved after parsing.
      * Call this method to resolve them.
      */
+    @OnThread(Tag.FXPlatform)
     public void resolveComments()
     {
         resolveMethodTypes();

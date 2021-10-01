@@ -21,6 +21,9 @@
  */
 package bluej.debugger;
 
+import threadchecker.OnThread;
+import threadchecker.Tag;
+
 import java.io.*;
 
 /**
@@ -30,9 +33,18 @@ import java.io.*;
  */
 public interface DebuggerTerminal
 {
+    @OnThread(Tag.Any)
     Writer getErrorWriter();
 
+    @OnThread(Tag.Any)
     Writer getWriter();
 
+    @OnThread(Tag.Any)
     Reader getReader();
+
+    /**
+     * This is called when there is reading request from the terminal on the remote virtual machine
+     */
+    @OnThread(Tag.Any)
+    void showOnInput();
 }

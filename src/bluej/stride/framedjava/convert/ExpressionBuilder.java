@@ -36,6 +36,8 @@ import bluej.stride.framedjava.ast.SuperThisParamsExpressionFragment;
 import bluej.stride.framedjava.convert.ConversionWarning.UnsupportedFeature;
 import bluej.stride.framedjava.elements.AssignElement;
 import bluej.stride.framedjava.elements.CodeElement;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 
 /**
  * Class in charge of building expressions.

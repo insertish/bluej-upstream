@@ -430,6 +430,7 @@ public class FileUtility
      * @return An array contained each source file which was
      *         not successfully copied or null if everything went well
      */
+    @OnThread(Tag.Any)
     public static File[] recursiveCopyFile(File srcDir, File destDir)
     {
         if (srcDir == null || destDir == null)
@@ -449,6 +450,7 @@ public class FileUtility
         return actualRecursiveCopyFile(srcDir, destDir);
     }
 
+    @OnThread(Tag.Any)
     private static File[] actualRecursiveCopyFile(File srcDir, File destDir)
     {
         // remember every file which we don't successfully copy
@@ -512,6 +514,7 @@ public class FileUtility
      * @return   a file with the given extension in the given directory,
      *           or 'null' if such a file cannot be found.
      */
+    @OnThread(Tag.Any)
     public static File findFile(File startDir, String suffix)
     {
         File[] files = startDir.listFiles();
@@ -543,6 +546,7 @@ public class FileUtility
      * @return  true if a file with the given suffix exists in the given
      *          directory.
      */
+    @OnThread(Tag.Any)
     public static boolean containsFile(File dir, String suffix)
     {
         if (dir == null)
@@ -632,6 +636,7 @@ public class FileUtility
      *         {@link WriteCapabilities#UNKNOWN} if the file is not an existing
      *         directory.
      */
+    @OnThread(Tag.Any)
     public static WriteCapabilities getVistaWriteCapabilities(File dir) 
     {
         if(!dir.isDirectory()) {
@@ -663,6 +668,7 @@ public class FileUtility
      * Check whether the given file is virtualized by Windows (Vista).
      * 
      */
+    @OnThread(Tag.Any)
     private static boolean isVirtualized(File file)
     {
         boolean isVirtualized = false;

@@ -81,6 +81,7 @@ public abstract class TabMenuManager
         });
     }
 
+    @OnThread(Tag.FXPlatform)
     protected void updateMoveMenus()
     {
         // Have to do everything double because the menus don't share:
@@ -112,5 +113,6 @@ public abstract class TabMenuManager
         }
     }
 
+    @OnThread(Tag.FXPlatform)
     abstract List<Menu> getMenus();
 }

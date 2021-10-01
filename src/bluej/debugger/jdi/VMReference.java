@@ -40,6 +40,7 @@ import java.util.List;
 import java.util.Map;
 
 import bluej.utility.DialogManager;
+import bluej.utility.javafx.FXPlatformSupplier;
 import threadchecker.OnThread;
 import threadchecker.Tag;
 import bluej.Boot;
@@ -129,6 +130,7 @@ import javafx.application.Platform;
  * 
  * @author Michael Kolling
  */
+@OnThread(Tag.Any)
 class VMReference
 {
     // the class name of the execution server class running on the remote VM
@@ -140,6 +142,9 @@ class VMReference
     // the name of the method used to suspend the ExecServer
     static final String SERVER_SUSPEND_METHOD_NAME = "vmSuspend";
 
+    // the name of the method used to show  the terminal on input
+    static final String SERVER_SHOW_TERMINAL_ON_INPUT_NAME = "showTerminalOnInput";
+
     // A map which can be used to map instances of VirtualMachine to VMReference 
     private static Map<VirtualMachine, VMReference> vmToReferenceMap = new HashMap<VirtualMachine, VMReference>();
     
@@ -148,10 +153,9 @@ class VMReference
     // we have a tight coupling between us and the JdiDebugger
     // that creates us
     private JdiDebugger owner = null;
-
+    private DebuggerTerminal term;
     // The remote virtual machine and process we are referring to
     private VirtualMachine machine = null;
-    private Process remoteVMprocess = null;
 
     // The handler for virtual machine events
     private VMEventHandler eventHandler = null;
@@ -170,21 +174,19 @@ class VMReference
 
     // a record of the threads we start up for
     // redirecting ExecServer streams
+    @OnThread(Tag.Any)
     private IOHandlerThread inputStreamRedirector = null;
+    @OnThread(Tag.Any)
     private IOHandlerThread outputStreamRedirector = null;
+    @OnThread(Tag.Any)
     private IOHandlerThread errorStreamRedirector = null;
 
     // the current class loader in the ExecServer
     private ClassLoaderReference currentLoader = null;
 
     private int exitStatus;
+    @OnThread(Tag.Any)
     private ExceptionDescription lastException;
-    
-    // array index of memory transport parameter 
-    private int transportIndex = 0;
-    
-    private boolean isDefaultEncoding = true;
-    private String streamEncoding = null;
 
     /**
      * Launch a remote debug VM using a TCP/IP socket.
@@ -197,6 +199,7 @@ class VMReference
      *            the virtual machine manager
      * @return an instance of a VirtualMachine or null if there was an error
      */
+    @OnThread(Tag.Any)
     public VirtualMachine localhostSocketLaunch(File initDir, URL[] libraries, DebuggerTerminal term,
             VirtualMachineManager mgr)
     {
@@ -275,13 +278,12 @@ class VMReference
             paramList.add("-Xdock:icon=" + Config.getBlueJIconPath() + "/" + Config.getVMIconsName());
             paramList.add("-Xdock:name=" + Config.getVMDockName());
         }
-        
-        // Index for where the transport parameter is to be added
-        transportIndex = paramList.size();
 
-        streamEncoding = Config.getPropString("bluej.terminal.encoding", null);
-        isDefaultEncoding = (streamEncoding == null);
-        if (! isDefaultEncoding) {
+        // Index for where the transport parameter is to be added
+        int transportIndex = paramList.size();
+
+        String streamEncoding = Config.getPropString("bluej.terminal.encoding", null);
+        if (streamEncoding != null) {
             // Set the input/output encoding to the same as the terminal encoding, to avoid confusion
             // that mismatching these two causes. See bug #509.
             paramList.add("-Dfile.encoding=" + streamEncoding);
@@ -292,7 +294,7 @@ class VMReference
         // set output encoding if specified, default is to use system default
         // this gets passed to ExecServer's main as an arg which can then be 
         // used to specify encoding
-        if(!isDefaultEncoding) {
+        if(streamEncoding != null) {
             paramList.add(streamEncoding);
         }
         
@@ -357,7 +359,8 @@ class VMReference
                                 + ",address=" + address);
                         launchParams = paramList.toArray(new String[paramList.size()]);
                         paramList.remove(transportIndex);
-                        
+
+                        final Process remoteVMprocess;
                         try {
                             remoteVMprocess = launchVM(initDir, launchParams);
                         }
@@ -368,7 +371,7 @@ class VMReference
 
                         try {
                             machine = connector.accept(arguments);
-                            redirectToTerminal(term);
+                            redirectToTerminal(term, remoteVMprocess, streamEncoding);
                         }
                         catch (Throwable t) {
                             // failed to connect.
@@ -378,11 +381,10 @@ class VMReference
                                 // whether the process has already exited.
                                 int exitCode = remoteVMprocess.exitValue();
                                 Debug.log("" + System.currentTimeMillis() + ": remote VM process has prematurely terminated with exit code: " + exitCode);
-                                drainOutput();
+                                drainOutput(remoteVMprocess);
                             }
                             catch (IllegalThreadStateException itse) {}
                             remoteVMprocess.destroy();
-                            remoteVMprocess = null;
                             throw t;
                         }
                         finally {
@@ -434,7 +436,7 @@ class VMReference
     /**
      * Read and log anything that the remote VM process output before it died.
      */
-    private void drainOutput()
+    private void drainOutput(Process remoteVMprocess)
     {
         InputStreamReader stdout = new InputStreamReader(remoteVMprocess.getInputStream());
         char charBuf[] = new char[2048];
@@ -486,6 +488,7 @@ class VMReference
      *                  the debug vm process
      * @param term      the terminal to connect to process I/O
      */
+    @OnThread(Tag.Any)
     private Process launchVM(File initDir, String [] params)
         throws IOException
     {    
@@ -542,10 +545,9 @@ class VMReference
     /**
      * Redirect input, output and error streams of the remote process to the terminal.
      */
-    private void redirectToTerminal(DebuggerTerminal term) throws UnsupportedEncodingException
+    @OnThread(Tag.Any)
+    private void redirectToTerminal(DebuggerTerminal term, Process vmProcess, String streamEncoding) throws UnsupportedEncodingException
     {
-        Process vmProcess = remoteVMprocess;
-        
         // redirect standard streams from process to Terminal
         // error stream System.err
         Reader errorReader = null;
@@ -554,7 +556,7 @@ class VMReference
         // input stream System.in
         Writer inputWriter = null;
         
-        if(isDefaultEncoding) {
+        if(streamEncoding == null) {
             errorReader = new InputStreamReader(vmProcess.getErrorStream());
             outReader = new InputStreamReader(vmProcess.getInputStream());
             inputWriter = new OutputStreamWriter(vmProcess.getOutputStream());            
@@ -575,15 +577,15 @@ class VMReference
      * Create the second virtual machine and start the execution server (class
      * ExecServer) on that machine.
      */
+    @OnThread(Tag.Any)
     public VMReference(JdiDebugger owner, DebuggerTerminal term, File initialDirectory, URL[] libraries)
         throws JdiVmCreationException
     {
         this.owner = owner;
+        this.term = term;
         
         // machine will be suspended at startup
         machine = localhostSocketLaunch(initialDirectory, libraries, term, Bootstrap.virtualMachineManager());
-        //machine = null; //uncomment to simulate inabilty to create debug VM
-        
         if (machine == null) {
             throw new JdiVmCreationException();
         }
@@ -609,6 +611,7 @@ class VMReference
     /**
      * Close down this virtual machine.
      */
+    @OnThread(Tag.Any)
     public synchronized void close()
     {
         if (machine != null) {
@@ -715,6 +718,17 @@ class VMReference
             workerBreakpoint.enable();
         }
 
+        // set a breakpoint in the showTerminaOnInput method
+        {
+            BreakpointRequest serverBreakpoint = erm.createBreakpointRequest(findMethodLocation(serverClass, SERVER_SHOW_TERMINAL_ON_INPUT_NAME));
+            serverBreakpoint.setSuspendPolicy(EventRequest.SUSPEND_NONE);
+            // the presence of this property indicates to breakEvent that we are
+            // a special type of breakpoint
+            serverBreakpoint.putProperty(SERVER_SHOW_TERMINAL_ON_INPUT_NAME, "yes");
+            serverBreakpoint.putProperty(Debugger.PERSIST_BREAKPOINT_PROPERTY, "yes");
+            serverBreakpoint.enable();
+        }
+
     }
 
     /**
@@ -755,6 +769,7 @@ class VMReference
      * 
      * @param urls  the classpath as an array of URL
      */
+    @OnThread(Tag.Any)
     ClassLoaderReference newClassLoader(URL [] urls)
     {
         synchronized(workerThread) {
@@ -897,7 +912,7 @@ class VMReference
      *            when a BlueJEvent is generated for a breakpoint, this
      *            parameter is passed as the event parameter
      */
-    public DebuggerResult runShellClass(String className)
+    public FXPlatformSupplier<DebuggerResult> runShellClass(String className)
     {
         // Calls to this method are protected by serverThreadLock in JdiDebugger
         
@@ -923,17 +938,16 @@ class VMReference
                 ObjectReference exception = getStaticFieldObject(serverClass, ExecServer.EXCEPTION_NAME);
                 if (exception != null) {
                     exceptionEvent(new InvocationException(exception));
-                    return new DebuggerResult(lastException);
+                    return () -> new DebuggerResult(lastException);
                 }
             }
             
             ObjectReference objR = getStaticFieldObject(serverClass, ExecServer.METHOD_RETURN_NAME);
-            JdiObject robj = JdiObject.getDebuggerObject(objR);
-            return new DebuggerResult(robj);
+            return () -> new DebuggerResult(JdiObject.getDebuggerObject(objR));
         }
         catch (VMDisconnectedException e) {
             exitStatus = Debugger.TERMINATED;
-            return new DebuggerResult(exitStatus);
+            return () -> new DebuggerResult(exitStatus);
         }
         catch (Exception e) {
             // remote invocation failed
@@ -943,13 +957,13 @@ class VMReference
             lastException = new ExceptionDescription("Internal BlueJ error: unexpected exception in remote VM\n" + e);
         }
         
-        return new DebuggerResult(lastException);
+        return () -> new DebuggerResult(lastException);
     }
     
     /**
      * Invoke the default constructor for some class, and return the resulting object.
      */
-    public DebuggerResult instantiateClass(String className)
+    public FXPlatformSupplier<DebuggerResult> instantiateClass(String className)
     {
         ObjectReference obj = null;
         exitStatus = Debugger.NORMAL_EXIT;
@@ -959,7 +973,7 @@ class VMReference
         catch (VMDisconnectedException e) {
             exitStatus = Debugger.TERMINATED;
             // return null; // debugger state change handled elsewhere
-            return new DebuggerResult(Debugger.TERMINATED);
+            return () -> new DebuggerResult(Debugger.TERMINATED);
         }
         catch (Exception e) {
             // remote invocation failed
@@ -969,10 +983,11 @@ class VMReference
             lastException = new ExceptionDescription("Internal BlueJ error: unexpected exception in remote VM\n" + e);
         }
         if (obj == null) {
-            return new DebuggerResult(lastException);
+            return () -> new DebuggerResult(lastException);
         }
         else {
-            return new DebuggerResult(JdiObject.getDebuggerObject(obj));
+            ObjectReference objFinal = obj;
+            return () -> new DebuggerResult(JdiObject.getDebuggerObject(objFinal));
         }
     }
 
@@ -988,7 +1003,7 @@ class VMReference
      * @return  The newly constructed object (or null if error/exception
      *          occurs)
      */
-    public DebuggerResult instantiateClass(String className, String [] paramTypes, ObjectReference [] args)
+    public FXPlatformSupplier<DebuggerResult> instantiateClass(String className, String [] paramTypes, ObjectReference [] args)
     {
         ObjectReference obj = null;
         exitStatus = Debugger.NORMAL_EXIT;
@@ -997,7 +1012,7 @@ class VMReference
         }
         catch (VMDisconnectedException e) {
             exitStatus = Debugger.TERMINATED;
-            return new DebuggerResult(exitStatus); // debugger state change handled elsewhere 
+            return () -> new DebuggerResult(exitStatus); // debugger state change handled elsewhere
         }
         catch (Exception e) {
             // remote invocation failed
@@ -1007,10 +1022,11 @@ class VMReference
             lastException = new ExceptionDescription("Internal BlueJ error: unexpected exception in remote VM\n" + e);
         }
         if (obj == null) {
-            return new DebuggerResult(lastException);
+            return () -> new DebuggerResult(lastException);
         }
         else {
-            return new DebuggerResult(JdiObject.getDebuggerObject(obj));
+            ObjectReference objFinal = obj;
+            return () -> new DebuggerResult(JdiObject.getDebuggerObject(objFinal));
         }
     }
     
@@ -1246,7 +1262,7 @@ class VMReference
         // after completing some work. We want to leave it suspended here until
         // it is required to do more work.
         else if (event.request().getProperty(SERVER_SUSPEND_METHOD_NAME) != null) {
-            
+
             if (workerThread == null) {
                 workerThread = event.thread();
             }
@@ -1255,6 +1271,11 @@ class VMReference
                 workerThreadReady = true;
                 workerThread.notifyAll();
             }
+        }
+        // if the breakpoint is marked with the SERVER_SHOW_TERMINAL_ON_INPUT_NAME
+        //
+        else if (event.request().getProperty(SERVER_SHOW_TERMINAL_ON_INPUT_NAME) != null) {
+                this.term.showOnInput();
         }
         else {
             // breakpoint set by user in user code
@@ -1729,7 +1750,7 @@ class VMReference
         catch(InterruptedException ie) {}
     }
 
-    public DebuggerResult launchFXApp(String className)
+    public FXPlatformSupplier<DebuggerResult> launchFXApp(String className)
     {
         ObjectReference obj = null;
         exitStatus = Debugger.NORMAL_EXIT;
@@ -1739,7 +1760,7 @@ class VMReference
         catch (VMDisconnectedException e) {
             exitStatus = Debugger.TERMINATED;
             // return null; // debugger state change handled elsewhere
-            return new DebuggerResult(Debugger.TERMINATED);
+            return () -> new DebuggerResult(Debugger.TERMINATED);
         }
         catch (Exception e) {
             // remote invocation failed
@@ -1749,10 +1770,11 @@ class VMReference
             lastException = new ExceptionDescription("Internal BlueJ error: unexpected exception in remote VM\n" + e);
         }
         if (obj == null) {
-            return new DebuggerResult(lastException);
+            return () -> new DebuggerResult(lastException);
         }
         else {
-            return new DebuggerResult(JdiObject.getDebuggerObject(obj));
+            ObjectReference objFinal = obj;
+            return () -> new DebuggerResult(JdiObject.getDebuggerObject(objFinal));
         }
     }
 
@@ -2211,6 +2233,7 @@ class VMReference
         private Writer writer;
         private volatile boolean keepRunning = true;
 
+        @OnThread(Tag.Any)
         IOHandlerThread(Reader reader, Writer writer)
         {
             super("BlueJ I/O Handler");

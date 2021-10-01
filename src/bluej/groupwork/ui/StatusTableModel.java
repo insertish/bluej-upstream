@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2016  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2016,2017  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -21,14 +21,14 @@
  */
 package bluej.groupwork.ui;
 
-import java.util.ArrayList;
 import java.util.List;
-
-import javax.swing.table.AbstractTableModel;
+import javafx.collections.ObservableList;
 
 import bluej.Config;
 import bluej.groupwork.TeamStatusInfo;
 import bluej.pkgmgr.Project;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 
 /**
  * Given a list of StatusEntry(s) returns a table model which allows them to
@@ -36,34 +36,32 @@ import bluej.pkgmgr.Project;
  * 
  * 
  * @author Bruce Quig
+ * @author Amjad Altadmri
  */
-public class StatusTableModel extends AbstractTableModel
+@OnThread(Tag.FXPlatform)
+public abstract class StatusTableModel
 {
-    final String resourceLabel = Config.getString("team.status.resource");
-    String statusLabel = Config.getString("team.status.status");
-    final String remoteStatusLabel = Config.getString("team.status.remoteStatus");
-    final String versionLabel = Config.getString("team.status.version");
- 
-    private Project project;
-    private List<TeamStatusInfo> resources;
-    
+    protected final String resourceLabel = Config.getString("team.status.resource");
+    protected final String remoteStatusLabel = Config.getString("team.status.remote");
+    protected final String versionLabel = Config.getString("team.status.version");
+
+    protected Project project;
+    protected String statusLabel;
+    protected List<String> labelsList;
+    protected ObservableList<TeamStatusInfo> resources;
+
     /**
      *
      */
     public StatusTableModel(Project project, int initialRows)
     {
         this.project = project;
-        resources = new ArrayList<TeamStatusInfo>();
-        for(int i = 0; i < initialRows; i++) {
-            resources.add(new TeamStatusInfo());
-        }
-        if (project.getTeamSettingsController().isDVCS()){
-            statusLabel = Config.getString("team.status.status");
-        } else {
-            statusLabel = Config.getString("team.status");
-        }
+//        resources = FXCollections.observableArrayList();
+//        for(int i = 0; i < initialRows; i++) {
+//            resources.add(new TeamStatusInfo());
+//        }
     }
-    
+
     /**
      * Return the name of a particular column
      *
@@ -72,123 +70,21 @@ public class StatusTableModel extends AbstractTableModel
      */
     public String getColumnName(int col)
     {
-        if (project.getTeamSettingsController().isDVCS()) {
-            switch (col) {
-                case 0:
-                    return resourceLabel;
-                case 1:
-                    return statusLabel;
-                case 2:
-                    return remoteStatusLabel;
-                default:
-                    break;
-            }
-        } else {
-            switch (col) {
-                case 0:
-                    return resourceLabel;
-                case 1:
-                    return versionLabel;
-                case 2:
-                    return statusLabel;
-                default:
-                    break;
-            }
+        try {
+            return labelsList.get(col);
         }
-        
-
-        throw new IllegalArgumentException("bad column number in StatusTableModel::getColumnName()");
-    }
-
-    /**
-     * Return the number of rows in the table
-     *
-     * @return      the number of rows in the table
-     */
-    public int getRowCount()
-    {
-        return resources.size();
-    }
-    
-    /**
-     * Return the number of columns in the table
-     *
-     * @return      the number of columns in the table
-     */
-    public int getColumnCount()
-    {
-        return 3;
-    }
-    
-    /**
-     * Find the table entry at a particular row and column
-     *
-     * @param   row     the table row
-     * @param   col     the table column
-     * @return          the Object at that location in the table
-     */
-    public Object getValueAt(int row, int col)
-    {
-        TeamStatusInfo info = (TeamStatusInfo) resources.get(row);
-        if (project.getTeamSettingsController().isDVCS()) {
-            switch (col) {
-                case 0:
-                    return ResourceDescriptor.getResource(project, info, false);
-                case 1:
-                    return info.getStatus();
-                case 2:
-                    return info.getRemoteStatus();
-                default:
-                    break;
-            }
-        } else {
-            switch (col) {
-                case 0:
-                    return ResourceDescriptor.getResource(project, info, false);
-                case 1:
-                    return info.getLocalVersion();
-                case 2:
-                    return info.getStatus();
-                default:
-                    break;
-            }
+        catch (Exception e) {
+            throw new IllegalArgumentException("bad column number in StatusTableModel::getColumnName()");
         }
-
-        return null;
-    }
-
-    /**
-     * Indicate that nothing is editable
-     */
-    public boolean isCellEditable(int row, int col)
-    {
-        return false;
-    }
-
-    /**
-     * Set the table entry at a particular row and column (only
-     * valid for the location column)
-     *
-     * @param   value   the Object at that location in the table
-     * @param   row     the table row
-     * @param   col     the table column
-     */
-    public void setValueAt(Object value, int row, int col)
-    {
-       // do nothing here
     }
     
-    public void clear()
-    {
-        resources.clear();
-        fireTableDataChanged();
-    }
-    
-    public void setStatusData(List<TeamStatusInfo> statusResources)
+    public void setStatusData(ObservableList<TeamStatusInfo> statusResources)
     {
         resources = statusResources;
-        fireTableDataChanged();
     }
-    
 
+    public ObservableList<TeamStatusInfo> getResources()
+    {
+        return resources;
+    }
 }

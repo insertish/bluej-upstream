@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2015,2016  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2015,2016,2017  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -22,7 +22,7 @@
 package bluej.groupwork.git;
 
 import bluej.Config;
-import bluej.groupwork.Repository;
+import bluej.groupwork.RepositoryOrError;
 import bluej.groupwork.TeamSettings;
 import bluej.groupwork.TeamworkCommandError;
 import bluej.groupwork.TeamworkCommandResult;
@@ -55,11 +55,15 @@ import org.eclipse.jgit.transport.Transport;
 import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider;
 import org.eclipse.jgit.util.FS;
 
+import threadchecker.OnThread;
+import threadchecker.Tag;
+
 /**
  * Teamwork provider for Git.
  *
  * @author Fabio Hedayioglu
  */
+@OnThread(Tag.Any)
 public class GitProvider implements TeamworkProvider 
 {
 
@@ -74,7 +78,8 @@ public class GitProvider implements TeamworkProvider
     @Override
     public String[] getProtocols() 
     {
-        return new String[]{"https", "http", "ssh", "git", "file"};
+        // 'file' protocol has been removed as it is not supported currently
+        return new String[]{"https", "http", "ssh", "git"};
     }
 
     @Override
@@ -92,7 +97,7 @@ public class GitProvider implements TeamworkProvider
     @Override
     public TeamworkCommandResult checkConnection(TeamSettings settings) 
     {
-        
+
         try {
             gitUrlString = makeGitUrl(settings);
             //perform a lsRemote on the remote git repo.
@@ -160,13 +165,15 @@ public class GitProvider implements TeamworkProvider
     }
     
     @Override
-    public Repository getRepository(File projectDir, TeamSettings settings)
+    public RepositoryOrError getRepository(File projectDir, TeamSettings settings)
     {
         try {
-            return new GitRepository(projectDir, settings.getProtocol(), makeGitUrl(settings), settings.getUserName(), settings.getPassword(), settings.getYourName(), settings.getYourEmail());
-        } catch (UnsupportedSettingException e) {
+            return new RepositoryOrError(new GitRepository(projectDir, settings.getProtocol(), makeGitUrl(settings),
+                    settings.getUserName(), settings.getPassword(), settings.getYourName(), settings.getYourEmail()));
+        }
+        catch (UnsupportedSettingException e) {
             Debug.reportError("GitProvider.getRepository", e);
-            return null;
+            return new RepositoryOrError(new TeamworkCommandError(e.getMessage(), e.getLocalizedMessage()));
         }
     }
 
@@ -178,6 +185,7 @@ public class GitProvider implements TeamworkProvider
      * @return the git-compatible connection string
      * @throws bluej.groupwork.UnsupportedSettingException
      */
+    @OnThread(Tag.Any)
     protected String makeGitUrl(TeamSettings settings)
             throws UnsupportedSettingException 
     {
@@ -189,7 +197,7 @@ public class GitProvider implements TeamworkProvider
         }
         
         String server = settings.getServer();
-        if ((server == null || server.isEmpty()) && !protocol.equals("file")){
+        if ((server == null || server.isEmpty()) /*&& !protocol.equals("file") // file protocol is unsupported currently*/ ){
             throw new UnsupportedSettingException(Config.getString("team.error.cannotParseServer"));
         }
         

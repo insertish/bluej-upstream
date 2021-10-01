@@ -32,6 +32,8 @@ import com.sun.jdi.ArrayReference;
 import com.sun.jdi.ArrayType;
 import com.sun.jdi.ObjectReference;
 import com.sun.jdi.Value;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 
 /**
  * Represents an array object running on the user (remote) machine.
@@ -40,9 +42,9 @@ import com.sun.jdi.Value;
  * @created    December 26, 2000
  */
 public class JdiArray extends JdiObject
-{    
-    private JavaType componentType; 
-    
+{
+    private JavaType componentType;
+
     protected JdiArray(ArrayReference obj)
     {
         this.obj = obj;
@@ -114,7 +116,7 @@ public class JdiArray extends JdiObject
             calcComponentType();
         }
     }
-    
+
     private void calcComponentType()
     {
         ArrayType ar = (ArrayType) obj.referenceType();

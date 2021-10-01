@@ -28,6 +28,7 @@ import bluej.stride.framedjava.ast.SlotFragment;
 import bluej.stride.slots.LinkedIdentifier;
 import bluej.stride.framedjava.ast.links.PossibleLink;
 import bluej.stride.slots.SuggestionList;
+import bluej.stride.slots.SuggestionList.SuggestionListParent;
 import bluej.utility.BackgroundConsumer;
 import bluej.utility.javafx.FXPlatformConsumer;
 import bluej.utility.javafx.FXPlatformRunnable;
@@ -69,7 +70,7 @@ import java.util.Set;
 import java.util.function.Consumer;
 
 @OnThread(Tag.FX)
-public interface InteractionManager
+public interface InteractionManager extends SuggestionListParent
 {
     /**
      * Gets completions at that point in the file
@@ -139,6 +140,7 @@ public interface InteractionManager
     @OnThread(Tag.FXPlatform)
     public void searchLink(PossibleLink link, FXPlatformConsumer<Optional<LinkedIdentifier>> callback);
 
+    @OnThread(Tag.FXPlatform)
     Pane getDragTargetCursorPane();
 
     void ensureImportsVisible();
@@ -150,6 +152,7 @@ public interface InteractionManager
 
     Paint getHighlightColor();
 
+    @OnThread(Tag.FXPlatform)
     List<AssistContentThreadSafe> getThisConstructors();
 
     FrameEditor getFrameEditor();
@@ -160,10 +163,12 @@ public interface InteractionManager
     @OnThread(Tag.FXPlatform)
     void recordCodeCompletionEnded(SlotFragment position, int index, String stem, String completion);
 
+    @OnThread(Tag.FXPlatform)
     void recordErrorIndicatorShown(int identifier);
 
     boolean isEditable();
 
+    @OnThread(Tag.FXPlatform)
     BooleanProperty cheatSheetShowingProperty();
 
     @OnThread(Tag.FXPlatform)
@@ -194,11 +199,6 @@ public interface InteractionManager
      */
     public void setupFocusableSlotComponent(EditableSlot parent, Node focusableComponent, boolean canCodeComplete, FXSupplier<List<ExtensionDescription>> getExtensions, List<FrameCatalogue.Hint> hints);
 
-    /**
-     * Add any necessary listeners to a code completion window
-     */
-    public void setupSuggestionWindow(Stage window);
-    
     /**
      * Focuses the nearest frame cursor to the given point, because a click event
      * was processed at that point.
@@ -271,9 +271,10 @@ public interface InteractionManager
      * unnecessary modification notifications
      * @return
      */
+    @OnThread(Tag.FX)
     public boolean isLoading();
 
-    public StringExpression getFontSizeCSS();
+    public StringExpression getFontCSS();
 
     public ReadOnlyObjectProperty<Frame.View> viewProperty();
 

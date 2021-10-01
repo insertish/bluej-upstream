@@ -28,6 +28,9 @@ import java.util.concurrent.CompletableFuture;
 
 import bluej.classmgr.BPClassLoader;
 import bluej.debugger.jdi.JdiDebugger;
+import bluej.utility.javafx.FXPlatformSupplier;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 
 /**
  * A class defining the debugger primitives needed by BlueJ. May be supported by different
@@ -92,9 +95,9 @@ public abstract class Debugger
      * 
      * @return  a Debugger instance
      */
-    public static Debugger getDebuggerImpl(File startingDirectory, DebuggerTerminal terminal)
+    public static Debugger getDebuggerImpl(File startingDirectory, DebuggerTerminal terminal, DebuggerThreadListener debuggerThreadListener)
     {
-        return new JdiDebugger(startingDirectory, terminal);
+        return new JdiDebugger(startingDirectory, terminal, debuggerThreadListener);
     }
 
     /**
@@ -109,6 +112,7 @@ public abstract class Debugger
      * 
      * <p>This can be a lengthy process so this should be executed in a sub thread.
      */
+    @OnThread(Tag.Any)
     public abstract void launch();
 
     /**
@@ -130,6 +134,7 @@ public abstract class Debugger
      * 
      * @param l  the DebuggerListener to remove
      */
+    @OnThread(Tag.Any)
     public abstract void removeDebuggerListener(DebuggerListener l);
 
     /**
@@ -197,7 +202,8 @@ public abstract class Debugger
      * @param className  the fully qualified name of the class
      * @return          a Map of (String name, DebuggerObject obj) entries
      */
-    public abstract Map<String,DebuggerObject> runTestSetUp(String className);
+    @OnThread(Tag.Any)
+    public abstract FXPlatformSupplier<Map<String,DebuggerObject>> runTestSetUp(String className);
 
     /**
      * Run a single test method in a test class and return the result.
@@ -206,17 +212,20 @@ public abstract class Debugger
      * @param  methodName the name of the method
      * @return            a DebuggerTestResult object
      */
+    @OnThread(Tag.Any)
     public abstract DebuggerTestResult runTestMethod(String className, String methodName);
 
     /**
      * Dispose all top level windows in the remote machine.
      */
+    @OnThread(Tag.Any)
     public abstract void disposeWindows();
 
     /**
      * "Run" a class (i.e. invoke its main method without arguments)
      */
-    public abstract DebuggerResult runClassMain(String className)
+    @OnThread(Tag.Any)
+    public abstract FXPlatformSupplier<DebuggerResult> runClassMain(String className)
         throws ClassNotFoundException;
 
     /**
@@ -224,7 +233,8 @@ public abstract class Debugger
      * @param className  The name of the class to instantiate
      * @return   The result of the constructor call
      */
-    public abstract DebuggerResult instantiateClass(String className);
+    @OnThread(Tag.Any)
+    public abstract FXPlatformSupplier<DebuggerResult> instantiateClass(String className);
 
     /**
      * Instantiate a class using a specific constructor for that class.
@@ -234,7 +244,7 @@ public abstract class Debugger
      * @param args       The arguments
      * @return   The result of the constructor call
      */
-    public abstract DebuggerResult instantiateClass(String className, String [] paramTypes, DebuggerObject [] args);
+    public abstract FXPlatformSupplier<DebuggerResult> instantiateClass(String className, String [] paramTypes, DebuggerObject [] args);
     
     /**
      * Get a class from the virtual machine, using the current classloader.
@@ -247,10 +257,11 @@ public abstract class Debugger
      * 
      * @throws ClassNotFoundException if the class couldn't be located.
      */
-    public abstract DebuggerClass getClass(String className, boolean initialize)
+    @OnThread(Tag.Any)
+    public abstract FXPlatformSupplier<DebuggerClass> getClass(String className, boolean initialize)
         throws ClassNotFoundException;
 
-    public abstract CompletableFuture<DebuggerResult> launchFXApp(String className);
+    public abstract CompletableFuture<FXPlatformSupplier<DebuggerResult>> launchFXApp(String className);
 
     /**
      * Get a reference to a string in the remote machine whose value is the
@@ -303,18 +314,4 @@ public abstract class Debugger
      */
     public abstract String toggleBreakpoint(DebuggerClass debuggerClass, String method, boolean set,
             Map<String, String> properties);
-    
-    /**
-     * A tree model representing the threads running in the debug VM.
-     *  
-     * @return  a TreeModel with DebuggerThread objects
-     *          as the leaves.
-     */
-    public abstract DebuggerThreadTreeModel getThreadTreeModel();
-
-    /**
-     * Set or clear the option to hide system threads.
-     * This method also updates the current display if necessary.
-     */
-    public abstract void hideSystemThreads(boolean hide);
 }

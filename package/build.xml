@@ -3,11 +3,15 @@
     
     <!-- Names of the the distributables created by the dist-target -->
     <property name="dist.jarinstaller" value="BlueJ-generic-${bluej.version.nodots}${bluej.rcsuffix}.jar"/>
+    <property name="dist.jarinstaller.final" value="BlueJ-generic-${bluej.version.nodots}.jar"/>
     <property name="dist.mac.legacy" value="BlueJ-mac-legacy-${bluej.version.nodots}${bluej.rcsuffix}.zip"/>
     <property name="dist.mac" value="BlueJ-mac-${bluej.version.nodots}${bluej.rcsuffix}.zip"/>
+    <property name="dist.mac.final" value="BlueJ-mac-${bluej.version.nodots}.zip"/>
 
     <property name="dist.linux" value="BlueJ-linux-${bluej.version.nodots}${bluej.rcsuffix}"/>
+    <property name="dist.linux.final" value="BlueJ-linux-${bluej.version.nodots}"/>
     <property name="dist.win" value="BlueJ-windows-${bluej.version.nodots}${bluej.rcsuffix}"/>
+    <property name="dist.win.final" value="BlueJ-windows-${bluej.version.nodots}"/>
     <property name="dist.jar" value="bluej-dist.jar"/>        
     
     <property name="bluej.source.zip" value="BlueJ-source-${bluej.version.nodots}${bluej.rcsuffix}.zip"/>
@@ -41,7 +45,6 @@
         <include name="lib/guava-17.0.jar" />
         <include name="lib/javassist-3.18.0.jar" />
         <include name="lib/xom-1.2.9.jar" />
-    	<include name="lib/bjdoclet.jar" />
         <include name="lib/bluej.defs" />
         <include name="lib/moe.defs" />
         <include name="lib/userlib/README.TXT" />
@@ -50,6 +53,7 @@
         <include name="lib/slf4j-api-1.7.2.jar"/>
         <include name="lib/slf4j-jdk14-1.7.2.jar"/>
         <include name="lib/nsmenufx-2.1.4.jar"/>
+        <include name="lib/richtextfx-fat-0.7-M5n.jar"/>
         <!-- Pi4J -->
         <include name="lib/userlib/pi4j-device.jar" />
         <include name="lib/userlib/pi4j-gpio-extension.jar" />
@@ -197,6 +201,7 @@
                srcdir="."
                destdir="install_tmp"
                includes="InstallerProps.java"
+               includeantruntime="false"
                debug="true"
         />
 
@@ -225,6 +230,7 @@
                fork="yes"
                srcdir="."
                destdir="install_tmp"
+               includeantruntime="false"
                includes="Installer.java"
                debug="true"
         >
@@ -247,11 +253,10 @@
              are now created. -->
         <delete dir="install_tmp"/>
        
-        <echo level="info" message="----------------------------------------------------------------------------"/>
+        <echo message="----------------------------------------------------------------------------"/>
         <echo level="info" message="The bluej-dist.jar (for building the windows installer) is in: ${basedir}${file.separator}${dist.jar}"/>
-        <echo level="info" message="The generic installer is in: ${basedir}${file.separator}${dist.jarinstaller}"/>
-        <echo level="info" message="The source is in: ${basedir}${file.separator}${bluej.source.zip}"/>
-        <echo level="warning" message="Remember to remove the dots in the version numbers when moving the files to the server. "/>
+        <echo message="The generic installer is in: ${basedir}${file.separator}${dist.jarinstaller}"/>
+        <echo message="The source is in: ${basedir}${file.separator}${bluej.source.zip}"/>
     </target>
 
 
@@ -306,6 +311,12 @@
         <copy todir="${zip_dir}/BlueJ.app">
             <fileset dir="macfiles/BlueJ.app"/> 
         </copy>
+
+        <!-- build the native launcher -->
+        <exec dir="macfiles/nativelauncher/" executable="/bin/bash">
+            <arg value="compile.sh"/>
+            <env key="JAVA_HOME" value="${build_java_home}"/>
+        </exec>
     	
     	<!-- copy the native launcher into place -->
     	<copy todir="${zip_dir}/BlueJ.app/Contents/MacOS" file="macfiles/nativelauncher/JavaAppLauncher" />
@@ -328,20 +339,22 @@
         <chmod perm="+x">
             <fileset dir="${zip_dir}/BlueJ.app/Contents" includes="${executable_files2}" />
         </chmod>
-    	
+
+        <!-- codesign needs Internet connection to verify current time -->
+        <echo message="Signing and verifying bundle (NOTE: Internet connection is required to sign)"/>
     	<chmod perm="+x" file="bundle-mac.sh" />
-        <exec executable="bundle-mac.sh" resolveexecutable="true">
+        <exec executable="bundle-mac.sh" resolveexecutable="true" outputproperty="bundleoutput">
             <arg value="${zip_dir}" />
         	<arg value="BlueJ.app" />
         	<arg value="${mac_bundled_jdk_path}" />
         	<arg value="${basedir}/${dist.mac}" />
         </exec>
+        <echo message="${bundleoutput}"/>
     	
         <delete dir="mac_tmp" />
 
-        <echo level="info" message="----------------------------------------------------------------------------"/>
-        <echo level="info" message="The mac installer is in: ${basedir}${file.separator}${dist.mac}"/>
-        <echo level="info" message="The legacy mac installer is in: ${basedir}${file.separator}${dist.mac.legacy}"/>
+        <echo message="----------------------------------------------------------------------------"/>
+        <echo message="The mac installer is in: ${basedir}${file.separator}${dist.mac}"/>
 
     </target>
 
@@ -593,6 +606,7 @@
 	    </replaceregexp>
 		
 		<!-- you must do this as root, sigh -->
+                <!-- (but we can also do it using fakeroot -->
 		<chown owner="root">
 			<fileset dir="bluejdeb">
 				<patternset includes="**" />
@@ -609,6 +623,14 @@
 				<patternset includes="**" />
 			</dirset>			
 		</chgrp>
+                <chmod perm="g-w">
+			<fileset dir="bluejdeb">
+				<patternset includes="**" />
+			</fileset>
+			<dirset dir="bluejdeb">
+				<patternset includes="**" />
+			</dirset>			
+                </chmod>
 		
 		<chmod perm="755" file="bluejdeb/DEBIAN/postinst" />
 		<chmod perm="755" file="bluejdeb/DEBIAN/postrm" />
@@ -620,53 +642,15 @@
 		
 		<delete dir="bluejdeb" />
 	</target>
-        
-    <!-- windows-dist requires that a bluej-dist.jar file is placed into
-         the package directory. This is unjarred and then rebuilt into
-         the windows installer package (left as winsetup/bluejsetup.exe)-->
-    <target name="windows-dist">
-        <delete dir="install_tmp" />
-        <unzip src="${dist.jar}" dest="install_tmp" />
 
-        <!-- make sure line endings are in windows format -->
-        <fixcrlf srcdir="install_tmp" eol="crlf" encoding="ISO-8859-1">
-            <patternset refid="bluej.textfiles.iso88591" />
-        </fixcrlf>
-        <fixcrlf srcdir="install_tmp" eol="crlf" encoding="UTF-8">
-            <patternset refid="bluej.textfiles.utf8" />
-        </fixcrlf>
-        
-        <!-- update version number in innosetup config file -->
-        <replaceregexp byline="true">
-            <regexp pattern="AppVerName=.*" />
-            <substitution expression="AppVerName=BlueJ ${bluej.version}" />
-            <fileset dir="winsetup" includes="bluej.iss" />
-        </replaceregexp>
-        
-        <!-- update output file in innosetup config file -->
-        <replaceregexp byline="true">
-            <regexp pattern="OutputBaseFilename=.*" />
-            <substitution expression="OutputBaseFilename=${dist.win}" />
-            <fileset dir="winsetup" includes="bluej.iss" />
-        </replaceregexp>
-        
-        <exec dir="winsetup" executable="C:\Program Files\Inno Setup 5\ISCC.exe">
-            <arg line="bluej.iss"/>
-        </exec>
-
-        <delete dir="install_tmp" />
-    </target>
-    
     <target name="zip-source"  description="create a zip of all the sources and other resources needed to build BlueJ." >
         <zip destfile="${bluej.source.zip}" compress="yes">
             <zipfileset dir="${bluej_home}" defaultexcludes="yes">
 	            <include name="src/**/*.java" />       
 	            <include name="boot/src/**/*.java" />       
-	            <include name="boot/src/bluej/splash.png" />
-                <include name="boot/src/bluej/splash@2x.png" />
+	            <include name="boot/src/bluej/*.png" />
                 <include name="threadchecker/src/**/*" />
                 <include name="threadchecker/pluginsrc/**/*" />
-                <include name="bjdoclet/**" />
 	            <include name="doc/HOWTO.*" />    
 	            <include name="doc/THIRDPARTYLICENSE.txt" />
 	            <include name="doc/LICENSE.txt" />
@@ -702,8 +686,10 @@
 	            <exclude name="package/install_tmp/"/>
 	            <include name="test/**/*"/>
             	<exclude name="test/classes/**"/>
+            	<include name="util/**/*.java"/>
 	            <include name="build.properties"/>   
 	            <include name="build.xml"/>  
+	            <include name="shared.xml"/>  
 	            <exclude name="**/.*"/>
 	        </zipfileset>
         </zip>
@@ -722,5 +708,32 @@
         <delete file="winsetup/$(dist.win}.exe" />
         <delete dir="install_tmp" />
     </target>
+
+    <target name="urls-rc">
+        <echo message="Mac:"/>
+        <test_url system="bluej" filename="rc/${dist.mac}"/>
+        <echo message="Windows MSI:"/>
+        <test_url system="bluej" filename="rc/${dist.win}.msi"/>
+        <echo message="Windows ZIP:"/>
+        <test_url system="bluej" filename="rc/${dist.win}.zip"/>
+        <echo message="Linux:"/>
+        <test_url system="bluej" filename="rc/${dist.linux}.deb"/>
+        <echo message="Generic:"/>
+        <test_url system="bluej" filename="rc/${dist.jarinstaller}"/>
+    </target>
+
+    <target name="urls-final">
+        <echo message="Mac:"/>
+        <test_url system="bluej" filename="${dist.mac.final}"/>
+        <echo message="Windows MSI:"/>
+        <test_url system="bluej" filename="${dist.win.final}.msi"/>
+        <echo message="Windows ZIP:"/>
+        <test_url system="bluej" filename="${dist.win.final}.zip"/>
+        <echo message="Linux:"/>
+        <test_url system="bluej" filename="${dist.linux.final}.deb"/>
+        <echo message="Generic:"/>
+        <test_url system="bluej" filename="${dist.jarinstaller.final}"/>
+    </target>
+
 
 </project>

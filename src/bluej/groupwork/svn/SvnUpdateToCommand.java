@@ -29,6 +29,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
 
+import javafx.application.Platform;
 import org.tigris.subversion.javahl.ClientException;
 import org.tigris.subversion.javahl.ConflictDescriptor;
 import org.tigris.subversion.javahl.ConflictResult;
@@ -51,6 +52,8 @@ import bluej.groupwork.TeamworkCommandResult;
 import bluej.groupwork.UpdateListener;
 import bluej.groupwork.UpdateResults;
 import bluej.utility.Debug;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 
 /**
  * Subversion command to update to a particular revision.
@@ -75,7 +78,8 @@ public class SvnUpdateToCommand extends SvnCommand implements UpdateResults
         this.forceFiles = forceFiles;
         this.listener = listener;
     }
-    
+
+    @OnThread(Tag.Worker)
     protected TeamworkCommandResult doCommand()
     {
         SVNClientInterface client = getClient();
@@ -162,22 +166,30 @@ public class SvnUpdateToCommand extends SvnCommand implements UpdateResults
         }
         finally {
             client.notification2(null);
-            
-            Iterator<File> i;
-            for (i = addedList.iterator(); i.hasNext(); ) {
-                listener.fileAdded(i.next());
-            }
-            for (i = updatedList.iterator(); i.hasNext(); ) {
-                listener.fileUpdated(i.next());
-            }
-            for (i = removedList.iterator(); i.hasNext(); ) {
-                listener.fileRemoved(i.next());
-            }
-            for (i = removedDirs.iterator(); i.hasNext(); ) {
-                listener.dirRemoved(i.next());
-            }
+
+            Platform.runLater(() ->
+            {
+                Iterator<File> i;
+                for (i = addedList.iterator(); i.hasNext(); )
+                {
+                    listener.fileAdded(i.next());
+                }
+                for (i = updatedList.iterator(); i.hasNext(); )
+                {
+                    listener.fileUpdated(i.next());
+                }
+                for (i = removedList.iterator(); i.hasNext(); )
+                {
+                    listener.fileRemoved(i.next());
+                }
+                for (i = removedDirs.iterator(); i.hasNext(); )
+                {
+                    listener.dirRemoved(i.next());
+                }
+            });
             
             if (! conflicts.isEmpty()) {
+                Iterator<File> i;
                 for (i = conflicts.iterator(); i.hasNext(); ) {
                     File file = (File) i.next();
                     try {
@@ -200,7 +212,7 @@ public class SvnUpdateToCommand extends SvnCommand implements UpdateResults
                 }
             }
             if (! conflicts.isEmpty() || ! binaryConflicts.isEmpty()) {
-                listener.handleConflicts(this);
+                Platform.runLater(() -> listener.handleConflicts(this));
             }
         }
         

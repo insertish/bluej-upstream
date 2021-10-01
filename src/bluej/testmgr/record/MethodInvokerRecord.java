@@ -56,6 +56,7 @@ public class MethodInvokerRecord extends VoidMethodInvokerRecord
      * @param returnType  the Class of the return type of the method
      * @param command     the method statement to execute
      */
+    @OnThread(Tag.FXPlatform)
     public MethodInvokerRecord(JavaType returnType, String command, String [] argumentValues)
     {
         super(command, argumentValues);
@@ -121,6 +122,7 @@ public class MethodInvokerRecord extends VoidMethodInvokerRecord
      *         src or null if there is none. 
      */
     @Override
+    @OnThread(Tag.FXPlatform)
     public String toFixtureSetup(String secondIndent)
     {
         if (benchName == null) {
@@ -167,7 +169,7 @@ public class MethodInvokerRecord extends VoidMethodInvokerRecord
      * up local variables if the result of the method is used more than once or
      * placed on the bench by using "Get".
      */
-    @OnThread(Tag.Swing)
+    @OnThread(Tag.FXPlatform)
     private String toTestMethodInit(PkgMgrFrame pkgMgrFrame, String secondIndent)
     {
         // If we have already prepared the method call, we return the name that
@@ -235,6 +237,7 @@ public class MethodInvokerRecord extends VoidMethodInvokerRecord
      * @return A string representing the assignment statement
      *         with an optional typecast to get the type correct
      */
+    @OnThread(Tag.FXPlatform)
     protected String benchAssignmentTypecast()
     {
         StringBuffer sb = new StringBuffer();

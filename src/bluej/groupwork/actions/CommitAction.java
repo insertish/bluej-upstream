@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2012,2014,2016  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2012,2014,2016,2017  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -21,16 +21,10 @@
  */
 package bluej.groupwork.actions;
 
-import java.awt.EventQueue;
-import java.awt.event.ActionEvent;
 import java.io.File;
 import java.util.HashSet;
 import java.util.Set;
 
-import javax.swing.AbstractAction;
-
-import threadchecker.OnThread;
-import threadchecker.Tag;
 import bluej.Config;
 import bluej.collect.DataCollector;
 import bluej.groupwork.StatusHandle;
@@ -41,10 +35,10 @@ import bluej.groupwork.TeamworkCommandResult;
 import bluej.groupwork.ui.CommitAndPushInterface;
 import bluej.pkgmgr.PkgMgrFrame;
 import bluej.pkgmgr.Project;
-import bluej.utility.SwingWorker;
-import java.awt.Window;
-import javafx.application.Platform;
+import bluej.utility.FXWorker;
 
+import threadchecker.OnThread;
+import threadchecker.Tag;
 
 /**
  * An action to do an actual commit.
@@ -61,20 +55,22 @@ import javafx.application.Platform;
  * 
  * @author Kasper
  */
-public class CommitAction extends AbstractAction
+@OnThread(Tag.FXPlatform)
+public class CommitAction extends TeamAction
 {
     private Set<File> newFiles; // which files are new files
     private Set<File> deletedFiles; // which files are to be removed
     private Set<File> files; // files to commit (includes both of above)
     private CommitAndPushInterface commitCommentsFrame;
+    @OnThread(value = Tag.Any, requireSynchronized = true)
     private StatusHandle statusHandle;
     
     private CommitWorker worker;
     
     public CommitAction(CommitAndPushInterface frame)
     {
-        super(Config.getString("team.commitButton"));
-        commitCommentsFrame = frame; 
+        super(Config.getString("team.commitButton"), false);
+        commitCommentsFrame = frame;
     }
     
     /**
@@ -110,16 +106,14 @@ public class CommitAction extends AbstractAction
     /**
      * Set the status handle to use in order to perform the commit operation.
      */
-    @OnThread(Tag.Any)
-    public void setStatusHandle(StatusHandle statusHandle)
+    @OnThread(Tag.Worker)
+    public synchronized void setStatusHandle(StatusHandle statusHandle)
     {
         this.statusHandle = statusHandle;
     }
     
-    /* (non-Javadoc)
-     * @see java.awt.event.ActionListener#actionPerformed(java.awt.event.ActionEvent)
-     */
-    public void actionPerformed(ActionEvent event) 
+    @Override
+    protected void actionPerformed(PkgMgrFrame pmf)
     {
         Project project = commitCommentsFrame.getProject();
         
@@ -133,8 +127,6 @@ public class CommitAction extends AbstractAction
                 PkgMgrFrame.displayMessage(project, Config.getString("team.commit.statusMessage"));
             }
             
-            setEnabled(false);
-            
             //doCommit(project);
             worker = new CommitWorker(project);
             worker.start();
@@ -146,7 +138,6 @@ public class CommitAction extends AbstractAction
      */
     public void cancel()
     {
-        setEnabled(true);
         if(worker != null) {
             worker.abort();
             worker = null;
@@ -158,17 +149,17 @@ public class CommitAction extends AbstractAction
      * 
      * @author Davin McCall
      */
-    private class CommitWorker extends SwingWorker
+    private class CommitWorker extends FXWorker
     {
         private TeamworkCommand command;
         private TeamworkCommandResult result;
         private boolean aborted;
-        
-        @OnThread(Tag.Swing)
+
+        @OnThread(Tag.FXPlatform)
         public CommitWorker(Project project)
         {
             String comment = commitCommentsFrame.getComment();
-            Set<TeamStatusInfo> forceFiles = new HashSet<TeamStatusInfo>();
+            Set<TeamStatusInfo> forceFiles = new HashSet<>();
             
             //last step before committing is to add in modified diagram 
             //layouts if selected in commit comments dialog
@@ -182,7 +173,8 @@ public class CommitAction extends AbstractAction
             command = statusHandle.commitAll(newFiles, binFiles, deletedFiles, files,
                     forceFiles, comment);
         }
-        
+
+        @OnThread(Tag.Worker)
         public Object construct()
         {
             result = command.getResult();
@@ -203,27 +195,21 @@ public class CommitAction extends AbstractAction
                 commitCommentsFrame.stopProgress();
                 if (! result.isError() && ! result.wasAborted()) {
                     DataCollector.teamCommitProject(project, statusHandle.getRepository(), files);
-                    EventQueue.invokeLater(() -> {
-                            if (project.getTeamSettingsController().isDVCS()) {
-                                //if DVCS, display message on commit/push window.
-                                commitCommentsFrame.displayMessage(Config.getString("team.commit.statusDone"));
-                            } else {
-                                //if svn, display the message on the main BlueJ window.
-                                PkgMgrFrame.displayMessage(project, Config.getString("team.commit.statusDone"));
-                            }
-                    });
+
+                    if (project.getTeamSettingsController().isDVCS()) {
+                        //if DVCS, display message on commit/push window.
+                        commitCommentsFrame.displayMessage(Config.getString("team.commit.statusDone"));
+                    } else {
+                        //if svn, display the message on the main BlueJ window.
+                        PkgMgrFrame.displayMessage(project, Config.getString("team.commit.statusDone"));
+                    }
                 }
             }
             
-            Platform.runLater(() -> TeamUtils.handleServerResponseFX(result, commitCommentsFrame.asWindow()));
+            TeamUtils.handleServerResponseFX(result, commitCommentsFrame.asWindow());
             
             if (! aborted) {
-                setEnabled(true);
-                if (project.getTeamSettingsController().isDVCS()){
-                    commitCommentsFrame.setVisible(true);
-                } else {
-                    commitCommentsFrame.setVisible(false);
-                }
+                commitCommentsFrame.setVisible(project.getTeamSettingsController().isDVCS());
             }
         }
     }

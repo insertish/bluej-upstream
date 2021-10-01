@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2016  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2016,2017  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -26,10 +26,10 @@ import bluej.groupwork.TeamworkCommandError;
 import bluej.groupwork.TeamworkCommandResult;
 import bluej.groupwork.UpdateListener;
 import bluej.groupwork.UpdateResults;
-import static bluej.groupwork.git.GitUtillities.findForkPoint;
-import static bluej.groupwork.git.GitUtillities.getDiffFromList;
-import static bluej.groupwork.git.GitUtillities.getDiffs;
-import static bluej.groupwork.git.GitUtillities.getFileNameFromDiff;
+import static bluej.groupwork.git.GitUtilities.findForkPoint;
+import static bluej.groupwork.git.GitUtilities.getDiffFromList;
+import static bluej.groupwork.git.GitUtilities.getDiffs;
+import static bluej.groupwork.git.GitUtilities.getFileNameFromDiff;
 import com.google.common.io.Files;
 import java.io.File;
 import java.io.IOException;
@@ -38,6 +38,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+
+import javafx.application.Platform;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.MergeCommand;
 import org.eclipse.jgit.api.MergeResult;
@@ -47,34 +49,40 @@ import org.eclipse.jgit.diff.DiffEntry;
 import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.merge.MergeStrategy;
 import org.eclipse.jgit.revwalk.RevCommit;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 
 /**
  * Git command to pull project changes from the upstream repository.
  *
  * @author Fabio Heday
  */
+@OnThread(Tag.Worker)
 public class GitUpdateToCommand extends GitCommand implements UpdateResults
 {
-
-    private final Set<File> files;
     private final Set<File> forceFiles;
     private final UpdateListener listener;
+    // Conflicts written to on worker thread, read from on GUI thread:
+    @OnThread(Tag.Any)
     private final List<File> conflicts = new ArrayList<>();
+    @OnThread(Tag.Any)
     private final Set<File> binaryConflicts = new HashSet<>();
-    private List<DiffEntry> listOfDiffsLocal, listOfDiffsRemote;
+    private List<DiffEntry> listOfDiffsLocal;
+    @OnThread(Tag.Any)
+    private List<DiffEntry> listOfDiffsRemote;
 
+    @OnThread(Tag.Any)
     public GitUpdateToCommand(GitRepository repository, UpdateListener listener, Set<File> files, Set<File> forceFiles)
     {
         super(repository);
-        this.files = files;
         this.forceFiles = forceFiles;
         this.listener = listener;
     }
 
     @Override
+    @OnThread(Tag.Worker)
     public TeamworkCommandResult getResult()
     {
-
         try (Git repo = Git.open(this.getRepository().getProjectPath())) {
             File gitPath = this.getRepository().getProjectPath();
 
@@ -135,7 +143,7 @@ public class GitUpdateToCommand extends GitCommand implements UpdateResults
             processChanges(repo, conflicts);
             
             if (!conflicts.isEmpty() || !binaryConflicts.isEmpty()) {
-                listener.handleConflicts(this);
+                Platform.runLater(() -> listener.handleConflicts(this));
             }
         } catch (IOException ex) {
             return new TeamworkCommandError(ex.getMessage(), ex.getLocalizedMessage());
@@ -148,18 +156,21 @@ public class GitUpdateToCommand extends GitCommand implements UpdateResults
     }
 
     @Override
+    @OnThread(Tag.Any)
     public List<File> getConflicts()
     {
         return conflicts;
     }
 
     @Override
+    @OnThread(Tag.Any)
     public Set<File> getBinaryConflicts()
     {
         return binaryConflicts;
     }
 
     @Override
+    @OnThread(Tag.FXPlatform)
     public void overrideFiles(Set<File> files)
     {
         for (File f : files) {
@@ -174,6 +185,7 @@ public class GitUpdateToCommand extends GitCommand implements UpdateResults
         }
     }
 
+    @OnThread(Tag.Worker)
     private void processChanges(Git repo, List<File> conflicts)
     {
         for (DiffEntry remoteDiffItem : listOfDiffsRemote) {
@@ -183,7 +195,7 @@ public class GitUpdateToCommand extends GitCommand implements UpdateResults
             switch (remoteDiffItem.getChangeType()) {
                 case ADD:
                 case COPY:
-                    listener.fileAdded(file);
+                    Platform.runLater(() -> listener.fileAdded(file));
                     break;
                 case DELETE:
                     if (localDiffItem != null && localDiffItem.getChangeType() == DiffEntry.ChangeType.MODIFY) {
@@ -192,13 +204,13 @@ public class GitUpdateToCommand extends GitCommand implements UpdateResults
                         binaryConflicts.add(file);
                     }
                     if (!file.exists()) {
-                        listener.fileRemoved(file);
+                        Platform.runLater(() -> listener.fileRemoved(file));
                     } else {
-                        listener.fileUpdated(file);
+                        Platform.runLater(() -> listener.fileUpdated(file));
                     }
                     break;
                 case MODIFY:
-                    listener.fileUpdated(file);
+                    Platform.runLater(() -> listener.fileUpdated(file));
                     break;
             }
         }

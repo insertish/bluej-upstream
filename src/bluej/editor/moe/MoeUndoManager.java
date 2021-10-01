@@ -21,13 +21,23 @@
  */
 package bluej.editor.moe;
 
-import java.util.LinkedList;
+import bluej.utility.javafx.FXPlatformRunnable;
+import javafx.beans.binding.BooleanExpression;
+import javafx.beans.property.BooleanProperty;
+import javafx.beans.property.SimpleBooleanProperty;
+import org.fxmisc.richtext.model.EditableStyledDocument;
+import org.fxmisc.undo.UndoManager;
+import org.fxmisc.undo.UndoManagerFactory;
+import org.reactfx.EventStream;
+import org.reactfx.Guard;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 
-import javax.swing.event.UndoableEditEvent;
-import javax.swing.event.UndoableEditListener;
-import javax.swing.undo.CompoundEdit;
-import javax.swing.undo.UndoManager;
-import javax.swing.undo.UndoableEdit;
+import java.util.Optional;
+import java.util.function.BiFunction;
+import java.util.function.Consumer;
+import java.util.function.Function;
+
 
 /**
  * An undo/redo manager for the editor. A stack of compound edits is maintained;
@@ -36,61 +46,64 @@ import javax.swing.undo.UndoableEdit;
  * 
  * @author Davin McCall
  */
-public class MoeUndoManager implements UndoableEditListener
+public class MoeUndoManager implements UndoManagerFactory
 {
-    LinkedList<CompoundEdit> editStack;
-    UndoManager undoManager;
-    CompoundEdit currentEdit;
-    MoeEditor editor;
-    
+    private final UndoManagerFactory delegate;
+    private UndoManager undoManager;
+    private final MoeEditor editor;
+    private BooleanProperty canUndo;
+    private BooleanProperty canRedo;
+
     public MoeUndoManager(MoeEditor editor)
     {
         this.editor = editor;
-        undoManager = new UndoManager();
-        currentEdit = undoManager;
-        editStack = new LinkedList<>();
+        delegate = UndoManagerFactory.fixedSizeHistoryFactory(100);
     }
-    
-    @Override
-    public void undoableEditHappened(UndoableEditEvent e)
+
+    /**
+     * Runs the given edit action.  See comment within.
+     */
+    public void compoundEdit(FXPlatformRunnable edit)
     {
-        addEdit(e.getEdit());
-    }
-    
-    public void addEdit(UndoableEdit edit)
-    {
-        currentEdit.addEdit(edit);
-        if (currentEdit == undoManager) {
-            editor.updateUndoRedoControls();
+        breakEdit();
+        // What we would like to do is carry out the given edit and treat it as a single compound edit; listeners
+        // for edits would only be informed of the final state not any intermediate states,
+        // and the edit will not merge in the undo manager with other edits before or after.
+
+        // However, this is not what pausing the updates does.  The changes are paused, but they are then later played back
+        // individually.  The document in the listener will be reflecting the final state of the document, not the
+        // intermediate state at that point of change.  This means if you do an insert and delete during
+        // the compound edit, the inserted change will get notified, even though the inserted text
+        // is no longer there.  What we probably need is an update mechanism building on top of RichTextFX
+        // (and perhaps an undo manager which can merge non-adjacent changes).  For now though, we just
+        // avoid suspending the updates, and live with the fact that the updates will get played separately
+        // (esp. since they wouldn't merge in the undo manager anyway)
+
+        //try(Guard currentEdit = ((EditableStyledDocument)editor.getSourcePane().getDocument()).beingUpdatedProperty().suspend())
+        {
+            edit.run();
         }
+        breakEdit();
     }
     
-    public void beginCompoundEdit()
+    public BooleanExpression canUndo()
     {
-        editStack.add(currentEdit);
-        currentEdit = new CompoundEdit();
-    }
-    
-    public void endCompoundEdit()
-    {
-        currentEdit.end();
-        CompoundEdit lastEdit = (CompoundEdit) editStack.removeLast();
-        lastEdit.addEdit(currentEdit);
-        currentEdit = lastEdit;
-        
-        if (currentEdit == undoManager) {
-            editor.updateUndoRedoControls();
+        if (canUndo == null)
+        {
+            canUndo = new SimpleBooleanProperty();
+            canUndo.bind(undoManager.undoAvailableProperty());
         }
+        return canUndo;
     }
     
-    public boolean canUndo()
+    public BooleanExpression canRedo()
     {
-        return undoManager.canUndo();
-    }
-    
-    public boolean canRedo()
-    {
-        return undoManager.canRedo();
+        if (canRedo == null)
+        {
+            canRedo = new SimpleBooleanProperty();
+            canRedo.bind(undoManager.redoAvailableProperty());
+        }
+        return canRedo;
     }
     
     public void undo()
@@ -101,5 +114,35 @@ public class MoeUndoManager implements UndoableEditListener
     public void redo()
     {
         undoManager.redo();
+    }
+
+    @Override
+    @OnThread(value = Tag.FXPlatform, ignoreParent = true)
+    public <C> UndoManager create(EventStream<C> eventStream, Function<? super C, ? extends C> function, Consumer<C> consumer)
+    {
+        undoManager = delegate.create(eventStream, function, consumer);
+        return undoManager;
+    }
+
+    @Override
+    @OnThread(value = Tag.FXPlatform, ignoreParent = true)
+    public <C> UndoManager create(EventStream<C> eventStream, Function<? super C, ? extends C> function, Consumer<C> consumer, BiFunction<C, C, Optional<C>> biFunction)
+    {
+        undoManager = delegate.create(eventStream, function, consumer, biFunction);
+        return undoManager;
+    }
+
+    public void forgetHistory()
+    {
+        undoManager.forgetHistory();
+    }
+
+    /**
+     * Stops edits before this point merging with later edits into one single undoable item
+     * (which is what happens by default).
+     */
+    public void breakEdit()
+    {
+        undoManager.preventMerge();
     }
 }

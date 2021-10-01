@@ -21,25 +21,6 @@
  */
 package bluej.testmgr;
 
-import javax.swing.SwingUtilities;
-import java.util.concurrent.atomic.AtomicBoolean;
-import javafx.beans.binding.Bindings;
-import javafx.beans.binding.BooleanBinding;
-import javafx.beans.property.SimpleIntegerProperty;
-import javafx.collections.FXCollections;
-import javafx.collections.ObservableList;
-import javafx.geometry.Orientation;
-import javafx.scene.Scene;
-import javafx.scene.control.*;
-import javafx.scene.image.Image;
-import javafx.scene.image.ImageView;
-import javafx.scene.input.MouseButton;
-import javafx.scene.layout.BorderPane;
-import javafx.scene.layout.HBox;
-import javafx.scene.layout.Priority;
-import javafx.scene.layout.VBox;
-import javafx.stage.Stage;
-
 import bluej.BlueJTheme;
 import bluej.Config;
 import bluej.debugger.DebuggerTestResult;
@@ -48,6 +29,31 @@ import bluej.pkgmgr.Package;
 import bluej.pkgmgr.Project;
 import bluej.utility.JavaNames;
 import bluej.utility.javafx.JavaFXUtil;
+import javafx.beans.binding.Bindings;
+import javafx.beans.binding.BooleanBinding;
+import javafx.beans.property.BooleanProperty;
+import javafx.beans.property.SimpleBooleanProperty;
+import javafx.beans.property.SimpleIntegerProperty;
+import javafx.collections.FXCollections;
+import javafx.collections.ObservableList;
+import javafx.geometry.Orientation;
+import javafx.scene.Scene;
+import javafx.scene.control.Button;
+import javafx.scene.control.Label;
+import javafx.scene.control.ListCell;
+import javafx.scene.control.ListView;
+import javafx.scene.control.ProgressBar;
+import javafx.scene.control.SelectionMode;
+import javafx.scene.control.SplitPane;
+import javafx.scene.control.TextArea;
+import javafx.scene.image.Image;
+import javafx.scene.image.ImageView;
+import javafx.scene.input.MouseButton;
+import javafx.scene.layout.BorderPane;
+import javafx.scene.layout.HBox;
+import javafx.scene.layout.Priority;
+import javafx.scene.layout.VBox;
+import javafx.stage.Stage;
 import threadchecker.OnThread;
 import threadchecker.Tag;
 
@@ -59,11 +65,13 @@ import threadchecker.Tag;
 public @OnThread(Tag.FXPlatform) class TestDisplayFrame
 {
     // -- static singleton factory method --
-    @OnThread(value = Tag.Any,requireSynchronized = true)
+    @OnThread(Tag.FXPlatform)
     private static TestDisplayFrame singleton = null;
+    @OnThread(Tag.FXPlatform)
+    private static BooleanProperty frameShowing = new SimpleBooleanProperty(false);
     
     @OnThread(Tag.FXPlatform)
-    public synchronized static TestDisplayFrame getTestDisplay()
+    public static TestDisplayFrame getTestDisplay()
     {
         if(singleton == null) {
             singleton = new TestDisplayFrame();
@@ -71,15 +79,34 @@ public @OnThread(Tag.FXPlatform) class TestDisplayFrame
         return singleton;
     }
 
-    @OnThread(Tag.Any)
-    public synchronized static boolean isFrameShown()
+    public static BooleanProperty showingProperty()
     {
-        if(singleton == null) {
-            return false;
-        }
-        else {
-            return singleton.isShown();
-        }
+        return frameShowing;
+    }
+
+    static
+    {
+        JavaFXUtil.addChangeListenerPlatform(frameShowing, doShow -> {
+            TestDisplayFrame testDisplayFrame = getTestDisplay();
+
+            // Note that we can end up here due to the window state changing,
+            // so be careful not to end up in a loop by showing/hiding again:
+            if (doShow)
+            {
+                if (!testDisplayFrame.frame.isShowing())
+                {
+                    testDisplayFrame.frame.show();
+                }
+                testDisplayFrame.frame.toFront();
+            }
+            else
+            {
+                if (testDisplayFrame.frame.isShowing())
+                {
+                    testDisplayFrame.frame.hide();
+                }
+            }
+        });
     }
 
     private final Image failureIcon = Config.getFixedImageAsFXImage("failure.gif");
@@ -116,9 +143,6 @@ public @OnThread(Tag.FXPlatform) class TestDisplayFrame
 
     private Project project;
 
-    @OnThread(Tag.Any)
-    private final AtomicBoolean frameShowing = new AtomicBoolean(false);
-
     public TestDisplayFrame()
     {
         testTotal = new SimpleIntegerProperty(0);
@@ -135,27 +159,13 @@ public @OnThread(Tag.FXPlatform) class TestDisplayFrame
      */
     public void showTestDisplay(boolean doShow)
     {
+        frameShowing.set(doShow);
         if (doShow)
         {
-            if (!frame.isShowing())
-            {
-                frame.show();
-            }
             frame.toFront();
         }
-        else
-            frame.hide();
     }
 
-    /**
-     * Return true if the window is currently displayed.
-     */
-    @OnThread(Tag.Any)
-    public boolean isShown()
-    {
-        return frameShowing.get();
-    }
-    
     /**
      * Create the user-interface for the error display dialog.
      */
@@ -163,15 +173,24 @@ public @OnThread(Tag.FXPlatform) class TestDisplayFrame
     {
         frame = new Stage();
         frame.setTitle(Config.getString("testdisplay.title"));
-        frame.setOnShown(e -> {frameShowing.set(true);/*org.scenicview.ScenicView.show(frame.getScene());*/});
-        frame.setOnHidden(e -> {frameShowing.set(false);});
+        frame.setOnShown(e -> {
+            // Note that we can get here because of a change in the property,
+            // so be sure not to end up in a loop by setting the property again:
+            if (!frameShowing.get())
+                frameShowing.set(true);
+            /*org.scenicview.ScenicView.show(frame.getScene());*/
+        });
+        frame.setOnHidden(e -> {
+            if (frameShowing.get())
+                frameShowing.set(false);
+        });
 
         BlueJTheme.setWindowIconFX(frame);
 
         frame.setMinWidth(500.0);
         frame.setMinHeight(250.0);
 
-        Config.rememberPositionAndSize(frame, "bluej.testdisplay");
+        Config.loadAndTrackPositionAndSize(frame, "bluej.testdisplay");
 
         SplitPane mainDivider = new SplitPane();
         mainDivider.setOrientation(Orientation.VERTICAL);
@@ -413,31 +432,28 @@ public @OnThread(Tag.FXPlatform) class TestDisplayFrame
     {
         if ((dtr != null) && (dtr.isError() || dtr.isFailure()))
         {
-            Project projFinal = project;
-            SwingUtilities.invokeLater(() -> {
-                SourceLocation exceptionLocation = dtr.getExceptionLocation();
+            SourceLocation exceptionLocation = dtr.getExceptionLocation();
 
-                if (exceptionLocation == null)
-                {
-                    return;
-                }
+            if (exceptionLocation == null)
+            {
+                return;
+            }
 
-                String packageName = JavaNames.getPrefix(exceptionLocation.getClassName());
+            String packageName = JavaNames.getPrefix(exceptionLocation.getClassName());
 
-                Package spackage = projFinal.getPackage(packageName);
+            Package spackage = project.getPackage(packageName);
 
-                if (spackage == null)
-                {
-                    return;
-                }
+            if (spackage == null)
+            {
+                return;
+            }
 
-                // We have the package name. Now get the source name and
-                // line number.
-                String sourceName = exceptionLocation.getFileName();
-                int lineno = exceptionLocation.getLineNumber();
+            // We have the package name. Now get the source name and
+            // line number.
+            String sourceName = exceptionLocation.getFileName();
+            int lineno = exceptionLocation.getLineNumber();
 
-                spackage.showSource(sourceName, lineno);
-            });
+            spackage.showSource(sourceName, lineno);
         }
     }
 }

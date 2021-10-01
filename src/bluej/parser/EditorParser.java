@@ -21,22 +21,9 @@
  */
 package bluej.parser;
 
-import java.io.Reader;
-import java.lang.reflect.Modifier;
-import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.ListIterator;
-import java.util.Stack;
-
-import javax.swing.text.Document;
-import javax.swing.text.Element;
-
-import threadchecker.OnThread;
-import threadchecker.Tag;
 import bluej.debugger.gentype.Reflective;
 import bluej.editor.moe.MoeSyntaxDocument;
+import bluej.editor.moe.MoeSyntaxDocument.Element;
 import bluej.parser.entity.EntityResolver;
 import bluej.parser.entity.IntersectionTypeEntity;
 import bluej.parser.entity.JavaEntity;
@@ -47,24 +34,20 @@ import bluej.parser.entity.TypeEntity;
 import bluej.parser.entity.UnresolvedArray;
 import bluej.parser.lexer.JavaTokenTypes;
 import bluej.parser.lexer.LocatableToken;
-import bluej.parser.nodes.CommentNode;
-import bluej.parser.nodes.ContainerNode;
-import bluej.parser.nodes.DeclarationNode;
-import bluej.parser.nodes.ExpressionNode;
-import bluej.parser.nodes.FieldNode;
-import bluej.parser.nodes.ImportNode;
-import bluej.parser.nodes.InnerNode;
-import bluej.parser.nodes.JavaParentNode;
-import bluej.parser.nodes.MethodBodyNode;
-import bluej.parser.nodes.MethodNode;
+import bluej.parser.nodes.*;
 import bluej.parser.nodes.NodeTree.NodeAndPosition;
-import bluej.parser.nodes.ParentParsedNode;
-import bluej.parser.nodes.ParsedCUNode;
-import bluej.parser.nodes.ParsedNode;
-import bluej.parser.nodes.ParsedTypeNode;
-import bluej.parser.nodes.PkgStmtNode;
-import bluej.parser.nodes.TypeInnerNode;
 import bluej.parser.symtab.Selection;
+import threadchecker.OnThread;
+import threadchecker.Tag;
+
+import java.io.Reader;
+import java.lang.reflect.Modifier;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.ListIterator;
+import java.util.Stack;
 
 /**
  * Parser which builds parse node tree.
@@ -103,7 +86,7 @@ public class EditorParser extends JavaParser
     private List<JavaEntity> extendedTypes;
     private List<JavaEntity> implementedTypes;
     
-    private Document document;
+    private MoeSyntaxDocument document;
     
     private boolean gotExtends = false;
     private boolean gotImplements = false;
@@ -130,14 +113,14 @@ public class EditorParser extends JavaParser
      * Constructor for an EditorParser to parse a particular document.
      * After construction the normal course of action is to call parseCU(ParsedCUNode).
      */
-    public EditorParser(Document document)
+    public EditorParser(MoeSyntaxDocument document)
     {
         super(new DocumentReader(document));
         this.document = document;
         //pcuNode = new ParsedCUNode(document);
     }
     
-    public EditorParser(Document document, Reader r, int line, int col, int pos, Stack<JavaParentNode> scopeStack)
+    public EditorParser(MoeSyntaxDocument document, Reader r, int line, int col, int pos, Stack<JavaParentNode> scopeStack)
     {
         super(r, line, col, pos);
         this.document = document;
@@ -154,9 +137,9 @@ public class EditorParser extends JavaParser
     }
     
     @Override
-    // This tag is not correct, but if document is an instanceof MoeSyntaxDocument, the parsing
-    // should be happening on the Swing thread:
-    @OnThread(value = Tag.Swing, ignoreParent = true)
+    // This tag is hacky, but if document is an instanceof MoeSyntaxDocument, the parsing
+    // should be happening on the FX thread:
+    @OnThread(value = Tag.FXPlatform, ignoreParent = true)
     protected void error(String msg, int beginLine, int beginColumn, int endLine, int endColumn)
     {
         // TODO make a proper listener interface

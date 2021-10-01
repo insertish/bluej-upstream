@@ -26,6 +26,9 @@ import java.awt.event.ActionEvent;
 import javax.swing.AbstractAction;
 
 import bluej.views.MethodView;
+import javafx.application.Platform;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 
 /**
  * Simple action representing an interactive method invocation.
@@ -33,10 +36,13 @@ import bluej.views.MethodView;
  * @author Davin McCall
  * @version $Id: InvokeAction.java 6215 2009-03-30 13:28:25Z polle $
  */
+@OnThread(Tag.Swing)
 public class InvokeAction extends AbstractAction
 {
-    MethodView methodView;
-    InvokeListener invokeListener;
+    @OnThread(Tag.Any)
+    private final MethodView methodView;
+    @OnThread(Tag.Any)
+    private final InvokeListener invokeListener;
     
     /**
      * Constructor for an InvokeAction.
@@ -57,6 +63,6 @@ public class InvokeAction extends AbstractAction
      */
     public void actionPerformed(ActionEvent e)
     {
-        invokeListener.executeMethod(methodView);
+        Platform.runLater(() -> invokeListener.executeMethod(methodView));
     }
 }

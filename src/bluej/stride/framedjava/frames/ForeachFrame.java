@@ -66,6 +66,7 @@ public class ForeachFrame extends SingleCanvasFrame
     private final EachExpressionSlot collection;
     private ForeachElement element;
     private final SlotLabel inLabel;
+    private final SlotLabel finalLabel;
 
     private ForeachFrame(InteractionManager editor)
     {
@@ -82,7 +83,8 @@ public class ForeachFrame extends SingleCanvasFrame
         collection = new EachExpressionSlot(editor, this, this, getHeaderRow(), type, var, "foreach-collection-");
         collection.setSimplePromptText("collection");
         inLabel = new SlotLabel(" in ");
-        setHeaderRow(new SlotLabel("("), type, var, inLabel, collection, new SlotLabel(")"));
+        finalLabel=new SlotLabel("");
+        setHeaderRow(new SlotLabel("("),finalLabel, type, var, inLabel, collection, new SlotLabel(")"));
 
         FXConsumer<String> updateTriple = s -> updateSidebarCurried("for each ").accept(type.getText() + " " + var.getText() + " : " + collection.getText());
         type.onTextPropertyChange(updateTriple);
@@ -105,6 +107,7 @@ public class ForeachFrame extends SingleCanvasFrame
     }
 
     @Override
+    @OnThread(Tag.FXPlatform)
     public List<FrameOperation> getContextOperations()
     {
         List<FrameOperation> r = super.getContextOperations();
@@ -201,6 +204,8 @@ public class ForeachFrame extends SingleCanvasFrame
         super.setView(oldView, newView, animateProgress);
         String caption = newView == View.JAVA_PREVIEW ? "for" : "for each";
         headerCaptionLabel.setText(caption);
+        String finalkeyword = newView == View.JAVA_PREVIEW ? "final " : "";
+        finalLabel.setText(finalkeyword);
         inLabel.setText(newView == View.JAVA_PREVIEW ? (collection.isConstantRange() ? " = " : " : ") : " in ");
 
         if (isFrameEnabled()  && (oldView == View.JAVA_PREVIEW || newView == View.JAVA_PREVIEW))

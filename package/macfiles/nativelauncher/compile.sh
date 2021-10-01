@@ -4,10 +4,7 @@
 # as well as XCode itself.
 #
 # JAVA_HOME should be set to something like:
-#     /Library/Java/JavaVirtualMachines/jdk1.8.0_121.jdk/Contents/Home
-#
-# current:
-#    export JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk1.8.0_121.jdk/Contents/Home
+#     /Library/Java/JavaVirtualMachines/jdk1.8.0_111.jdk/Contents/Home
 
 gcc -I "$JAVA_HOME/include" -I "$JAVA_HOME/include/darwin" -o JavaAppLauncher \
 	-framework Cocoa -arch x86_64 \

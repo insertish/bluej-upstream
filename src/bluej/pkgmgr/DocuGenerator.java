@@ -21,8 +21,18 @@
  */
 package bluej.pkgmgr;
 
-import javax.swing.SwingUtilities;
-import java.awt.EventQueue;
+import bluej.BlueJEvent;
+import bluej.Config;
+import bluej.extensions.SourceType;
+import bluej.utility.Debug;
+import bluej.utility.DialogManager;
+import bluej.utility.FileUtility;
+import bluej.utility.Utility;
+import javafx.application.Platform;
+import threadchecker.OnThread;
+import threadchecker.Tag;
+
+import javax.swing.*;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileOutputStream;
@@ -36,18 +46,6 @@ import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
-
-import javafx.application.Platform;
-
-import bluej.BlueJEvent;
-import bluej.Config;
-import bluej.extensions.SourceType;
-import bluej.utility.Debug;
-import bluej.utility.DialogManager;
-import bluej.utility.FileUtility;
-import bluej.utility.Utility;
-import threadchecker.OnThread;
-import threadchecker.Tag;
 
 /**
  * This class handles documentation generation from inside BlueJ.
@@ -155,6 +153,7 @@ public class DocuGenerator
          * If this call was successful let the result be shown in a browser.
          */
         @Override
+        @OnThread(value = Tag.Unique, ignoreParent = true)
         public void run()
         {
             // Process docuRun;
@@ -244,7 +243,7 @@ public class DocuGenerator
                 }
                 
                 final int finalExitValue = exitValue;
-                EventQueue.invokeLater(new Runnable() {
+                Platform.runLater(new Runnable() {
                     public void run() {
                         if (finalExitValue == 0) {
                             BlueJEvent.raiseEvent(BlueJEvent.DOCU_GENERATED, null);
@@ -255,14 +254,14 @@ public class DocuGenerator
                             }
                             if(openBrowser) {
                                 // logWriter.println("try to open: " + showFile.getPath());
-                                Utility.openWebBrowser(showFile.getPath());
+                                SwingUtilities.invokeLater(() -> Utility.openWebBrowser(showFile.getPath()));
                             }
                         }
                         else {
                             BlueJEvent.raiseEvent(BlueJEvent.DOCU_ABORTED, null);
-                            Platform.runLater(() -> DialogManager.showMessageWithTextFX(null,
+                            DialogManager.showMessageWithTextFX(null,
                                     "doctool-error",
-                                    logFile.getPath()));
+                                    logFile.getPath());
                         }
                     }
                 });
@@ -286,7 +285,8 @@ public class DocuGenerator
     {
         private InputStream   readStream;
         private OutputStream outStream;
-        
+
+        @OnThread(Tag.Any)
         public EchoThread(InputStream r,OutputStream out)
         {
             readStream = r;
@@ -294,6 +294,7 @@ public class DocuGenerator
         }
         
         @Override
+        @OnThread(value = Tag.Unique, ignoreParent = true)
         public void run()
         {
             try {
@@ -346,71 +347,66 @@ public class DocuGenerator
         File startPage = new File(docDir, "index.html");
         File logFile = new File(docDir, "logfile.txt");
 
-        Platform.runLater(() ->
+        if (documentationExists(logFile))
         {
-            if (documentationExists(logFile))
+            int result = DialogManager.askQuestionFX(null, "show-or-generate");
+            if (result == 0)
+            {  // show only
+                SwingUtilities.invokeLater(() -> Utility.openWebBrowser(startPage.getPath()));
+                return "";
+            }
+            if (result == 2)
+            {  // cancel
+                return "";
+            }
+        }
+        // tool-specific infos for javadoc
+
+        ArrayList<String> call = new ArrayList<String>();
+        call.add(docCommand);
+        call.add("-sourcepath");
+        call.add(projectDirPath);
+        addGeneralOptions(call);
+        call.add("-doctitle");
+        call.add(project.getProjectName());
+        call.add("-windowtitle");
+        call.add(project.getProjectName());
+        call.addAll(Utility.dequoteCommandLine(fixedJavadocParams));
+
+        // get the parameter that enables javadoc to link the generated
+        // documentation to the API documentation
+        addLinkParam(call);
+
+        // add the names of all the targets for the documentation tool.
+        // first: get the names of all packages that contain java sources.
+        List<String> packageNames = project.getPackageNames();
+        for (Iterator<String> names = packageNames.iterator(); names.hasNext(); )
+        {
+            String packageName = names.next();
+            // as javadoc doesn't like packages with no java-files, we have to
+            // pass only names of packages that really contain java files.
+            Package pack = project.getPackage(packageName);
+            if (FileUtility.containsFile(pack.getPath(), "." + SourceType.Java.toString().toLowerCase()))
             {
-                int result = DialogManager.askQuestionFX(null, "show-or-generate");
-                if (result == 0)
-                {  // show only
-                    SwingUtilities.invokeLater(() -> Utility.openWebBrowser(startPage.getPath()));
-                    return;
-                }
-                if (result == 2)
-                {  // cancel
-                    return;
+                if (packageName.length() > 0)
+                {
+                    call.add(packageName);
                 }
             }
-            SwingUtilities.invokeLater(() ->
-            {
+        }
 
-                // tool-specific infos for javadoc
+        // second: get class names of classes in unnamed package, if any
+        List<String> classNames = project.getPackage("").getAllClassnamesWithSource();
+        String dirName = project.getProjectDir().getAbsolutePath();
+        for (Iterator<String> names = classNames.iterator(); names.hasNext(); )
+        {
+            call.add(dirName + "/" + names.next() + "." + SourceType.Java.toString().toLowerCase());
+        }
+        String[] javadocCall = call.toArray(new String[0]);
 
-                ArrayList<String> call = new ArrayList<String>();
-                call.add(docCommand);
-                call.add("-sourcepath");
-                call.add(projectDirPath);
-                addGeneralOptions(call);
-                call.add("-doctitle");
-                call.add(project.getProjectName());
-                call.add("-windowtitle");
-                call.add(project.getProjectName());
-                call.addAll(Utility.dequoteCommandLine(fixedJavadocParams));
+        removeStylesheet();
+        generateDoc(javadocCall, startPage, logFile, projectLogHeader, true);
 
-                // get the parameter that enables javadoc to link the generated
-                // documentation to the API documentation
-                addLinkParam(call);
-
-                // add the names of all the targets for the documentation tool.
-                // first: get the names of all packages that contain java sources.
-                List<String> packageNames = project.getPackageNames();
-                for (Iterator<String> names = packageNames.iterator(); names.hasNext(); )
-                {
-                    String packageName = names.next();
-                    // as javadoc doesn't like packages with no java-files, we have to
-                    // pass only names of packages that really contain java files.
-                    Package pack = project.getPackage(packageName);
-                    if (FileUtility.containsFile(pack.getPath(), "." + SourceType.Java.toString().toLowerCase()))
-                    {
-                        if (packageName.length() > 0)
-                        {
-                            call.add(packageName);
-                        }
-                    }
-                }
-
-                // second: get class names of classes in unnamed package, if any
-                List<String> classNames = project.getPackage("").getAllClassnamesWithSource();
-                String dirName = project.getProjectDir().getAbsolutePath();
-                for (Iterator<String> names = classNames.iterator(); names.hasNext(); )
-                {
-                    call.add(dirName + "/" + names.next() + "." + SourceType.Java.toString().toLowerCase());
-                }
-                String[] javadocCall = call.toArray(new String[0]);
-
-                generateDoc(javadocCall, startPage, logFile, projectLogHeader, true);
-            });
-        });
         return "";
     }
 
@@ -449,9 +445,26 @@ public class DocuGenerator
         File htmlFile = new File(getDocuPath(filename));
         File logFile = new File(docDir, "logfile.txt");
 
+        removeStylesheet();
         generateDoc(javadocCall, htmlFile, logFile, classLogHeader, false);
     }
-    
+
+    /**
+     * Removes the stylesheet (used before generating Javadoc).  Needed because versions
+     * before 4.1.0 would generate a stylesheet.css file that was different, but Javadoc
+     * does not do content comparison so in 4.1.0+ will not by itself regenerate the Javadoc,
+     * even though it may needs to replace the pre-4.1.0 version.  We just delete it every
+     * time to make sure the stylesheet.css is up-to-date.
+     */
+    private void removeStylesheet()
+    {
+        File stylesheet = new File(projectDir, "doc/stylesheet.css");
+        if (stylesheet.exists())
+        {
+            stylesheet.delete();
+        }
+    }
+
     private void addGeneralOptions(List<String> call)
     {
         String majorVersion = System.getProperty("java.specification.version");        
@@ -465,10 +478,6 @@ public class DocuGenerator
         call.add(project.getProjectCharset().name());
         call.add("-charset");
         call.add(project.getProjectCharset().name());
-        call.add("-docletpath");
-        call.add(new File(Config.getBlueJLibDir(), "bjdoclet.jar").getPath());
-        call.add("-doclet");
-        call.add("bluej.doclet.doclets.formats.html.HtmlDoclet");
     }
 
     /**

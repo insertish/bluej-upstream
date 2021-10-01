@@ -30,15 +30,14 @@ import java.util.List;
 
 import java.util.stream.Stream;
 
-import javax.swing.SwingUtilities;
-import javax.swing.text.BadLocationException;
-
 import bluej.debugger.gentype.ConstructorReflective;
+import bluej.editor.moe.ScopeColors;
 import bluej.parser.entity.PackageResolver;
 import bluej.stride.framedjava.ast.FrameFragment;
 import bluej.stride.framedjava.errors.SyntaxCodeError;
 import bluej.stride.generic.AssistContentThreadSafe;
 import bluej.stride.generic.InteractionManager;
+import javafx.application.Platform;
 import nu.xom.Element;
 import threadchecker.OnThread;
 import threadchecker.Tag;
@@ -56,7 +55,6 @@ import bluej.stride.framedjava.frames.InterfaceFrame;
 import bluej.stride.framedjava.frames.TopLevelFrame;
 import bluej.stride.framedjava.slots.ExpressionSlot;
 import bluej.stride.generic.Frame.ShowReason;
-import bluej.utility.Debug;
 import bluej.utility.Utility;
 
 public class InterfaceElement extends DocumentContainerCodeElement implements TopLevelCodeElement
@@ -196,11 +194,13 @@ public class InterfaceElement extends DocumentContainerCodeElement implements To
     }
 
     @Override
+    @OnThread(Tag.FXPlatform)
     public JavaSource toJavaSource()
     {
         return getDAP(null).java;
     }
 
+    @OnThread(Tag.FXPlatform)
     private JavaSource generateJavaSource()
     {
         List<JavaFragment> header = new ArrayList<>();
@@ -317,13 +317,13 @@ public class InterfaceElement extends DocumentContainerCodeElement implements To
         frame.show(reason);        
     }
     
-    @OnThread(Tag.Swing)
+    @OnThread(Tag.FXPlatform)
     private MoeSyntaxDocument getSourceDocument(ExpressionSlot completing)
     {
         return getDAP(completing).getDocument(projectResolver);
     }
 
-    @OnThread(Tag.Any)
+    @OnThread(Tag.FXPlatform)
     private synchronized DocAndPositions getDAP(ExpressionSlot completing)
     {
         if (sourceDocument == null || sourceDocumentCompleting != completing)
@@ -364,7 +364,7 @@ public class InterfaceElement extends DocumentContainerCodeElement implements To
     @Override
     public void updateSourcePositions()
     {
-        SwingUtilities.invokeLater(() -> getSourceDocument(null));
+        Platform.runLater(() -> getSourceDocument(null));
     }
 
     @Override
@@ -395,20 +395,13 @@ public class InterfaceElement extends DocumentContainerCodeElement implements To
             this.fragmentPositions = fragmentPositions;
         }
 
-        @OnThread(Tag.Swing)
+        @OnThread(Tag.FXPlatform)
         public MoeSyntaxDocument getDocument(EntityResolver projectResolver)
         {
             if (document == null)
             {
                 document = new MoeSyntaxDocument(projectResolver);
-                try
-                {
-                    document.insertString(0, src, null);
-                }
-                catch (BadLocationException e)
-                {
-                    Debug.reportError(e);
-                }
+                document.insertString(0, src);
                 document.enableParser(true);
             }
             return document;
