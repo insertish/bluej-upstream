@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2011  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2011,2012  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -218,8 +218,6 @@ class VMReference
         
         paramList.add("-classpath");
         paramList.add(allClassPath);
-        paramList.add("-Xdebug");
-        paramList.add("-Xnoagent");
         if (Config.isMacOS()) {
             paramList.add("-Xdock:icon=" + Config.getBlueJIconPath() + "/" + Config.getVMIconsName());
             paramList.add("-Xdock:name=" + Config.getVMDockName());
@@ -266,7 +264,7 @@ class VMReference
                     if (timeoutArg != null) {
                         // The timeout appears to be in milliseconds.
                         // The default is apparently no timeout.
-                        timeoutArg.setValue("1000");
+                        timeoutArg.setValue("2000");
                     }
                     
                     // Make sure the local address is localhost, not the
@@ -276,7 +274,7 @@ class VMReference
                     String listenAddress = null;
                     if (connector.transport().name().equals("dt_socket") && arguments.containsKey("localAddress"))
                     {
-                        listenAddress = InetAddress.getLocalHost().getHostAddress();
+                        listenAddress = InetAddress.getByName(null).getHostAddress();
                         arguments.get("localAddress").setValue(listenAddress);
                     }
                     
@@ -288,13 +286,13 @@ class VMReference
                             // It seems the address name returned by connector.startListening(...) may be the host name,
                             // even though we specifically asked for localhost. So here we'll force it to the localhost
                             // IP address:
-                            int colonIndex = address.indexOf(':');
+                            int colonIndex = address.lastIndexOf(':');
                             if (colonIndex != -1) {
                                 address = listenAddress + address.substring(colonIndex);
                             }
                         }
                         Debug.log("Listening for JDWP connection on address: " + address);
-                        paramList.add(transportIndex, "-Xrunjdwp:transport=" + connector.transport().name()
+                        paramList.add(transportIndex, "-agentlib:jdwp=transport=" + connector.transport().name()
                                 + ",address=" + address);
                         launchParams = paramList.toArray(new String[paramList.size()]);
                         paramList.remove(transportIndex);

@@ -52,9 +52,11 @@ import bluej.debugger.SourceLocation;
 import bluej.debugmgr.CallHistory;
 import bluej.debugmgr.Invoker;
 import bluej.editor.Editor;
+import bluej.extensions.BDependency;
 import bluej.extensions.BPackage;
 import bluej.extensions.ExtensionBridge;
 import bluej.extensions.event.CompileEvent;
+import bluej.extensions.event.DependencyEvent;
 import bluej.extmgr.ExtensionsManager;
 import bluej.graph.Edge;
 import bluej.graph.Graph;
@@ -506,6 +508,54 @@ public final class Package extends Graph
                 return (Dependency) edge;
             }
         }
+        return null;
+    }
+
+    /**
+     * Returns the {@link Dependency} with the specified <code>origin</code>,
+     * <code>target</code> and <code>type</code> or <code>null</code> if there
+     * is no such dependency.
+     * 
+     * @param origin
+     *            The origin of the dependency.
+     * @param target
+     *            The target of the dependency.
+     * @param type
+     *            The type of the dependency (there may be more than one
+     *            dependencies with the same origin and target but different
+     *            types).
+     * @return The {@link Dependency} with the specified <code>origin</code>,
+     *         <code>target</code> and <code>type</code> or <code>null</code> if
+     *         there is no such dependency.
+     */
+    public Dependency getDependency(DependentTarget origin, DependentTarget target, BDependency.Type type)
+    {
+        List<Dependency> dependencies = new ArrayList<Dependency>();
+
+        switch (type) {
+            case USES :
+                dependencies = usesArrows;
+                break;
+            case IMPLEMENTS :
+            case EXTENDS :
+                dependencies = extendsArrows;
+                break;
+            case UNKNOWN :
+                // If the type of the dependency is UNKNOWN, the requested
+                // dependency does not exist anymore. In this case the method
+                // returns null.
+                return null;
+        }
+
+        for (Dependency dependency : dependencies) {
+            DependentTarget from = dependency.getFrom();
+            DependentTarget to = dependency.getTo();
+
+            if (from.equals(origin) && to.equals(target)) {
+                return dependency;
+            }
+        }
+
         return null;
     }
 
@@ -1542,6 +1592,10 @@ public final class Package extends Graph
 
         from.addDependencyOut(d, recalc);
         to.addDependencyIn(d, recalc);
+
+        // Inform all listeners about the added dependency
+        DependencyEvent event = new DependencyEvent(d, this, DependencyEvent.Type.DEPENDENCY_ADDED);
+        ExtensionsManager.getInstance().delegateEvent(event);
     }
 
     /**
@@ -1774,6 +1828,10 @@ public final class Package extends Graph
         to.removeDependencyIn(d, recalc);
 
         removedSelectableElement(d);
+
+        // Inform all listeners about the removed dependency
+        DependencyEvent event = new DependencyEvent(d, this, DependencyEvent.Type.DEPENDENCY_REMOVED);
+        ExtensionsManager.getInstance().delegateEvent(event);
     }
 
     /**
@@ -2322,6 +2380,16 @@ public final class Package extends Graph
             showMessageWithText("error-in-file", loc.getClassName() + ":" + loc.getLineNumber() + "\n" + message);
         }
     }
+    
+    /**
+     * Displays the given class at the given line number (due to an exception, usually clicked-on stack trace).
+     * 
+     *  Simpler than the other exceptionMessage method because it requires less details 
+     */
+    public void exceptionMessage(String className, int lineNumber)
+    {
+        showEditorMessage(className, lineNumber, "", false, true, false, "exception");
+    }
 
     /**
      * Report an execption. Usually, we do this through "errorMessage", but if
@@ -2571,11 +2639,13 @@ public final class Package extends Graph
         private static final int MAX_EDIT_DISTANCE = 2;
         private final String message;
         private int lineNumber;
+        private int column;
         private Project project;
 
-        public MisspeltMethodChecker(String message, int lineNumber, Project project)
+        public MisspeltMethodChecker(String message, int column, int lineNumber, Project project)
         {
             this.message = message;
+            this.column = column;
             this.lineNumber = lineNumber;
             this.project = project;
         }
@@ -2655,6 +2725,7 @@ public final class Package extends Graph
             return d[n][m];
         }
         
+        @Override
         public String calculateMessage(Editor e)
         {
             if (e == null) {
@@ -2664,11 +2735,11 @@ public final class Package extends Graph
             String missing = chopAtOpeningBracket(message.substring(message.lastIndexOf(' ') + 1));
 
             String lineText = getLine(e);
-            // We're only given the line number, not the column number
-            // Let's guess that the method name only occurs once on the line,
-            // and use its first occurrence:
-            int pos = getLineStart(e) + lineText.indexOf(missing);
-
+            
+            // The column from the diagnostic object assumes tabs are 8 spaces; convert to
+            // a line position:
+            int pos = convertColumn(lineText, column) + getLineStart(e);
+            
             LinkedList<String> maybeTheyMeant = new LinkedList<String>();
             CodeSuggestions suggests = e.getParsedNode().getExpressionType(pos, e.getSourceDocument());
             AssistContent[] values = ParseUtils.getPossibleCompletions(suggests, "",
@@ -2693,6 +2764,31 @@ public final class Package extends Graph
                 }
                 return augmentedMessage;
             }
+        }
+        
+        /** 
+         * Convert a column where a tab is counted as 8 to a column where a tab is counted
+         * as 1
+         */
+        private static int convertColumn(String string, int column)
+        {
+            int ccount = 0; // count of characters
+            int lpos = 0;   // count of columns (0 based)
+
+            int tabIndex = string.indexOf('\t');
+            while (tabIndex != -1 && lpos < column - 1) {
+                lpos += tabIndex - ccount;
+                ccount = tabIndex;
+                if (lpos >= column - 1) {
+                    break;
+                }
+                lpos = ((lpos + 8) / 8) * 8;  // tab!
+                ccount += 1;
+                tabIndex = string.indexOf('\t', ccount);
+            }
+
+            ccount += column - lpos;
+            return ccount;
         }
     }
 
@@ -2743,7 +2839,10 @@ public final class Package extends Graph
                 // See if we can help the user a bit more if they've mis-spelt a method:
                 if (message.contains("cannot find symbol - method")) {
                     messageShown = showEditorDiagnostic(diagnostic,
-                            new MisspeltMethodChecker(message, (int) diagnostic.getStartLine(), project));
+                            new MisspeltMethodChecker(message,
+                                    (int) diagnostic.getStartColumn(),
+                                    (int) diagnostic.getStartLine(),
+                                    project));
                 } else {
                     messageShown = showEditorDiagnostic(diagnostic, null);
                 }

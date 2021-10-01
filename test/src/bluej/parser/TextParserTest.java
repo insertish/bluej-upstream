@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2012  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -26,6 +26,7 @@ import java.util.List;
 import javax.swing.text.BadLocationException;
 
 import junit.framework.TestCase;
+import bluej.debugger.gentype.JavaPrimitiveType;
 import bluej.debugmgr.objectbench.ObjectBench;
 import bluej.debugmgr.texteval.DeclaredVar;
 import bluej.editor.moe.MoeSyntaxDocument;
@@ -769,7 +770,7 @@ public class TextParserTest extends TestCase
         assertTrue(parser.atEnd());
         exprType = parser.getExpressionType();
         assertNotNull(exprType);
-        assertEquals("float", exprType.toString());
+        assertEquals("float", exprType.getType().toString());
         
         parser = new TextParser(resolver, "(int)(4.0f / 0.0f)", null, true);
         parser.parseExpression();
@@ -777,13 +778,31 @@ public class TextParserTest extends TestCase
         exprType = parser.getExpressionType();
         checkConstInt(exprType, Integer.MAX_VALUE);
 
+        parser = new TextParser(resolver, "(short)(4.0f / 0.0f)", null, true);
+        parser.parseExpression();
+        assertTrue(parser.atEnd());
+        exprType = parser.getExpressionType();
+        checkConstInt(exprType, -1);
+
+        parser = new TextParser(resolver, "(char)(4.0f / 0.0f)", null, true);
+        parser.parseExpression();
+        assertTrue(parser.atEnd());
+        exprType = parser.getExpressionType();
+        checkConstInt(exprType, Character.MAX_VALUE);
+        
+        parser = new TextParser(resolver, "(byte)(4.0f / 0.0f)", null, true);
+        parser.parseExpression();
+        assertTrue(parser.atEnd());
+        exprType = parser.getExpressionType();
+        checkConstInt(exprType, -1);
+                
         // Modulo implies division
         parser = new TextParser(resolver, "4 % 0", null, true);
         parser.parseExpression();
         assertTrue(parser.atEnd());
         exprType = parser.getExpressionType();
         assertNotNull(exprType);
-        assertEquals("int", exprType.toString());
+        assertEquals("int", exprType.getType().toString());
     }
     
     public void testConstantStrings()
@@ -1052,5 +1071,18 @@ public class TextParserTest extends TestCase
         
         String r = tp.parseCommand("new String[5].length");
         assertEquals("int", r);
+    }
+    
+    public void testParenthesizedVar()
+    {
+        // Test for ticket #413
+        TestValueCollection coll = new TestValueCollection();
+        coll.addVariable("boolVal", JavaPrimitiveType.getBoolean(), true, false);
+        TextAnalyzer tp = new TextAnalyzer(resolver, "", coll);
+        
+        String r = tp.parseCommand("(boolVal) && true");
+        assertEquals("boolean", r);
+        r = tp.parseCommand("(boolVal) || true");
+        assertEquals("boolean", r);
     }
 }

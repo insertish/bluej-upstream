@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2011  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2011,2012  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -28,6 +28,7 @@ import java.awt.Image;
 import java.awt.Point;
 import java.awt.Rectangle;
 import java.awt.Toolkit;
+import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
 import java.io.File;
 import java.io.FileInputStream;
@@ -153,6 +154,11 @@ public final class Config
     protected static final int SHORTCUT_MASK =
         Toolkit.getDefaultToolkit().getMenuShortcutKeyMask();
     
+    // Bit ugly having it here, but it's needed by MiscPrefPanel (which may just be in BlueJ)
+    // and by Greenfoot
+    public static final KeyStroke GREENFOOT_SET_PLAYER_NAME_SHORTCUT =
+        KeyStroke.getKeyStroke(KeyEvent.VK_P, SHORTCUT_MASK | InputEvent.SHIFT_DOWN_MASK);
+    
     private static Color selectionColour;
     private static Color selectionColour2;
     private static Color highlightColour;
@@ -170,6 +176,18 @@ public final class Config
      */
     public static void initialise(File bluejLibDir, Properties tempCommandLineProps,
                                   boolean bootingGreenfoot)
+    {
+        initialise(bluejLibDir, tempCommandLineProps, bootingGreenfoot, true);
+    }
+    
+    /**
+     * Initialisation of BlueJ configuration. Must be called at startup.
+     * This method finds and opens the configuration files.<p>
+     * 
+     * See also initializeVMside().
+     */
+    private static void initialise(File bluejLibDir, Properties tempCommandLineProps,
+                                  boolean bootingGreenfoot, boolean createUserhome)
     {
         if(initialised)
             return;
@@ -213,29 +231,21 @@ public final class Config
         commandProps.putAll(tempCommandLineProps);
         commandProps.setProperty("bluej.libdir", bluejLibDir.getAbsolutePath());
         
-        // get user home directory
-        {
-            File userHome;
-            String homeDir = getPropString("bluej.userHome", "$user.home");
-            userHome = new File(homeDir);
+        if (createUserhome) {
 
-            // get user specific bluej property directory (in user home)
-            userPrefDir = new File(userHome, getBlueJPrefDirName());
+            // get user home directory
+            initUserHome();
 
-            if(!userPrefDir.isDirectory()) {
-                userPrefDir.mkdirs();
+            // add user specific definitions (bluej.properties or greenfoot.properties)
+            loadProperties(getApplicationName().toLowerCase(), userProps);
+
+            // set a new name for the log file if we are running in greenfoot mode
+            if(isGreenfoot) {
+                debugLogName = greenfootDebugLogName;
             }
-        }
 
-        // add user specific definitions (bluej.properties or greenfoot.properties)
-        loadProperties(getApplicationName().toLowerCase(), userProps);
-
-        // set a new name for the log file if we are running in greenfoot mode
-        if(isGreenfoot) {
-            debugLogName = greenfootDebugLogName;
+            checkDebug(userPrefDir);
         }
-        
-        checkDebug(userPrefDir);
         
         // find our language (but default to english if none found)
         language = commandProps.getProperty("bluej.language", DEFAULT_LANGUAGE);
@@ -267,8 +277,57 @@ public final class Config
         // Create a property containing the BlueJ version string
         // put it in command_props so it won't be saved to a file
         commandProps.setProperty("bluej.version", Boot.BLUEJ_VERSION);
-    } // initialise
+    }
 
+    /**
+     * Initialise the user home (try and create directories if necessary).
+     * <p>
+     * We try the bluej.userHome property, or default to the system user.home
+     * property if that is not set. If the result is not writable we try
+     * bluej.userHome1, bluej.userHome2, etc.
+     */
+    private static void initUserHome()
+    {
+        File userHome;
+        String homeDir = getPropString("bluej.userHome", "$user.home");
+        userHome = new File(homeDir);
+
+        String prefDirName = getBlueJPrefDirName();
+        
+        // get user specific bluej property directory (in user home)
+        userPrefDir = new File(userHome, prefDirName);
+
+        int nameCounter = 1;
+        do {
+            if (! userPrefDir.isDirectory()) {
+                if (userPrefDir.mkdirs()) {
+                    // successfully created the preferences directory
+                    break;
+                }
+            }
+            else if (userPrefDir.canWrite()) {
+                break;
+            }
+            
+            nameCounter++;
+            String propertyName = "bluej.userHome" + nameCounter;
+            homeDir = getPropString(propertyName, null);
+            if (homeDir == null) {
+                break;
+            }
+            userHome = new File(homeDir);
+            userPrefDir = new File(userHome, prefDirName);
+        }
+        while (true);
+        
+        if (homeDir == null) {
+            // Now we're in trouble... just user user.home, and hope it's writable.
+            homeDir = System.getProperty("user.home");
+            userHome = new File(homeDir);
+            userPrefDir = new File(userHome, prefDirName);
+        }
+    }
+    
     /**
      * Alternative to "initialise", to be used in the debugee-VM by
      * applications which require it (ie. greenfoot).
@@ -309,8 +368,7 @@ public final class Config
                 return Config.propSource.getBlueJPropertyString(key, def);
             }
         };
-        initialise(bluejLibDir, tempCommandLineProps, bootingGreenfoot);
-
+        initialise(bluejLibDir, tempCommandLineProps, bootingGreenfoot, false);
     }
 
     /**
@@ -1514,16 +1572,30 @@ public final class Config
             }
             // treat Linux and Solaris the same at the moment
             else if(isLinux() || isSolaris()) {
-                UIManager.setLookAndFeel(UIManager.getCrossPlatformLookAndFeelClassName());
+                LookAndFeelInfo [] lafi = UIManager.getInstalledLookAndFeels();
+                LookAndFeelInfo nimbus = null;
+                for (LookAndFeelInfo lafInstance : lafi) {
+                    if (lafInstance.getName().equals("Nimbus")) {
+                        nimbus = lafInstance;
+                        break;
+                    }
+                }
+                
+                if (nimbus != null) {
+                    UIManager.setLookAndFeel(nimbus.getClassName());
+                }
+                else {
+                    UIManager.setLookAndFeel(UIManager.getCrossPlatformLookAndFeelClassName());
+                }
             }
         } catch (ClassNotFoundException e) {
-            e.printStackTrace();
+            Debug.log("Could not find look-and-feel class: " + e.getMessage());
         } catch (InstantiationException e) {
             e.printStackTrace();
         } catch (IllegalAccessException e) {
             e.printStackTrace();
         } catch (UnsupportedLookAndFeelException e) {
-            e.printStackTrace();
+            Debug.log("Unsupported look-and-feel: " + e.getMessage());
         }
     }
     
