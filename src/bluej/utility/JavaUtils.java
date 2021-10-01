@@ -37,10 +37,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import bluej.debugger.gentype.GenTypeArray;
 import bluej.debugger.gentype.GenTypeClass;
 import bluej.debugger.gentype.GenTypeDeclTpar;
 import bluej.debugger.gentype.GenTypeParameter;
 import bluej.debugger.gentype.GenTypeSolid;
+import bluej.debugger.gentype.JavaPrimitiveType;
 import bluej.debugger.gentype.JavaType;
 import bluej.debugger.gentype.Reflective;
 
@@ -295,11 +297,6 @@ public abstract class JavaUtils
     abstract public JavaType[] getParamGenTypes(Constructor<?> constructor);
 
     /**
-     * Build a JavaType structure from a "Class" object.
-     */
-    abstract public JavaType genTypeFromClass(Class<?> t);
-    
-    /**
      * Open a web browser to show the given URL. On Java 6+ we can use
      * the desktop integration functionality of the JDK to do this. On
      * prior versions we fall back to older methods.
@@ -356,12 +353,15 @@ public abstract class JavaUtils
      * according to its modifiers.
      * 
      * @param container  The type containing the member to which access is being checked
+     * @param targetType The type of the expression from which the member is accessed
      * @param accessor   The type trying to access the member
      * @param modifiers  The modifiers of the member
      * @param isStatic   True if the access is a in static context; false if not
+     * 
      * @return  true if the access is allowed, false otherwise
      */
-    public static boolean checkMemberAccess(Reflective container, Reflective accessor, int modifiers, boolean isStatic)
+    public static boolean checkMemberAccess(Reflective container, GenTypeSolid targetType,
+            Reflective accessor, int modifiers, boolean isStatic)
     {
         // Access from a static context can only access static members
         if (isStatic && !Modifier.isStatic(modifiers))
@@ -390,27 +390,36 @@ public abstract class JavaUtils
         if (outer != null) {
             // Inner classes can access outer class members with outer class privileges
             isStatic |= accessor.isStatic();
-            if (checkMemberAccess(container, outer, modifiers, isStatic)) {
+            if (checkMemberAccess(container, targetType, outer, modifiers, isStatic)) {
                 return true;
+            }
+        }
+        
+        // Protected access is allowed if the targetType is a subtype of the acessType
+        Set<Reflective> targetSupers = new HashSet<Reflective>();
+        targetType.erasedSuperTypes(targetSupers);
+        boolean allowProtected = false;
+        for (Reflective ref : targetSupers) {
+            if (accessor.isAssignableFrom(ref)) {
+                allowProtected = true;
+                break;
             }
         }
         
         List<Reflective> supers = accessor.getSuperTypesR();
         Set<String> done = new HashSet<String>();
-        String cpackage = JavaNames.getPrefix(container.getName());
         while (! supers.isEmpty()) {
             Reflective r = supers.remove(0);
             if (done.add(r.getName())) {
                 if (r.getName().equals(container.getName())) {
                     if (Modifier.isProtected(modifiers)) {
-                        return true;
+                        return allowProtected;
                     }
-                    if (! Modifier.isPrivate(modifiers)) {
-                        if (accessor.getName().startsWith(cpackage)
-                                && accessor.getName().indexOf('.', cpackage.length() + 1) == -1) {
-                            // Classes are in the same package, and the member is not private: access allowed
-                            return true;
-                        }
+                } else {
+                    // We need to check super classes of our super-classes
+                    // as if the method is protected we will be allowed access 
+                    for (Reflective rParent : r.getSuperTypesR()) {
+                        supers.add(rParent);
                     }
                 }
             }
@@ -532,51 +541,51 @@ public abstract class JavaUtils
             }
         }
         
-        // Process the block tags
-        if (i < javadocString.length()) {
-            String header = javadocString.substring(0, i);
-            String blocksText = javadocString.substring(i);
-            String[] lines = Utility.splitLines(blocksText);
-            
-            List<String> blocks = getBlockTags(lines);
-            
-            StringBuilder rest = new StringBuilder();
-            StringBuilder params = new StringBuilder();
-            params.append("<h3>Parameters</h3>").append("<table border=0>");
-            boolean hasParamDoc = false;
-            
-            for (String block : blocks) {
-                if (block.startsWith("param ")) {
-                    int p = "param".length();
-                    // Find the parameter name
-                    while (Character.isWhitespace(block.charAt(p))) {
-                        p++;
-                    }
-                    int k = p;
-                    while (k < block.length() && !Character.isWhitespace(block.charAt(k))) {
-                        k++;
-                    }
-                    String paramName = block.substring(p, k);
-                    String paramDesc = block.substring(k);
-                    
-                    params.append("<tr><td valign=\"top\">&nbsp;&nbsp;&nbsp;");
-                    params.append(makeCommentColour(paramName));
-                    params.append("</td><td>");
-                    params.append(makeCommentColour(" - " + paramDesc));
-                    params.append("</td></tr>");
-                    hasParamDoc = true;
-                } else {
-                    rest.append(convertBlockTag(block)).append("<br>");
-                }
-            }           
-            
-            params.append("</table><p>");
-            
-            String result = makeCommentColour(header) + (hasParamDoc ? params.toString() : "<p>") + rest.toString();
-            return result;
+        if (i >= javadocString.length()) {
+            return makeCommentColour(javadocString);
         }
         
-        return makeCommentColour(javadocString);
+        // Process the block tags
+        String header = javadocString.substring(0, i);
+        String blocksText = javadocString.substring(i);
+        String[] lines = Utility.splitLines(blocksText);
+
+        List<String> blocks = getBlockTags(lines);
+
+        StringBuilder rest = new StringBuilder();
+        StringBuilder params = new StringBuilder();
+        params.append("<h3>Parameters</h3>").append("<table border=0>");
+        boolean hasParamDoc = false;
+
+        for (String block : blocks) {
+            if (block.startsWith("param ")) {
+                int p = "param".length();
+                // Find the parameter name
+                while (Character.isWhitespace(block.charAt(p))) {
+                    p++;
+                }
+                int k = p;
+                while (k < block.length() && !Character.isWhitespace(block.charAt(k))) {
+                    k++;
+                }
+                String paramName = block.substring(p, k);
+                String paramDesc = block.substring(k);
+
+                params.append("<tr><td valign=\"top\">&nbsp;&nbsp;&nbsp;");
+                params.append(makeCommentColour(paramName));
+                params.append("</td><td>");
+                params.append(makeCommentColour(" - " + paramDesc));
+                params.append("</td></tr>");
+                hasParamDoc = true;
+            } else {
+                rest.append(convertBlockTag(block)).append("<br>");
+            }
+        }           
+
+        params.append("</table><p>");
+
+        String result = makeCommentColour(header) + (hasParamDoc ? params.toString() : "<p>") + rest.toString();
+        return result;
     }
     
     private static String makeCommentColour(String text)
@@ -584,6 +593,11 @@ public abstract class JavaUtils
         return "<font color='#994400'>" + text + "</font>";
     }
 
+    /**
+     * For a set of text lines representing block tags in a a javadoc comment, with some block
+     * tags potentially flowing over more than one line, return a list of Strings corresponding
+     * to each block tag with its complete text.
+     */
     private static List<String> getBlockTags(String[] lines)
     {
         LinkedList<String> blocks = new LinkedList<String>();
@@ -597,7 +611,7 @@ public abstract class JavaUtils
                 cur = line.substring(1);
             } else {
                 //If it doesn't start with an at, it's part of the previous tag
-                cur += line + " ";
+                cur += " " + line;
             }
         }
         blocks.addLast(cur);
@@ -634,5 +648,38 @@ public abstract class JavaUtils
             }
         }
         return s;
+    }
+    
+    /**
+     * Get a GenType corresponding to the (raw) class c
+     */
+    public static JavaType genTypeFromClass(Class<?> c)
+    {
+        if (c.isPrimitive()) {
+            if (c == boolean.class)
+                return JavaPrimitiveType.getBoolean();
+            if (c == char.class)
+                return JavaPrimitiveType.getChar();
+            if (c == byte.class)
+                return JavaPrimitiveType.getByte();
+            if (c == short.class)
+                return JavaPrimitiveType.getShort();
+            if (c == int.class)
+                return JavaPrimitiveType.getInt();
+            if (c == long.class)
+                return JavaPrimitiveType.getLong();
+            if (c == float.class)
+                return JavaPrimitiveType.getFloat();
+            if (c == double.class)
+                return JavaPrimitiveType.getDouble();
+            if (c == void.class)
+                return JavaPrimitiveType.getVoid();
+            Debug.message("getReturnType: Unknown primitive type");
+        }
+        if (c.isArray()) {
+            JavaType componentT = genTypeFromClass(c.getComponentType());
+            return new GenTypeArray(componentT);
+        }
+        return new GenTypeClass(new JavaReflective(c));
     }
 }

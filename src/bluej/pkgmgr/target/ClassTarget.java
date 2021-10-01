@@ -661,6 +661,16 @@ public class ClassTarget extends DependentTarget
     {
         return (getRole() instanceof UnitTestClassRole);
     }
+    
+    /**
+     * Verify whether this class target represents an Enum
+     * 
+     * @return true if class target represents an Enum, else false
+     */
+    public boolean isEnum()
+    {
+        return (getRole() instanceof EnumClassRole);
+    }
 
     /**
      * Check whether this class target represents an abstract class. This
@@ -884,7 +894,7 @@ public class ClassTarget extends DependentTarget
                     // This is the intial state. Try and load the class.
                     case 0:
                         try {
-                            clss = getPackage().getDebugger().getClass(getQualifiedName());
+                            clss = getPackage().getDebugger().getClass(getQualifiedName(), true);
                             state = 1;
                             EventQueue.invokeLater(this);
                         }
@@ -1279,12 +1289,19 @@ public class ClassTarget extends DependentTarget
     /**
      * Set the superclass. This adds an extends dependency to the appropriate class.
      * The old extends dependency (if any) must be removed separately.
+     * 
+     * @param superName  the fully-qualified name of the superclass
      */
     private void setSuperClass(String superName)
     {
         String pkgPrefix = getPackage().getQualifiedName();
         if (superName.startsWith(pkgPrefix)) {
-            superName = superName.substring(pkgPrefix.length());
+            // Must account for the final "." in the fully qualified name, if the package is
+            // not the default package:
+            int prefixLen = pkgPrefix.length();
+            prefixLen = prefixLen == 0 ? 0 : prefixLen + 1;
+            
+            superName = superName.substring(prefixLen);
             DependentTarget superclass = getPackage().getDependentTarget(superName);
             if (superclass != null) {
                 getPackage().addDependency(new ExtendsDependency(getPackage(), this, superclass), false);

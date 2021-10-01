@@ -97,14 +97,15 @@ class VMEventHandler extends Thread
                         queueEmpty = true;
                         notifyAll();
                     }
+                    
+                    // In case a thread event was issued while queueEmpty was still false,
+                    // we should process it now:
+                    handleThreadEvents();
 
                     try {
                         eventSet = queue.remove();
                     }
                     catch (InterruptedException ie) {
-                        if (exiting) {
-                            break;
-                        }
                         handleThreadEvents();
                         continue;
                     }
@@ -115,8 +116,9 @@ class VMEventHandler extends Thread
                         queueEmpty = false;
                     }
                 }
-                
-                handleThreadEvents();
+                else {
+                    handleThreadEvents();
+                }
                 
                 // From the JDK documentation
                 // The events that are grouped in an EventSet are restricted in the following ways:
@@ -213,10 +215,6 @@ class VMEventHandler extends Thread
     
     /**
      * Emit a thread halted/resumed event.
-     * 
-     * <p>A "thread resumed" event must be emitted before the thread
-     * is actually resumed, in order to guarantee that the continue
-     * event comes before any thread death event. 
      * 
      * @param thr   The thread for which the event occurred
      * @param halted  True if the thread was halted, false if resumed

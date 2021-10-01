@@ -1245,13 +1245,7 @@ public class Project implements DebuggerListener, InspectorManager
             return;
         }
         
-        // remove bench objects for all frames in this project
-        PkgMgrFrame[] frames = PkgMgrFrame.getAllProjectFrames(this);
-
-        for (int i = 0; i < frames.length; i++) {
-            frames[i].getObjectBench().removeAllObjects(getUniqueId());
-            frames[i].clearTextEval();
-        }
+        clearObjectBenches();
 
         // get rid of any inspectors that are open that were not cleaned up
         // as part of removing objects from the bench
@@ -1271,6 +1265,20 @@ public class Project implements DebuggerListener, InspectorManager
         }
 
         currentClassLoader = null;
+    }
+
+    /**
+     * Clears the objects from all object benches belonging to this project.
+     */
+    public void clearObjectBenches()
+    {
+        // remove bench objects for all frames in this project
+        PkgMgrFrame[] frames = PkgMgrFrame.getAllProjectFrames(this);
+
+        for (int i = 0; i < frames.length; i++) {
+            frames[i].getObjectBench().removeAllObjects(getUniqueId());
+            frames[i].clearTextEval();
+        }
     }
 
     /**
@@ -1306,7 +1314,8 @@ public class Project implements DebuggerListener, InspectorManager
         return execControls != null;
     }
 
-    public ExecControls getExecControls() {
+    public ExecControls getExecControls()
+    {
         if (execControls == null) {
             execControls = new ExecControls(this, getDebugger());
         }
@@ -1314,11 +1323,13 @@ public class Project implements DebuggerListener, InspectorManager
         return execControls;
     }
 
-    public boolean hasTerminal() {
+    public boolean hasTerminal()
+    {
         return terminal != null;
     }
 
-    public Terminal getTerminal() {
+    public Terminal getTerminal()
+    {
         if (terminal == null) {
             terminal = new Terminal(this);
         }
@@ -1351,8 +1362,6 @@ public class Project implements DebuggerListener, InspectorManager
     {
         inTestMode = mode;
     }
-
-
   
     /**
      * Return a list of URL of the Java ME libraries specified in the 
@@ -1462,7 +1471,7 @@ public class Project implements DebuggerListener, InspectorManager
         // The userlib location may be specified in bluej.defs
         String userLibSetting = Config.getPropString("bluej.userlibLocation", null);
         if (userLibSetting == null) {
-            userLibDir = new File(Boot.getInstance().getBluejLibDir(), "userlib");
+            userLibDir = new File(Boot.getBluejLibDir(), "userlib");
         }
         else {
             userLibDir = new File(userLibSetting);
@@ -1920,6 +1929,9 @@ public class Project implements DebuggerListener, InspectorManager
         }
     }
 
+    /*
+     * @see bluej.debugger.DebuggerListener#examineDebuggerEvent(bluej.debugger.DebuggerEvent)
+     */
     public boolean examineDebuggerEvent(DebuggerEvent e)
     {
         return false;

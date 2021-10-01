@@ -41,12 +41,19 @@ public class TestReflective extends Reflective
     public String name;
     public List<GenTypeDeclTpar> typeParams;
     public List<GenTypeClass> superTypes; // list of GenTypeClass
+    public Map<String,FieldReflective> fields = Collections.emptyMap();
     
     public TestReflective(String name)
     {
         this.name = name;
         typeParams = new ArrayList<GenTypeDeclTpar>();
         superTypes = new ArrayList<GenTypeClass>();
+    }
+    
+    public TestReflective(String name, Reflective superClass)
+    {
+        this(name);
+        superTypes.add(new GenTypeClass(superClass));
     }
     
     public String getName()
@@ -104,13 +111,24 @@ public class TestReflective extends Reflective
     
     public boolean isAssignableFrom(Reflective r)
     {
+        if (r == this) {
+            return true;
+        }
+        
+        List<Reflective> supers = r.getSuperTypesR();
+        for (Reflective superR : supers) {
+            if (isAssignableFrom(superR)) {
+                return true;
+            }
+        }
+        
         return false;
     }
     
     @Override
     public Map<String,FieldReflective> getDeclaredFields()
     {
-        return Collections.emptyMap();
+        return fields;
     }
     
     @Override
@@ -120,7 +138,7 @@ public class TestReflective extends Reflective
     }
     
     @Override
-    public List<GenTypeClass> getInners()
+    public List<Reflective> getInners()
     {
         return Collections.emptyList();
     }

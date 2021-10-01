@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -153,6 +153,8 @@ public class TextParser extends JavaParser
     {
         switch (tokenType) {
         case PAREN_OPERATOR:
+            return -2;
+        case JavaTokenTypes.LITERAL_new:
             return -1;
         case JavaTokenTypes.ASSIGN:
         case JavaTokenTypes.BAND_ASSIGN:
@@ -262,6 +264,9 @@ public class TextParser extends JavaParser
         case JavaTokenTypes.BSR_ASSIGN:
         case JavaTokenTypes.MOD_ASSIGN:
         case JavaTokenTypes.BXOR_ASSIGN:
+        case JavaTokenTypes.BAND:
+        case JavaTokenTypes.BOR:
+        case JavaTokenTypes.BXOR:
             arg2 = popValueStack();
             arg1 = popValueStack();
             checkArgs(arg1, arg2, token);
@@ -294,8 +299,11 @@ public class TextParser extends JavaParser
         case JavaTokenTypes.QUESTION:
             processQuestionOperator();
             break;
+        case JavaTokenTypes.LITERAL_new:
+            processNewOperator(token);
+            break;
         }
-        // TODO logical not, bitwise not/and/or/xor
+        // TODO bitwise and/or/xor
     }
     
     @Override
@@ -508,6 +516,9 @@ public class TextParser extends JavaParser
         case JavaTokenTypes.STAR:
         case JavaTokenTypes.DIV:
         case JavaTokenTypes.MOD:
+        case JavaTokenTypes.BAND:
+        case JavaTokenTypes.BOR:
+        case JavaTokenTypes.BXOR:
             JavaType resultType = TextAnalyzer.binaryNumericPromotion(a1type, a2type);
             if (resultType == null) {
                 valueStack.push(new ErrorEntity());
@@ -1075,7 +1086,7 @@ public class TextParser extends JavaParser
                     taList.add(new WildcardExtendsEntity(taEnt));
                 }
                 else {
-                    taList.add(new UnboundedWildcardEntity());
+                    taList.add(new UnboundedWildcardEntity(resolver));
                     i.previous();
                 }
             }
@@ -1132,7 +1143,9 @@ public class TextParser extends JavaParser
     @Override
     protected void endArgument()
     {
-        // processHigherPrecedence(getPrecedence(JavaTokenTypes.COMMA));
+        // Each argument is an expression delimited by beginExpression()/
+        // endExpression(), so it should leave just a single value on the
+        // stack.
         if (! valueStack.isEmpty()) {
             argumentStack.peek().add(valueStack.pop());
         }

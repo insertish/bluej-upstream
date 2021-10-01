@@ -45,6 +45,15 @@ public abstract class Reflective
     public abstract String getName();
     
     /**
+     * Get the name of the class or interface represented by the reflective.
+     * The name is in a form that can be presented nicely to the user.
+     */
+    public String getSimpleName()
+    {
+        return getName();
+    }
+    
+    /**
      * Get the formal type parameters of the class/interface this reflective
      * represents. Note that this does not give the type parameters from
      * outer classes which may still parameterize this reflective's class.
@@ -145,7 +154,9 @@ public abstract class Reflective
     
     /**
      * Get the methods declared in the type represented by this Reflective.
-     * This does not include methods declared in the superclass(es).
+     * This does not include methods declared in the superclass(es), nor does
+     * it include synthetic methods.
+     * 
      * @return a map which maps method names to a set of methods
      *    (represented by MethodReflective objects) 
      */
@@ -160,5 +171,5 @@ public abstract class Reflective
     /**
      * Get the inner classes of the type represented by this Reflective.
      */
-    abstract public List<GenTypeClass> getInners();
+    abstract public List<Reflective> getInners();
 }

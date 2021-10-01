@@ -22,10 +22,12 @@
 package bluej.parser;
 
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
+import bluej.debugger.gentype.GenTypeDeclTpar;
 import bluej.debugger.gentype.GenTypeParameter;
 import bluej.debugger.gentype.JavaType;
 import bluej.debugger.gentype.MethodReflective;
@@ -45,7 +47,8 @@ public class MethodCompletion extends AssistContent
     /**
      * Construct a new method completion
      * @param method    The method to represent
-     * @param typeArgs   The type arguments (may be null if there are none)
+     * @param typeArgs   The type arguments applied to the declaring class. For a method
+     *                   call on a raw expression, will be null.
      * @param javadocResolver  The javadoc resolver to use
      */
     public MethodCompletion(MethodReflective method,
@@ -53,16 +56,28 @@ public class MethodCompletion extends AssistContent
             JavadocResolver javadocResolver)
     {
         this.method = method;
-        this.typeArgs = typeArgs;
+        if (typeArgs != null) {
+            List<GenTypeDeclTpar> mtpars = method.getTparTypes();
+            if (! mtpars.isEmpty()) {
+                // The method has its own type parameters - these override the class parameters.
+                Map<String,GenTypeParameter> fullArgMap = new HashMap<String,GenTypeParameter>();
+                fullArgMap.putAll(typeArgs);
+                for (GenTypeDeclTpar mtpar : mtpars) {
+                    fullArgMap.put(mtpar.getTparName(), mtpar);
+                }
+                this.typeArgs = fullArgMap;
+            }
+            else {
+                this.typeArgs = typeArgs;
+            }
+        }
         this.javadocResolver = javadocResolver;
     }
     
     @Override
     public String getDeclaringClass()
     {
-        String dname = method.getDeclaringType().getName();
-        dname = dname.replace('$', '.');
-        return dname;
+        return method.getDeclaringType().getSimpleName();
     }
     
     @Override
@@ -181,6 +196,7 @@ public class MethodCompletion extends AssistContent
                 type = type.mapTparsToTypes(typeArgs).getUpperBound();
             }
             else {
+                // null indicates a raw type.
                 type = type.getErasedType();
             }
         }

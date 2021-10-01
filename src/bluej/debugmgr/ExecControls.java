@@ -39,6 +39,7 @@ import java.awt.event.MouseEvent;
 import java.awt.event.MouseListener;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 
@@ -49,6 +50,7 @@ import javax.swing.BorderFactory;
 import javax.swing.DefaultListModel;
 import javax.swing.JButton;
 import javax.swing.JCheckBoxMenuItem;
+import javax.swing.JComponent;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JList;
@@ -81,8 +83,8 @@ import bluej.debugger.DebuggerThreadTreeModel;
 import bluej.debugger.SourceLocation;
 import bluej.debugger.DebuggerThreadTreeModel.SyncMechanism;
 import bluej.pkgmgr.Project;
-import bluej.utility.Debug;
 import bluej.utility.GradientFillPanel;
+import bluej.utility.JavaNames;
 
 /**
  * Window for controlling the debugger
@@ -131,7 +133,7 @@ public class ExecControls extends JFrame
     private DebuggerThreadTreeModel threadModel;
 	
     
-    private JSplitPane mainPanel;
+    private JComponent mainPanel;
     private JList stackList, staticList, instanceList, localList;
     private JButton stopButton, stepButton, stepIntoButton, continueButton,
         terminateButton;
@@ -174,8 +176,9 @@ public class ExecControls extends JFrame
     {
         super(Config.getApplicationName() + ":  " + Config.getString("debugger.execControls.windowTitle"));
 
-        if (project == null || debugger == null)
+        if (project == null || debugger == null) {
             throw new NullPointerException("project or debugger null in ExecControls");
+        }
 
         this.project = project;
         this.debugger = debugger;
@@ -206,14 +209,13 @@ public class ExecControls extends JFrame
     public void valueChanged(ListSelectionEvent event)
     {
         // ignore mouse down, dragging, etc.
-		if(event.getValueIsAdjusting())
+        if(event.getValueIsAdjusting()) {
             return;
+        }
 
         if(event.getSource() == stackList) {
             selectStackFrame(stackList.getSelectedIndex());
         }
-        // staticList, instanceList and localList are ignored
-        // a single click doesn't do anything
     }
 
     // ----- end of ListSelectionListener interface -----
@@ -240,8 +242,9 @@ public class ExecControls extends JFrame
             DefaultMutableTreeNode node =
                 (DefaultMutableTreeNode) threadTree.getLastSelectedPathComponent();
 
-            if (node == null)
+            if (node == null) {
                 return;
+            }
 
             DebuggerThread dt = threadModel.getNodeAsDebuggerThread(node);        
 
@@ -261,17 +264,20 @@ public class ExecControls extends JFrame
      */
     public void treeNodesChanged(TreeModelEvent e)
     {
-        if (selectedThread == null)
+        if (selectedThread == null) {
             return;
+        }
 
         Object nodes[] = e.getChildren();
 
         for(int i=0; i<nodes.length; i++) {
-            if (nodes[i] == null)
+            if (nodes[i] == null) {
                 continue;
+            }
 
-            if (selectedThread.equals(threadModel.getNodeAsDebuggerThread(nodes[i])))
+            if (selectedThread.equals(threadModel.getNodeAsDebuggerThread(nodes[i]))) {
                 setSelectedThread(selectedThread);
+            }
         }	
     }
 
@@ -324,31 +330,27 @@ public class ExecControls extends JFrame
                 threadTree.clearSelection();
                 threadTree.addSelectionPath(tp);
             }
+            
+            // There seems to be a swing glitch causing the thread-tree scrollpane
+            // to be reduced to a very small size by the divider. Doing a paint
+            // here seems to fix it.
+            mainPanel.paintImmediately(0,0,mainPanel.getSize().width,mainPanel.getSize().height);
         }
-        else {
-            Debug.message("Thread " + dt + " no longer available for selection");
-        }
-
-        // There seems to be a swing glitch causing the thread-tree scrollpane
-        // to be reduced to a very small size by the divider. Doing a paint
-        // here seems to fix it.
-        mainPanel.paintImmediately(0,0,mainPanel.getSize().width,mainPanel.getSize().height);
     }
 
     /**
      * Set our internally selected thread and update the
      * UI to reflect its status.
+     *
+     * <p>This does not actually highlight the selected thread - use makeSureThreadIsSelected()
+     * for that.
      * 
-     * It is currently true that this thread will be
-     * selected in the tree view before this method is called.
-     * At the moment, this method does not rely on this fact
-     * but if the method is changed _to_ rely on it, this
-     * comment should be fixed.
+     * @see #makeSureThreadIsSelected(DebuggerThread)
      * 
      * @param dt  the thread to select or null if the thread
      *            selection has been cleared
      */
-    private void setSelectedThread(DebuggerThread dt)
+    public void setSelectedThread(DebuggerThread dt)
     {
         selectedThread = dt;
 
@@ -377,19 +379,63 @@ public class ExecControls extends JFrame
     /**
      * Display the details for the currently selected thread.
      * These details include showing the threads stack, and displaying 
-     * the details for the top stack frome.
+     * the details for the top stack frame.
      */
     private void setThreadDetails()
     {
         stackList.setFixedCellWidth(-1);
-        List<SourceLocation> stack = selectedThread.getStack();
-        if(stack.size() > 0) {
-            stackList.setListData(stack.toArray());
+        //Copy the list because we may alter it:
+        LinkedList<SourceLocation> stack = new LinkedList<SourceLocation>(selectedThread.getStack());
+        SourceLocation[] filtered = getFilteredStack(stack);
+        if(filtered.length > 0) {
+            stackList.setListData(filtered);
             // show details of top frame
             autoSelectionEvent = true;
             selectStackFrame(0);
             autoSelectionEvent = false;
         }
+    }
+    
+    private SourceLocation [] getFilteredStack(List<SourceLocation> stack)
+    {
+        int first = -1;
+        int i;
+        for (i = 0; i < stack.size(); i++) {
+            SourceLocation loc = stack.get(i);
+            String className = loc.getClassName();
+
+            // ensure that the bluej.runtime.ExecServer frames are not shown
+            if (className.startsWith("bluej.runtime.")) {
+                break;
+            }
+
+            // must getBase on classname so that we find __SHELL
+            // classes in other packages ie a.b.__SHELL
+            // if it is a __SHELL class, stop processing the stack
+            if (JavaNames.getBase(className).startsWith("__SHELL")) {
+                break;
+            }
+            
+            if (Config.isGreenfoot() && className.startsWith("greenfoot.core.")) {
+                break;
+            }
+            
+            // Topmost stack location shown will have source available!
+            if (first == -1 && loc.getFileName() != null) {
+                first = i;
+            }
+        }
+        
+        if (first == -1 || i == 0) {
+            return new SourceLocation[0];
+        }
+        
+        SourceLocation[] filtered = new SourceLocation[i - first];
+        for (int j = first; j < i; j++) {
+            filtered[j - first] = stack.get(j);
+        }
+        
+        return filtered;
     }
     
     /**
@@ -412,9 +458,9 @@ public class ExecControls extends JFrame
     {
         // if the UI isn't up to date, make sure the correct frame is
         // selected in the list
-        if (stackList.getSelectedIndex() != index)
+        if (stackList.getSelectedIndex() != index) {
             stackList.setSelectedIndex(index);
-
+        }
         else if (index >= 0) {
             setStackFrameDetails(index);
             selectedThread.setSelectedFrame(index);
@@ -437,17 +483,15 @@ public class ExecControls extends JFrame
         currentObject = selectedThread.getCurrentObject(frameNo);
         if(currentClass != null) {
             staticList.setFixedCellWidth(-1);
-            staticList.setListData(
-                currentClass.getStaticFields(false, restrictedClasses).toArray(new Object[0]));
+            staticList.setListData(currentClass.getStaticFields(false, restrictedClasses).toArray());
         }
         if(currentObject != null) {
             instanceList.setFixedCellWidth(-1);
-            instanceList.setListData(
-               currentObject.getInstanceFields(false, restrictedClasses).toArray(new Object[0]));
+            instanceList.setListData(currentObject.getInstanceFields(false, restrictedClasses).toArray());
         }
         if(selectedThread != null) {
             localList.setFixedCellWidth(-1);
-            localList.setListData(selectedThread.getLocalVariables(frameNo).toArray(new Object[0]));
+            localList.setListData(selectedThread.getLocalVariables(frameNo).toArray());
         }
     }
 
@@ -673,12 +717,15 @@ public class ExecControls extends JFrame
             flipPanel.add(tempPanel, "blank");
         }
 
+        if (Config.isGreenfoot()) {
+            mainPanel = flipPanel;
+        } else {
         /* JSplitPane */ mainPanel = new JSplitPane(JSplitPane.VERTICAL_SPLIT,
                                               threadPanel, flipPanel);
-
-        mainPanel.setDividerSize(6);
-        mainPanel.setOpaque(false);
-
+            ((JSplitPane)mainPanel).setDividerSize(6);
+            mainPanel.setOpaque(false);
+        }
+        
         contentPane.add(mainPanel, BorderLayout.CENTER);
 
         // Close Action when close button is pressed
@@ -710,12 +757,14 @@ public class ExecControls extends JFrame
         JMenuBar menubar = new JMenuBar();
         JMenu menu = new JMenu(Config.getString("terminal.options"));
 
-        systemThreadItem = new JCheckBoxMenuItem(new HideSystemThreadAction());
-        systemThreadItem.setSelected(true);
+        
+        if (!Config.isGreenfoot()) {
+            systemThreadItem = new JCheckBoxMenuItem(new HideSystemThreadAction());
+            systemThreadItem.setSelected(true);
+            menu.add(systemThreadItem);
+            menu.add(new JSeparator());
+        }
         debugger.hideSystemThreads(true);
-        menu.add(systemThreadItem);
-
-        menu.add(new JSeparator());
 
         menu.add(new CloseAction());
 

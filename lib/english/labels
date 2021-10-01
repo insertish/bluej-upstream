@@ -110,7 +110,7 @@ prefmgr.edit.prefpaneltitle=Editor
 prefmgr.edit.editor.title=Editor settings
 prefmgr.edit.editorfontsize=Font size
 prefmgr.edit.colortransparency=Scope Highlighting
-prefmgr.edit.usesyntaxhilighting=Use syntax hilighting
+prefmgr.edit.usesyntaxhilighting=Use syntax highlighting
 prefmgr.edit.autoindent=Auto-indent (Enter and Tab keys)
 prefmgr.edit.displaylinenumbers=Display line numbers
 prefmgr.edit.makeBackup=Make backup of source files
@@ -186,6 +186,7 @@ editor.autoindentLabel = Auto-layout
 editor.comment-blockLabel = Comment
 editor.uncomment-blockLabel = Uncomment
 editor.insert-methodLabel = Insert method
+editor.add-javadocLabel = Add method comment
 
 editor.new-findLabel = New Find
 editor.findLabel = Find...
@@ -256,6 +257,14 @@ editor.replacePanel.replaceLabel=Replace:
 editor.replacePanel.replaceOnce=Once
 editor.replacePanel.replaceAll=All
 
+# "Add javadoc" function
+editor.addjavadoc.notAMethod=Not in a method.
+editor.addjavadoc.hasJavadoc=This method already has a Javadoc comment.
+editor.addjavadoc.constructor=Constructor
+editor.addjavadoc.method=Method
+editor.addjavadoc.parameter=A parameter
+editor.addjavadoc.returnValue=The return value
+
 # Messages shown as a result of a search with replace all
 editor.replaceAll.replaced=Replaced 
 editor.replaceAll.intancesOf=\ instances of 
@@ -270,7 +279,7 @@ editor.highlight.notFound=\ not found.
 editor.completion.noMatch=No matching completions
 
 # Messages shown when determining what function is bound to a given key
-editor.keypressed.keyIsNotBound=\ in not bound to a function.
+editor.keypressed.keyIsNotBound=\ is not bound to a function.
 editor.keypressed.callsTheFunction=\ calls the function "
 
 #Messages, warnings, etc that is displayed by Info.java
@@ -500,9 +509,9 @@ debugger.threadRunning = <html><center>Thread is running.<br>Threads must be sto
 
 # DialogManager labels
 
-dialogmgr.error = BlueJ:  Error
-dialogmgr.question = BlueJ:  Question
-dialogmgr.message = BlueJ:  Message
+dialogmgr.error = Error
+dialogmgr.question = Question
+dialogmgr.message = Message
 
 #Terminal Window
 terminal.options = Options

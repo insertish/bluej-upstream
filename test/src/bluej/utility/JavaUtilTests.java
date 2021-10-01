@@ -22,6 +22,7 @@
 package bluej.utility;
 
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
@@ -34,6 +35,7 @@ import bluej.debugger.gentype.GenTypeParameter;
 import bluej.debugger.gentype.GenTypeSolid;
 import bluej.debugger.gentype.JavaType;
 import bluej.debugger.gentype.Reflective;
+import bluej.debugger.gentype.TestReflective;
 
 public class JavaUtilTests extends TestCase
 {
@@ -53,7 +55,7 @@ public class JavaUtilTests extends TestCase
      * Test that types with infinite recursion don't cause us to bomb out.
      * In this case we use Enum, as Enum&lt;E&gt; has E extend Enum&lt;E&gt;.
      */
-    public void test1()
+    public void testEnumInfiniteRecursion()
     {
         JavaUtils ju = JavaUtils.getJavaUtils();
         try {
@@ -79,10 +81,8 @@ public class JavaUtilTests extends TestCase
     /**
      * Test that method/constructor signatures are constructed correctly.
      */
-    @SuppressWarnings("unchecked")
     public void testSignatures()
     {
-        JavaUtils jutils = JavaUtils.getJavaUtils();
         boolean onjava5 = true;
         // String majorVersion = System.getProperty("java.specification.version");        
         // boolean onjava6 = majorVersion.compareTo("1.6") >= 0;
@@ -97,12 +97,12 @@ public class JavaUtilTests extends TestCase
             fail();
         }
         
-        String sig = jutils.getSignature(sampleMeth);
+        String sig = JavaUtils.getSignature(sampleMeth);
         assertEquals(sig, "void sampleMethod(int, int)");
         
         if (onjava5) {
             // test a varargs method
-            Class<Class> clazz = Class.class;
+            Class<?> clazz = Class.class;
             try {
                 sampleMeth = clazz.getMethod("getConstructor", new Class [] {Class [].class});
             }
@@ -110,7 +110,7 @@ public class JavaUtilTests extends TestCase
                 fail();
             }
             
-            sig = jutils.getSignature(sampleMeth);
+            sig = JavaUtils.getSignature(sampleMeth);
             assertEquals("java.lang.reflect.Constructor getConstructor(java.lang.Class[])", sig);
         }
 
@@ -121,7 +121,7 @@ public class JavaUtilTests extends TestCase
             fail();
         }
 
-        sig = jutils.getSignature(sampleMeth);
+        sig = JavaUtils.getSignature(sampleMeth);
         assertEquals("void sampleMethod2(java.lang.String[])", sig);
     }
     
@@ -131,7 +131,7 @@ public class JavaUtilTests extends TestCase
         Method minMethod = colClass.getMethod("min", Collection.class);
         JavaUtils ju = JavaUtils.getJavaUtils();
         
-        JavaType type = ju.genTypeFromClass(minMethod.getReturnType());
+        JavaType type = JavaUtils.genTypeFromClass(minMethod.getReturnType());
         assertNotNull(type.asClass());
         
         type = ju.getReturnType(minMethod);
@@ -174,5 +174,55 @@ public class JavaUtilTests extends TestCase
         }
         
         assertTrue(foundComparable);
+    }
+    
+    /**
+     * Test that a class can access protected members of its superclass, and of its
+     * superclass' superclass and so on.
+     */
+    public void testAccessCheck()
+    {
+        TestReflective baseR = new TestReflective("Base");
+        TestReflective subR = new TestReflective("Sub", baseR);
+        TestReflective subsubR = new TestReflective("SubSub", subR);
+        
+        assertTrue(JavaUtils.checkMemberAccess(subR, new GenTypeClass(subsubR), subsubR, Modifier.PROTECTED, false));
+        assertFalse(JavaUtils.checkMemberAccess(subR, new GenTypeClass(subsubR), subsubR, Modifier.PRIVATE, false));
+        
+        assertTrue(JavaUtils.checkMemberAccess(subR, new GenTypeClass(baseR), baseR, Modifier.PROTECTED, false));
+        assertFalse(JavaUtils.checkMemberAccess(subR, new GenTypeClass(baseR), baseR, Modifier.PRIVATE, false));
+    }
+    
+    /**
+     * Test that we can't access a package-private member from a class which isn't
+     * a superclass, even if a superclass is in the same package.
+     */
+    public void testAccessCheck2()
+    {
+        TestReflective baseR = new TestReflective("Base");
+        TestReflective subR = new TestReflective("somepkg.Sub", baseR);
+        TestReflective otherR = new TestReflective("Other");
+        
+        assertFalse(JavaUtils.checkMemberAccess(otherR, new GenTypeClass(subR), subR, 0, false));
+    }
+    
+    /**
+     * Test that a subclass can only access a protected member from the superclass via an expression
+     * of subclass type.
+     */
+    public void testAccessCheck3()
+    {
+        TestReflective baseR = new TestReflective("Base");
+        TestReflective subR = new TestReflective("somepkg.Sub", baseR);
+        TestReflective subsubR = new TestReflective("somepkg.SubSub", subR);
+        
+        assertFalse(JavaUtils.checkMemberAccess(baseR, new GenTypeClass(baseR),
+                subR, Modifier.PROTECTED, false));
+        
+        assertTrue(JavaUtils.checkMemberAccess(baseR, new GenTypeClass(subR),
+                subR, Modifier.PROTECTED, false));
+
+        assertTrue(JavaUtils.checkMemberAccess(baseR, new GenTypeClass(subsubR),
+                subR, Modifier.PROTECTED, false));
     }
 }

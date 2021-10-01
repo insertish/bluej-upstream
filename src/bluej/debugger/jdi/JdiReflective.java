@@ -487,7 +487,9 @@ public class JdiReflective extends Reflective
             // '*' represents an unbounded '?'. For instance, List<?>
             // has signature: Ljava/lang/list<*>;
             i.next();
-            return new GenTypeUnbounded();
+            JdiReflective objRef = new JdiReflective("java.lang.Object", parent);
+            GenTypeClass objClass = new GenTypeClass(objRef);
+            return new GenTypeUnbounded(objClass);
         }
         if (c == '+') {
             // ? extends ...
@@ -897,6 +899,10 @@ public class JdiReflective extends Reflective
         Map<String,Set<MethodReflective>> methodMap = new HashMap<String,Set<MethodReflective>>();
         
         for (Method method : methods) {
+            if (method.isSynthetic()) {
+                continue;
+            }
+            
             // Process the string signature to determine return and param types
             String genSig = method.genericSignature();
             if (genSig == null) {
@@ -938,7 +944,7 @@ public class JdiReflective extends Reflective
     }
     
     @Override
-    public List<GenTypeClass> getInners()
+    public List<Reflective> getInners()
     {
         return Collections.emptyList(); // not implemented
     }

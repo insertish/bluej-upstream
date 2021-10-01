@@ -117,11 +117,17 @@ public class ParsedTypeNode extends IncrementalParsingNode
         return implementedTypes;
     }
     
+    /**
+     * Specify which types this type explicitly extends.
+     */
     public void setExtendedTypes(List<JavaEntity> extendedTypes)
     {
         this.extendedTypes = extendedTypes;
     }
     
+    /**
+     * Return the types which this type explicit extends.
+     */
     public List<JavaEntity> getExtendedTypes()
     {
         return extendedTypes;
@@ -212,6 +218,8 @@ public class ParsedTypeNode extends IncrementalParsingNode
             }
             last = token;
             params.tokenStream.pushBack(token);
+            params.parser.getExtendedTypes();
+            setExtendedTypes(params.parser.getExtendedTypes());
             return PP_BEGINS_NEXT_STATE;
         }
         else if (state == 1) {

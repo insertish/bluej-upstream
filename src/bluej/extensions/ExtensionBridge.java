@@ -21,21 +21,19 @@
  */
 package bluej.extensions;
 
+import javax.swing.JMenuItem;
+
 import bluej.debugger.DebuggerListener;
 import bluej.debugmgr.objectbench.ObjectWrapper;
-
 import bluej.extensions.event.ExtensionEvent;
-
-import bluej.extmgr.*;
-
-import bluej.pkgmgr.*;
+import bluej.extmgr.ExtensionPrefManager;
+import bluej.extmgr.ExtensionWrapper;
 import bluej.pkgmgr.Package;
-
+import bluej.pkgmgr.PkgMgrFrame;
+import bluej.pkgmgr.Project;
 import bluej.pkgmgr.target.ClassTarget;
 
 import com.sun.jdi.Value;
-
-import javax.swing.*;
 
 
 /*
@@ -46,13 +44,15 @@ import javax.swing.*;
  *
  * This class should be excluded when the Javadoc API documentation is generated.
  */
-public final class ExtensionBridge {
-    public static void delegateEvent(BlueJ thisBluej, ExtensionEvent anEvent) {
+public final class ExtensionBridge
+{
+    public static void delegateEvent(BlueJ thisBluej, ExtensionEvent anEvent)
+    {
         thisBluej.delegateEvent(anEvent);
     }
 
-    public static Object getVal(PkgMgrFrame aFrame, String instanceName,
-        Value val) {
+    public static Object getVal(PkgMgrFrame aFrame, String instanceName, Value val)
+    {
         return BField.doGetVal(aFrame, instanceName, val);
     }
 
@@ -103,5 +103,10 @@ public final class ExtensionBridge {
     public static boolean hasSourceCode(BClass bClass) throws ProjectNotOpenException, PackageNotFoundException
     {
         return bClass.hasSourceCode();
+    }
+
+    public static void clearObjectBench(BProject project) throws ProjectNotOpenException
+    {
+        project.clearObjectBench();
     }
 }

@@ -54,8 +54,9 @@ public class DialogManager
     public static void showMessage(Component parent, String msgID)
     {
         String message = getMessage(msgID);
-        if(message != null)
+        if (message != null)
             JOptionPane.showMessageDialog(parent, message,
+                                          Config.getApplicationName() + ":  " +
                                           Config.getString("dialogmgr.message"),
                                           JOptionPane.INFORMATION_MESSAGE);
     }
@@ -71,7 +72,7 @@ public class DialogManager
                                            String text)
     {
         String message = getMessage(msgID);
-        if(message != null)
+        if (message != null)
             JOptionPane.showMessageDialog(parent, message + "\n" + text);
     }
     
@@ -87,7 +88,7 @@ public class DialogManager
                                            String text)
     {
         String message = getMessage(msgID);
-        if(message != null)
+        if (message != null)
             JOptionPane.showMessageDialog(parent, text+ "\n"+message);
     }
     
@@ -104,7 +105,7 @@ public class DialogManager
     {
         String message = getMessage(msgID);
         String messageDialog=Utility.mergeStrings(message, innerText);
-        if(message != null)
+        if (message != null)
             JOptionPane.showMessageDialog(parent, text+ "\n"+messageDialog);
     }
 
@@ -127,7 +128,7 @@ public class DialogManager
     public static void showError(Component parent, String msgID)
     {
         String message = getMessage(msgID);
-        if(message != null) {
+        if (message != null) {
             showErrorText(parent, message);
         }
     }
@@ -141,6 +142,7 @@ public class DialogManager
     public static void showErrorText(Component parent, String message)
     {
         JOptionPane.showMessageDialog(parent, message,
+                Config.getApplicationName() + ":  " +
                 Config.getString("dialogmgr.error"),
                 JOptionPane.ERROR_MESSAGE);
     }
@@ -153,7 +155,7 @@ public class DialogManager
                                          String text)
     {
         String message = getMessage(msgID);
-        if(message != null) {
+        if (message != null) {
             showErrorText(parent, message + "\n" + text);
         }
     }
@@ -167,7 +169,7 @@ public class DialogManager
     public static int askQuestion(Component parent, String msgID)
     {
         String message = getMessage(msgID);
-        if(message != null) {
+        if (message != null) {
             int button3Index = message.lastIndexOf("\n");
             int button2Index = message.lastIndexOf("\n", button3Index-1);
             int button1Index = message.lastIndexOf("\n", button2Index-1);
@@ -184,6 +186,7 @@ public class DialogManager
             }
 
             return JOptionPane.showOptionDialog(parent, message,
+                                                Config.getApplicationName() + ":  " +
                                                 Config.getString("dialogmgr.question"),
                                                 JOptionPane.DEFAULT_OPTION,
                                                 JOptionPane.WARNING_MESSAGE,
@@ -204,7 +207,7 @@ public class DialogManager
     public static int askQuestion(Component parent, String msgID, String [] subs)
     {
         String message = getMessage(msgID);
-        if(message != null) {
+        if (message != null) {
             int button3Index = message.lastIndexOf("\n");
             int button2Index = message.lastIndexOf("\n", button3Index-1);
             int button1Index = message.lastIndexOf("\n", button2Index-1);
@@ -222,6 +225,7 @@ public class DialogManager
             }
 
             return JOptionPane.showOptionDialog(parent, message,
+                                                Config.getApplicationName() + ":  " +
                                                 Config.getString("dialogmgr.question"),
                                                 JOptionPane.DEFAULT_OPTION,
                                                 JOptionPane.WARNING_MESSAGE,
@@ -244,13 +248,13 @@ public class DialogManager
     {
         String response = "";
         String message = getMessage(msgID);
-        if(message != null) {
+        if (message != null) {
             int defaultTextIndex = message.lastIndexOf("\n");
             int titleIndex = message.lastIndexOf("\n", defaultTextIndex-1);
             String defaultText = message.substring(defaultTextIndex+1);
             String title = message.substring(titleIndex+1, defaultTextIndex);
             message = message.substring(0, titleIndex);
-            if("null".equals(defaultText)) {
+            if ("null".equals(defaultText)) {
                 defaultText = null;
             }
             response = (String)JOptionPane.showInputDialog(parent,
@@ -365,30 +369,31 @@ public class DialogManager
     public static int askQuestion(Component parent, String msgID, int numOptions)
     {
         String message = getMessage(msgID);
-        String buttonName;
-        int btnIndex=message.length()+1;
-        int prevBtnIndex=message.length(); 
-        String[] options=new String[numOptions];
         if(message != null) {
-        	for (int i=0; i < numOptions; i++){
-        		btnIndex=message.lastIndexOf("\n", btnIndex-1);
-        		buttonName=message.substring(btnIndex+1, prevBtnIndex);
-        		options[numOptions-i-1]=buttonName; //just to ensure they go in, in the correct order
-        		prevBtnIndex=btnIndex;
-        	}
+            String buttonName;
+            int btnIndex=message.length()+1;
+            int prevBtnIndex=message.length(); 
+            String[] options=new String[numOptions];
+            for (int i=0; i < numOptions; i++) {
+                btnIndex=message.lastIndexOf("\n", btnIndex-1);
+                buttonName=message.substring(btnIndex+1, prevBtnIndex);
+                options[numOptions-i-1]=buttonName; //just to ensure they go in, in the correct order
+                prevBtnIndex=btnIndex;
+            }
             message = message.substring(0, btnIndex);
-          
 
             return JOptionPane.showOptionDialog(parent, message,
-                                                Config.getString("dialogmgr.question"),
-                                                JOptionPane.DEFAULT_OPTION,
-                                                JOptionPane.WARNING_MESSAGE,
-                                                null, options, options[0]);
+                    Config.getApplicationName() + ":  " +
+                    Config.getString("dialogmgr.question"),
+                    JOptionPane.DEFAULT_OPTION,
+                    JOptionPane.WARNING_MESSAGE,
+                    null, options, options[0]);
         }
         return 0;
     }
 
-    public static void addOKCancelButtons(JPanel panel, JButton okButton, JButton cancelButton) {
+    public static void addOKCancelButtons(JPanel panel, JButton okButton, JButton cancelButton) 
+    {
         if (Config.isMacOS()) {
             panel.add(cancelButton);
             panel.add(okButton);

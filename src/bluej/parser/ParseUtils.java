@@ -32,6 +32,7 @@ import java.util.ListIterator;
 import java.util.Map;
 import java.util.Set;
 
+import bluej.debugger.gentype.GenTypeArrayClass;
 import bluej.debugger.gentype.GenTypeClass;
 import bluej.debugger.gentype.GenTypeParameter;
 import bluej.debugger.gentype.JavaPrimitiveType;
@@ -41,6 +42,7 @@ import bluej.debugger.gentype.Reflective;
 import bluej.parser.entity.EntityResolver;
 import bluej.parser.entity.ImportedEntity;
 import bluej.parser.entity.JavaEntity;
+import bluej.parser.entity.ParsedArrayReflective;
 import bluej.parser.entity.SolidTargEntity;
 import bluej.parser.entity.TypeArgumentEntity;
 import bluej.parser.entity.TypeEntity;
@@ -52,6 +54,7 @@ import bluej.parser.entity.WildcardSuperEntity;
 import bluej.parser.lexer.JavaTokenTypes;
 import bluej.parser.lexer.LocatableToken;
 import bluej.pkgmgr.JavadocResolver;
+import bluej.utility.JavaReflective;
 import bluej.utility.JavaUtils;
 
 /**
@@ -78,7 +81,22 @@ public class ParseUtils
         if (suggests != null) {
             GenTypeClass exprType = suggests.getSuggestionType().asClass();
             if (exprType == null) {
-                return null;
+                final JavaType arrayComponent = suggests.getSuggestionType().getArrayComponent();
+                if (arrayComponent != null && arrayComponent.isPrimitive()) {
+                    // Array of primitives:
+                    // For code completion purposes, consider this as an array of object with a tweaked name:
+                    exprType = new GenTypeArrayClass(new ParsedArrayReflective(new JavaReflective(Object.class),"Object")
+                    {
+                        public String getSimpleName()
+                        {
+                            return arrayComponent.toString() + "[]";
+                        }
+                        
+                    }, arrayComponent);
+                }
+                else {
+                    return null;
+                }
             }
             
             GenTypeClass accessType = suggests.getAccessType();
@@ -92,6 +110,7 @@ public class ParseUtils
 
             LinkedList<GenTypeClass> typeQueue = new LinkedList<GenTypeClass>();
             typeQueue.add(exprType);
+            GenTypeClass origExprType = exprType;
             
             while (! typeQueue.isEmpty()) {
                 exprType = typeQueue.removeFirst();
@@ -103,21 +122,22 @@ public class ParseUtils
                 Map<String,GenTypeParameter> typeArgs = exprType.getMap();
 
                 for (String name : methods.keySet()) {
-                    if (name.startsWith(prefix)) {
-                        Set<MethodReflective> mset = methods.get(name);
-                        for (MethodReflective method : mset) {
-                            if (accessReflective != null &&
-                                    ! JavaUtils.checkMemberAccess(method.getDeclaringType(),
-                                    suggests.getAccessType().getReflective(),
-                                    method.getModifiers(), suggests.isStatic())) {
-                                continue;
-                            }
-                            MethodCompletion completion = new MethodCompletion(method,
-                                    typeArgs, javadocResolver);
-                            String sig = completion.getDisplayName();
-                            if (contentSigs.add(sig)) {
-                                completions.add(new MethodCompletion(method, typeArgs, javadocResolver));
-                            }
+                    Set<MethodReflective> mset = methods.get(name);
+                    for (MethodReflective method : mset) {
+                        if (accessReflective != null &&
+                                ! JavaUtils.checkMemberAccess(method.getDeclaringType(),
+                                        origExprType,
+                                        suggests.getAccessType().getReflective(),
+                                        method.getModifiers(), suggests.isStatic())) {
+                            continue;
+                        }
+                        Map<String,GenTypeParameter> declMap =
+                            exprType.mapToSuper(method.getDeclaringType().getName()).getMap();
+                        MethodCompletion completion = new MethodCompletion(method,
+                                declMap, javadocResolver);
+                        String sig = completion.getDisplayName();
+                        if (contentSigs.add(sig)) {
+                            completions.add(new MethodCompletion(method, typeArgs, javadocResolver));
                         }
                     }
                 }
@@ -335,7 +355,7 @@ public class ParseUtils
                     taList.add(new WildcardExtendsEntity(taEnt));
                 }
                 else {
-                    taList.add(new UnboundedWildcardEntity());
+                    taList.add(new UnboundedWildcardEntity(resolver));
                     i.previous();
                 }
             }

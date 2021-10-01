@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -104,7 +104,6 @@ public class BProject
     {
         projectId.getBluejProject().restartVM();
     }
-            
     
     /**
      * Create and return a new package with the given fully qualified name.
@@ -119,24 +118,29 @@ public class BProject
     {
         Project bluejProject = projectId.getBluejProject();
 
-        int risul=bluejProject.newPackage(fullyQualifiedName);
+        int result = bluejProject.newPackage(fullyQualifiedName);
 
-        if ( risul == Project.NEW_PACKAGE_BAD_NAME )
+        if ( result == Project.NEW_PACKAGE_BAD_NAME ) {
             throw new IllegalArgumentException("newPackage: Bad package name '"+fullyQualifiedName+"'");
+        }
             
-        if ( risul == Project.NEW_PACKAGE_EXIST )
+        if ( result == Project.NEW_PACKAGE_EXIST ) {
             throw new PackageAlreadyExistsException("newPackage: Package '"+fullyQualifiedName+"' already exists");
+        }
 
-        if ( risul == Project.NEW_PACKAGE_NO_PARENT )
+        if ( result == Project.NEW_PACKAGE_NO_PARENT ) {
             throw new IllegalStateException("newPackage: Package '"+fullyQualifiedName+"' has no parent package");
+        }
 
-        if ( risul != Project.NEW_PACKAGE_DONE )
-            throw new IllegalStateException("newPackage: Unknown result code="+risul);
+        if ( result != Project.NEW_PACKAGE_DONE ) {
+            throw new IllegalStateException("newPackage: Unknown result code="+result);
+        }
 
         Package pkg = bluejProject.getPackage(fullyQualifiedName);
 
-        if ( pkg == null ) 
+        if ( pkg == null ) {
             throw new Error("newPackage: getPackage '"+fullyQualifiedName+"' returned null");
+        }
 
         Package reloadPkg = pkg;
         for(int index=0; index<10 && reloadPkg != null; index++) {
@@ -220,5 +224,11 @@ public class BProject
     {
         Project thisProject = projectId.getBluejProject();
         thisProject.getDebugger().addDebuggerListener(listener);
+    }
+    
+    void clearObjectBench() throws ProjectNotOpenException
+    {
+        Project thisProject = projectId.getBluejProject();
+        thisProject.clearObjectBenches();
     }
 }

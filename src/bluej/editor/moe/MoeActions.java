@@ -66,8 +66,11 @@ import javax.swing.undo.CannotRedoException;
 import javax.swing.undo.CannotUndoException;
 
 import bluej.Config;
+import bluej.debugger.gentype.JavaType;
 import bluej.editor.moe.MoeIndent.AutoIndentInformation;
+import bluej.parser.entity.JavaEntity;
 import bluej.parser.nodes.CommentNode;
+import bluej.parser.nodes.MethodNode;
 import bluej.parser.nodes.ParsedNode;
 import bluej.parser.nodes.NodeTree.NodeAndPosition;
 import bluej.prefmgr.PrefMgr;
@@ -797,6 +800,88 @@ public final class MoeActions
             editor.undoManager.beginCompoundEdit();
             insertTemplate(getTextComponent(e), editor, "method");
             editor.undoManager.endCompoundEdit();
+        }
+    }
+    
+    class AddJavadocAction extends MoeAbstractAction
+    {
+        public AddJavadocAction()
+        {
+            super ("add-javadoc");
+        }
+
+        public void actionPerformed(ActionEvent e)
+        {
+            MoeEditor editor = getEditor(e);
+            //this method should not be actioned if the editor is not displaying source code
+            if (!editor.containsSourceCode()){
+                return;
+            }
+            int caretPos = editor.getCaretPosition();
+            NodeAndPosition<ParsedNode> node = editor.getParsedNode().findNodeAt(caretPos, 0);
+            while (node != null && node.getNode().getNodeType() != ParsedNode.NODETYPE_METHODDEF) {
+                node = node.getNode().findNodeAt(caretPos, node.getPosition());
+            }
+            if (node == null || !(node.getNode() instanceof MethodNode)) {
+                editor.writeMessage(Config.getString("editor.addjavadoc.notAMethod"));
+            } else {
+                MethodNode methodNode = ((MethodNode)node.getNode());
+                
+                boolean hasJavadocComment = false;
+                Iterator<NodeAndPosition<ParsedNode>> it = methodNode.getChildren(node.getPosition());
+                while (it.hasNext()) {
+                    ParsedNode subNode = it.next().getNode();
+                    if (subNode instanceof CommentNode) {
+                        hasJavadocComment = hasJavadocComment || ((CommentNode)subNode).isJavadocComment();
+                    }
+                }
+                
+                if (hasJavadocComment) {
+                    editor.writeMessage(Config.getString("editor.addjavadoc.hasJavadoc"));
+                } else {
+                    StringBuilder indent = new StringBuilder();
+                    int column = editor.getLineColumnFromOffset(node.getPosition()).getColumn();
+                    for (int i = 0;i < column-1;i++)
+                        indent.append(' ');
+                    StringBuilder newComment = new StringBuilder();
+                    newComment.append("/**\n");
+                    
+                    JavaEntity retTypeEntity = methodNode.getReturnType();
+                    
+                    if (retTypeEntity == null) {
+                        // It's a constructor:
+                        newComment.append(indent).append(" * " + methodNode.getName() + " " +
+                                Config.getString("editor.addjavadoc.constructor") + "\n");
+                    } else {
+                        // It's a method:
+                        newComment.append(indent).append(" * " +
+                                Config.getString("editor.addjavadoc.method") + " " +
+                                methodNode.getName() + "\n");
+                    }
+                    newComment.append(indent).append(" *\n");
+
+                    for (String s: methodNode.getParamNames()) {
+                        newComment.append(indent).append(" * @param " + s + " " +
+                                Config.getString("editor.addjavadoc.parameter") + "\n");
+                    }
+                    
+                    if (retTypeEntity != null) {
+                        JavaType retType = retTypeEntity.resolveAsType().getType();
+                        if (retType != null && !retType.isVoid()) {
+                            newComment.append(indent).append(" * @return " +
+                                    Config.getString("editor.addjavadoc.returnValue") + "\n");
+                        }
+                    }
+                    
+                    newComment.append(indent).append(" */\n").append(indent);
+                    
+                    editor.undoManager.beginCompoundEdit();
+                    editor.setCaretPosition(node.getPosition());
+                    editor.currentTextPane.replaceSelection(newComment.toString());
+                    editor.setCaretPosition(caretPos + newComment.length());
+                    editor.undoManager.endCompoundEdit();
+                }
+            }
         }
     }
 
@@ -1950,13 +2035,13 @@ public final class MoeActions
     }
 
     /**
-     * Perform an action on all selected lines.
+     * Perform an action on all selected lines in the source document.
      */
     private void blockAction(MoeEditor editor, LineAction lineAction)
     {
         editor.setCaretActive(false);
         
-        Caret caret = editor.currentTextPane.getCaret();
+        Caret caret = editor.getSourcePane().getCaret();
         int selectionStart = caret.getMark();
         int selectionEnd = caret.getDot();
         if (selectionStart > selectionEnd) {
@@ -2031,6 +2116,7 @@ public final class MoeActions
                 new IndentBlockAction(),
                 new DeindentBlockAction(), 
                 new InsertMethodAction(), 
+                new AddJavadocAction(),
                 new IndentAction(),
                 new DeIndentAction(),
                 new NewLineAction(),

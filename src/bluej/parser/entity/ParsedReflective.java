@@ -97,6 +97,19 @@ public class ParsedReflective extends Reflective
                 }
             }
         }
+        
+        if (! isInterface()) {
+            if (rval.isEmpty()) {
+                // All classes extend Object implicitly
+                TypeEntity tent = pnode.resolveQualifiedClass("java.lang.Object");
+                if (tent != null) {
+                    GenTypeClass ct = tent.getType().asClass();
+                    if (ct != null) {
+                        rval.add(ct);
+                    }
+                }
+            }
+        }
 
         for (JavaEntity etype : pnode.getImplementedTypes()) {
             TypeEntity tent = etype.resolveAsType();
@@ -108,16 +121,6 @@ public class ParsedReflective extends Reflective
             }
         }
         
-        if (rval.size() == 0 && !isInterface()) {
-            TypeEntity tent = pnode.resolveQualifiedClass("java.lang.Object");
-            if (tent != null) {
-                GenTypeClass ct = tent.getType().asClass();
-                if (ct != null) {
-                    rval.add(ct);
-                }
-            }
-        }
-
         return rval;
     }
 
@@ -138,7 +141,7 @@ public class ParsedReflective extends Reflective
             }
         }
         
-        if (rlist.isEmpty()) {
+        if (rlist.isEmpty() && ! isInterface()) {
             // Object is always a supertype
             TypeEntity objEntity = pnode.resolveQualifiedClass("java.lang.Object");
             if (objEntity != null) {
@@ -187,7 +190,20 @@ public class ParsedReflective extends Reflective
     @Override
     public boolean isAssignableFrom(Reflective r)
     {
-        // TODO Auto-generated method stub
+        Set<String> done = new HashSet<String>();
+        LinkedList<Reflective> todo = new LinkedList<Reflective>();
+        
+        while (r != null) {
+            String rname = r.getName();
+            if (rname.equals(getName())) {
+                return true;
+            }
+            if (done.add(r.getName())) {
+                todo.addAll(r.getSuperTypesR());
+            }
+            r = todo.poll();
+        }
+        
         return false;
     }
 
@@ -267,7 +283,7 @@ public class ParsedReflective extends Reflective
     }
     
     @Override
-    public List<GenTypeClass> getInners()
+    public List<Reflective> getInners()
     {
         // TODO fix
         return Collections.emptyList();

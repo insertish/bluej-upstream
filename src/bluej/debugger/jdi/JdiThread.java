@@ -27,7 +27,6 @@ import bluej.Config;
 import bluej.debugger.*;
 import bluej.debugger.gentype.JavaType;
 import bluej.utility.Debug;
-import bluej.utility.JavaNames;
 
 import com.sun.jdi.*;
 import com.sun.jdi.request.EventRequestManager;
@@ -81,8 +80,17 @@ class JdiThread extends DebuggerThread
         }
     }
 
-    // the reference to the remote thread
+    /** the reference to the remote thread */
     private ThreadReference rt;
+    
+    /** We track suspension status internally */
+    private boolean isSuspended;
+    
+    /*
+     * Note that we have to track suspension status internally, because JDI will happily
+     * tell us that a thread is suspended when, in fact, it is suspended only because of some
+     * VM event which suspends every thread (ThreadStart / ThreadDeath).
+     */
     
     // stores a stack frame that was selected for this
     // thread (selection is done for debugging)
@@ -185,12 +193,7 @@ class JdiThread extends DebuggerThread
      */
     public boolean isSuspended()
     {
-        try {
-            return rt.isSuspended();
-        }
-        catch (VMDisconnectedException vmde) {
-            return false;
-        }
+        return isSuspended;
     }
 
     /** 
@@ -249,29 +252,39 @@ class JdiThread extends DebuggerThread
     public boolean isKnownSystemThread()
     {
         // A finished thread will have a null thread group.
-        ThreadGroupReference tgr = rt.threadGroup();
-        if(tgr == null || ! tgr.name().equals(MAIN_THREADGROUP))
-            return true;
+        try {
+            ThreadGroupReference tgr = rt.threadGroup();
+            if(tgr == null || ! tgr.name().equals(MAIN_THREADGROUP)) {
+                return true;
+            }
 
-        String name = rt.name();
-        if(name.startsWith("AWT-") ||
-           name.equals("DestroyJavaVM") ||
-           name.equals("BlueJ worker thread") ||
-           name.equals("Timer Queue") ||
-           name.equals("Screen Updater") ||
-           name.startsWith("SunToolkit.") ||
-           name.startsWith("Native Carbon") ||
-           name.equals("Java2D Disposer"))
-            return true;
+            String name = rt.name();
+            if(name.startsWith("AWT-") ||
+                    name.equals("DestroyJavaVM") ||
+                    name.equals("BlueJ worker thread") ||
+                    name.equals("Timer Queue") ||
+                    name.equals("Screen Updater") ||
+                    name.startsWith("SunToolkit.") ||
+                    name.startsWith("Native Carbon") ||
+                    name.equals("Java2D Disposer")) {
+                return true;
+            }
 
-        return false;
+            return false;
+        }
+        catch (VMDisconnectedException vmde) {
+            return false;
+        }
+        catch (ObjectCollectedException oce) {
+            return true;
+        }
     }
 
     /**
      * Get strings showing the current stack frames. Ignore everything
      * including the __SHELL class and below.
      *
-     * The thread must be suspended to do this. Otherwise an empty list
+     * <p>The thread must be suspended to do this. Otherwise an empty list
      * is returned.
      *
      * @return  A List of SourceLocations
@@ -285,12 +298,9 @@ class JdiThread extends DebuggerThread
      * Get strings showing the current stack frames. Ignore everything
      * including the __SHELL class and below.
      *
-     * The thread must be suspended to do this. Otherwise an empty list
+     * <p>The thread must be suspended to do this. Otherwise an empty list
      * is returned.
      * 
-     * If the fileName for a source location is unavailable, the location
-     * will not be added to the stack.
-     *
      * @return  A List of SourceLocations
      */
     public static List<SourceLocation> getStack(ThreadReference thr)
@@ -305,23 +315,11 @@ class JdiThread extends DebuggerThread
                     Location loc = f.location();
                     String className = loc.declaringType().name();
                     
-                    // ensure that the bluej.runtime.ExecServer frames are not shown
-                    if(className.startsWith("bluej.runtime"))
-                        break;
-                    
-                    // must getBase on classname so that we find __SHELL
-                    // classes in other packages ie a.b.__SHELL
-					// if it is a __SHELL class, stop processing the stack
-                    if(JavaNames.getBase(className).startsWith("__SHELL"))
-                        break;
-
                     String fileName = null;
                     try {
                         fileName = loc.sourceName();
                     }
-                    catch(AbsentInformationException e) {
-                        continue;
-                    }
+                    catch(AbsentInformationException e) { }
                     String methodName = loc.method().name();
                     int lineNumber = loc.lineNumber();
 
@@ -482,11 +480,14 @@ class JdiThread extends DebuggerThread
     /**
      * Halt this thread.
      */
-    public void halt()
+    public synchronized void halt()
     {
         try {
-            rt.suspend();
-            debugger.emitThreadHaltEvent(this);
+            if (! isSuspended) {
+                rt.suspend();
+                debugger.emitThreadHaltEvent(this);
+                isSuspended = true;
+            }
         }
         catch (VMDisconnectedException vmde) {}
     }
@@ -494,18 +495,27 @@ class JdiThread extends DebuggerThread
     /**
      * Continue a previously halted thread.
      */
-    public void cont()
+    public synchronized void cont()
     {
         try {
-            // Note we must emit the even before actually resuming the thread; otherwise, the
-            // thread may finish (resulting in a thread death event) before the continue event
-            // is received.
-            debugger.emitThreadResumedEvent(this);
-            rt.resume();
+            if (isSuspended) {
+                debugger.emitThreadResumedEvent(this);
+                rt.resume();
+                isSuspended = false;
+            }
         }
         catch (VMDisconnectedException vmde) {}
     }
 
+    /**
+     * Inform the JdiThread that the underlying thread has been suspended due to
+     * (for example) hitting a breakpoint.
+     */
+    public void stopped()
+    {
+        isSuspended = true;
+    }
+    
     /**
      * Make this thread step a single line.
      */
@@ -539,6 +549,9 @@ class JdiThread extends DebuggerThread
         request.putProperty(VMEventHandler.DONT_RESUME, "yes");
         request.enable();
 
+        synchronized (this) {
+            isSuspended = false;
+        }
         rt.resume();
     }
 
@@ -587,5 +600,14 @@ class JdiThread extends DebuggerThread
     	{
     	    return "collected";
     	}
+    }
+    
+    public boolean sameThread(DebuggerThread dt)
+    {
+        if (dt != null && dt instanceof JdiThread) {
+            return getThreadReference().uniqueID() == ((JdiThread)dt).getThreadReference().uniqueID();
+        } else {
+            return false;
+        }
     }
 }

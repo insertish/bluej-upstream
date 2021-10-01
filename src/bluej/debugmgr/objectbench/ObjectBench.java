@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -37,13 +37,14 @@ import bluej.debugmgr.NamedValue;
 import bluej.debugmgr.ValueCollection;
 import bluej.pkgmgr.PkgMgrFrame;
 import bluej.testmgr.record.InvokerRecord;
+import bluej.utility.JavaNames;
 
 /**
- * The object responsible for the panel that displays objects
+ * The class responsible for the panel that displays objects
  * at the bottom of the package manager.
+ * 
  * @author  Michael Cahill
  * @author  Andrew Patterson
- * @version $Id: ObjectBench.java 7952 2010-07-29 07:17:55Z davmac $
  */
 public class ObjectBench extends JPanel implements ValueCollection,
     FocusListener, KeyListener, MouseListener, ObjectBenchInterface
@@ -58,7 +59,6 @@ public class ObjectBench extends JPanel implements ValueCollection,
 	
     // All invocations done since our last reset.
     private List<InvokerRecord> invokerRecords;
-
    
     /**
      * Construct an object bench which is used to hold
@@ -81,10 +81,14 @@ public class ObjectBench extends JPanel implements ValueCollection,
 
         String newname = wrapper.getName();
         int count = 1;
+        
+        if (JavaNames.isJavaKeyword(newname)) {
+            newname = "x" + newname;
+        }
 
         while(hasObject(newname)) {
             count++;
-            newname = wrapper.getName() + "_" + count;
+            newname = wrapper.getName() + count;
         }
         wrapper.setName(newname);
 

@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -241,6 +241,37 @@ public class TextParserTest extends TestCase
         var = declaredVars.get(0);
         assertEquals("iaa", var.getName());
         assertEquals("int[][]", var.getDeclaredType().toString());
+        
+        // Simple reference-type array with no initializer
+        tp.parseCommand("String [] a;");
+        List<DeclaredVar> vars = tp.getDeclaredVars();
+        assertEquals(1, vars.size());
+        assertEquals("java.lang.String[]", vars.get(0).getDeclaredType().toString());
+        
+        // Array with array declarators after the name instead of before it
+        tp.parseCommand("String a[];");
+        vars = tp.getDeclaredVars();
+        assertEquals(1, vars.size());
+        assertEquals("java.lang.String[]", vars.get(0).getDeclaredType().toString());
+        
+        // Multiple declaration
+        tp.parseCommand("int a, b[], c, d[][], e[];");
+        vars = tp.getDeclaredVars();
+        assertEquals(5, vars.size());
+        assertEquals("int", vars.get(0).getDeclaredType().toString());
+        assertEquals("int[]", vars.get(1).getDeclaredType().toString());
+        assertEquals("int", vars.get(2).getDeclaredType().toString());
+        assertEquals("int[][]", vars.get(3).getDeclaredType().toString());
+        assertEquals("int[]", vars.get(4).getDeclaredType().toString());
+        
+        // Multiple declarations 2
+        tp.parseCommand("int [] a, b[], c, d[][];");
+        vars = tp.getDeclaredVars();
+        assertEquals(4, vars.size());
+        assertEquals("int[]", vars.get(0).getDeclaredType().toString());
+        assertEquals("int[][]", vars.get(1).getDeclaredType().toString());
+        assertEquals("int[]", vars.get(2).getDeclaredType().toString());
+        assertEquals("int[][][]", vars.get(3).getDeclaredType().toString());
     }
     
     public void testAnonymousInnerClass()
@@ -397,12 +428,12 @@ public class TextParserTest extends TestCase
         assertEquals("int", r);
         r = tp.parseCommand("~4l");
         assertEquals("long", r);
-        r = tp.parseCommand("4 & 5");
-        assertEquals("int", r);
-        r = tp.parseCommand("4 | 5");
-        assertEquals("int", r);
-        r = tp.parseCommand("4 ^ 5"); // xor
-        assertEquals("int", r);
+        r = tp.parseCommand("4l & 5");
+        assertEquals("long", r);
+        r = tp.parseCommand("4l | 5");
+        assertEquals("long", r);
+        r = tp.parseCommand("4l ^ 5"); // xor
+        assertEquals("long", r);
     }
     
     public void testOperators2()
@@ -414,7 +445,12 @@ public class TextParserTest extends TestCase
         r = tp.parseCommand("true ? \"a string\" : \"b string\"");
         assertEquals("java.lang.String", r);
         r = tp.parseCommand("true ? \"a string\" : 4");
-        assertEquals("java.lang.Object", r);
+        // The result in this case is really:
+        //   java.lang.Object & java.io.Serializable & java.lang.Comparable<? extends [recursive]>
+        boolean correct = r.equals("java.lang.Object");
+        correct |= r.equals("java.io.Serializable");
+        correct |= r.equals("java.lang.Comparable<? extends java.lang.Comparable<?>>");
+        assertTrue(correct);
         
         // If one side is a byte and the other is a constant which could be narrowed to
         // a byte, then the result type should be byte:

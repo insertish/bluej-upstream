@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -33,6 +33,7 @@ import junit.framework.TestCase;
 import bluej.debugger.gentype.FieldReflective;
 import bluej.debugger.gentype.GenTypeClass;
 import bluej.debugger.gentype.JavaType;
+import bluej.debugger.gentype.MethodReflective;
 import bluej.debugger.gentype.Reflective;
 import bluej.editor.moe.MoeSyntaxDocument;
 import bluej.parser.entity.ClassLoaderResolver;
@@ -42,6 +43,7 @@ import bluej.parser.entity.PackageResolver;
 import bluej.parser.entity.TypeEntity;
 import bluej.parser.lexer.LocatableToken;
 import bluej.parser.nodes.ParsedCUNode;
+import bluej.pkgmgr.JavadocResolver;
 
 public class CompletionTest extends TestCase
 {
@@ -627,6 +629,79 @@ public class CompletionTest extends TestCase
         assertNotNull(suggests);
         assertEquals("A", suggests.getSuggestionType().toString());
         assertEquals("s", suggests.getSuggestionToken().getText());
+    }
+    
+    public void testCompletionOnGenericType() throws Exception
+    {
+        String aClassSrc =
+            "class A {\n" +   // 0 - 10 
+            "  public void m() {\n" +  // 10 - 30
+            "    java.util.List<?> l = new java.util.LinkedList<Object>();\n" + // 30 - 92
+            "    l.size();\n" + // 92 -  98  =  l. 
+            "  }\n" +
+            "}\n";
+        
+        PlainDocument doc = new PlainDocument();
+        doc.insertString(0, aClassSrc, null);
+        ParsedCUNode aNode = cuForSource(aClassSrc, "");
+        resolver.addCompilationUnit("", aNode);
+        
+        CodeSuggestions suggests = aNode.getExpressionType(98, doc);
+        assertNotNull(suggests);
+        assertEquals("java.util.List<?>", suggests.getSuggestionType().toString());
+        
+        AssistContent [] assists = ParseUtils.getPossibleCompletions(suggests, "", new JavadocResolver() {
+            public void getJavadoc(MethodReflective method)
+            {
+                // We want to check that the return type has an erased type.
+                assertNotNull(method.getReturnType().getErasedType());
+            }
+        });
+        
+        for (AssistContent assist : assists) {
+            assist.getJavadoc();
+        }
+    }
+    
+    /**
+     * Regression test for bug #288
+     */
+    public void testInterNewCompletion() throws Exception
+    {
+        String aClassSrc =
+            "class A {\n" +   // 0 - 10 
+            "  public void m() {\n" +  // 10 - 30
+            "    callMe(new Runnable() { });\n" +  // 30 -    53 <- Runnable[HERE]()
+            "  }\n" +
+            "}\n";
+        
+        PlainDocument doc = new PlainDocument();
+        doc.insertString(0, aClassSrc, null);
+        ParsedCUNode aNode = cuForSource(aClassSrc, "");
+        resolver.addCompilationUnit("", aNode);
+        
+        CodeSuggestions suggests = aNode.getExpressionType(53, doc);
+        assertNotNull(suggests);
+    }
+    
+    public void testPartialExpressionCompletion() throws Exception
+    {
+        String aClassSrc =
+            "class A {\n" +             // 0 - 10
+            "  public void g() {\n" +   // 10 - 30
+            "    String s = \"\";\n" +  // 30 - 49
+            "    s.l\n" +               //   s.l <---  56 
+            "    s.length();\n" +
+            "  }\n" +
+            "}\n";
+        
+        PlainDocument doc = new PlainDocument();
+        doc.insertString(0, aClassSrc, null);
+        ParsedCUNode aNode = cuForSource(aClassSrc, "");
+        resolver.addCompilationUnit("", aNode);
+        
+        CodeSuggestions suggests = aNode.getExpressionType(56, doc);
+        assertNotNull(suggests);
     }
     
     // Yet to do:

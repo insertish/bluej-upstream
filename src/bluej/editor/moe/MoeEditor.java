@@ -86,7 +86,6 @@ import javax.swing.event.HyperlinkListener;
 import javax.swing.text.AbstractDocument;
 import javax.swing.text.BadLocationException;
 import javax.swing.text.Caret;
-import javax.swing.text.Document;
 import javax.swing.text.EditorKit;
 import javax.swing.text.Element;
 import javax.swing.text.Highlighter;
@@ -123,7 +122,7 @@ import bluej.utility.Utility;
  * Moe is the editor of the BlueJ environment. This class is the main class of
  * this editor and implements the top-level functionality.
  * 
- * MoeEditor implements the Editor interface, which defines the interface to the
+ * <p>MoeEditor implements the Editor interface, which defines the interface to the
  * rest of the BlueJ system.
  * 
  * @author Michael Kolling
@@ -540,7 +539,7 @@ implements bluej.editor.Editor, BlueJEventListener, HyperlinkListener, DocumentL
     {
         switchToSourceView();
 
-        Element line = getLine(lineNumber);
+        Element line = getSourceLine(lineNumber);
         int pos = line.getStartOffset();
 
         if (setStepMark) {
@@ -578,14 +577,14 @@ implements bluej.editor.Editor, BlueJEventListener, HyperlinkListener, DocumentL
      */
     public void setSelection(int lineNumber, int columnNumber, int len)
     {
-        Element line = getLine(lineNumber);
+        Element line = getSourceLine(lineNumber);
 
         sourcePane.select(line.getStartOffset() + columnNumber - 1, 
                 line.getStartOffset() + columnNumber + len - 1);
     }
 
     /**
-     * Select a specified area of text.
+     * Select a specified area of text in the source pane.
      * 
      * @param lineNumber1  The new selection value
      * @param columnNumber1  The new selection value
@@ -598,8 +597,8 @@ implements bluej.editor.Editor, BlueJEventListener, HyperlinkListener, DocumentL
          * if (lineNumber2 < lineNumber1) return; if (lineNumber2 == lineNumber1 &&
          * (columnNumber2 < columnNumber1)) return;
          */
-        Element line1 = getLine(lineNumber1);
-        Element line2 = getLine(lineNumber2);
+        Element line1 = getSourceLine(lineNumber1);
+        Element line2 = getSourceLine(lineNumber2);
 
         sourcePane.select(line1.getStartOffset() + columnNumber1 - 1, line2.getStartOffset() + columnNumber2 - 1);
     }
@@ -1300,7 +1299,7 @@ implements bluej.editor.Editor, BlueJEventListener, HyperlinkListener, DocumentL
         setVisible(false);
         if (watcher != null) {
         	//setting the naviview visible property when an editor is closed
-        	watcher.setProperty(watcher.NAVIVIEW_EXPANDED_PROPERTY, String.valueOf(dividerPanel.isExpanded()));
+        	watcher.setProperty(EditorWatcher.NAVIVIEW_EXPANDED_PROPERTY, String.valueOf(dividerPanel.isExpanded()));
             watcher.closeEvent(this);
         }
     }
@@ -1361,15 +1360,14 @@ implements bluej.editor.Editor, BlueJEventListener, HyperlinkListener, DocumentL
     // --------------------------------------------------------------------
 
     /**
-     * Implementation of "replace" user function. Replace adds extra
-     * functionality to that of a find dialog, as well as altered behaviour. It
-     * can remain open for multiple functions.
+     * Replaces the selected text with the replaceString; moves the caret to the 
+     * position it was in before the replace was requested and writes a message
      */
     public void replace(String replaceString)
     {
         int caretPos = sourcePane.getCaretPosition();
         String searchString=finder.getSearchString();
-        if (getSourcePane().getSelectedText()==null|| getCurrentTextPane().getSelectedText().length()<=0){
+        if (getSourcePane().getSelectedText()==null|| getSourcePane().getSelectedText().length()<=0){
             //in case the selection has been lost due to moving it in the editor
             if (finder.getSearchString()!=null && finder.getSearchString().length()>0)
                 searchString=finder.getSearchTextfield();
@@ -1403,11 +1401,13 @@ implements bluej.editor.Editor, BlueJEventListener, HyperlinkListener, DocumentL
         //if it is not open, it should do a single find forward or backwards
         if (finder.isVisible()){
             finder.setSearchString(selection);
-            if (backwards)
+            if (backwards) {
                 finder.getPrev();
-            else
+            }
+            else {
                 finder.getNext();
-        }else {
+            }
+        } else {
             removeSearchHighlights();
             removeSelection(currentTextPane);
             findString(selection, backwards, !finder.getMatchCase(), true);
@@ -1438,22 +1438,29 @@ implements bluej.editor.Editor, BlueJEventListener, HyperlinkListener, DocumentL
 
         StringBuffer msg = new StringBuffer(Config.getString("editor.find.find.label") + " ");
         msg.append(backward ? Config.getString("editor.find.backward") : Config.getString("editor.find.forward"));
-        if (ignoreCase || wrap)
+        if (ignoreCase || wrap) {
             msg.append(" (");
-        if (ignoreCase)
+        }
+        if (ignoreCase) {
             msg.append(Config.getString("editor.find.ignoreCase").toLowerCase() + ", ");
-        if (wrap) 
+        }
+        if (wrap) { 
             msg.append(Config.getString("editor.find.wrapAround").toLowerCase() + ", ");
-        if (ignoreCase || wrap) 
+        }
+        if (ignoreCase || wrap) { 
             msg.replace(msg.length() - 2, msg.length(), "): ");
-        else 
+        }
+        else { 
             msg.append(": ");
+        }
 
         msg.append(s);
-        if (found)
+        if (found) {
             info.message(msg.toString());
-        else
+        }
+        else {
             info.warning(msg.toString(), Config.getString("editor.info.notFound"));
+        }
 
         return found;
     }
@@ -1461,7 +1468,7 @@ implements bluej.editor.Editor, BlueJEventListener, HyperlinkListener, DocumentL
     // --------------------------------------------------------------------
 
     /**
-     * doFind - search for and select the given search string forwards from
+     * Search for and select the given search string forwards from
      * the current caret position. Returns false if not found.
      */
     boolean doFind(String s, boolean ignoreCase, boolean wrap)
@@ -1514,13 +1521,13 @@ implements bluej.editor.Editor, BlueJEventListener, HyperlinkListener, DocumentL
             }
         }
         catch (BadLocationException ex) {
-            Debug.message("error in editor find operation");
+            Debug.reportError("Error in editor find operation", ex);
         }
         return found;
     }
 
     /**
-     * doFindBackward - do a find backwards without visible feedback. Returns
+     * Do a find backwards without visible feedback. Returns
      * false if not found.
      */
     boolean doFindBackward(String s, boolean ignoreCase, boolean wrap)
@@ -1570,8 +1577,7 @@ implements bluej.editor.Editor, BlueJEventListener, HyperlinkListener, DocumentL
             }
         }
         catch (BadLocationException ex) {
-            Debug.reportError("error in editor find operation");
-            ex.printStackTrace();
+            Debug.reportError("Error in editor find operation", ex);
         }
         return found;
     }
@@ -1934,7 +1940,7 @@ implements bluej.editor.Editor, BlueJEventListener, HyperlinkListener, DocumentL
     // --------------------------------------------------------------------
     
     /**
-     * Switch on the source view (it it isn't showing already).
+     * Switch on the source view (if it isn't showing already).
      */
     private void switchToSourceView()
     {
@@ -2312,26 +2318,27 @@ implements bluej.editor.Editor, BlueJEventListener, HyperlinkListener, DocumentL
     }
 
     /**
-     * Check weather a position has a breakpoint set
+     * Check whether a position in the current document has a breakpoint set
+     * (should only be called after a check that the current document is the source doc)
      */
     private boolean positionHasBreakpoint(int pos)
     {
-        Element line = getLineAt(pos);
+        Element line = getSourceLine(getLineNumberAt(pos));
         return Boolean.TRUE.equals(line.getAttributes().getAttribute(MoeSyntaxView.BREAKPOINT));
     }
     
     /**
-     * Check weather a line has a breakpoint set
+     * Check whether a line in the source document has a breakpoint set
      */
     private boolean lineHasBreakpoint(int lineNo)
     {
-        Element line = getLine(lineNo);
+        Element line = getSourceLine(lineNo);
         return (Boolean.TRUE.equals(line.getAttributes().getAttribute(MoeSyntaxView.BREAKPOINT)));
     }
 
     /**
      * Try to set or remove a breakpoint (depending on the parameter) at the
-     * given position. Informs the watcher.
+     * given position in the source document. Informs the watcher.
      */
     private void setUnsetBreakpoint(int pos, boolean set)
     {
@@ -2399,7 +2406,7 @@ implements bluej.editor.Editor, BlueJEventListener, HyperlinkListener, DocumentL
 
     // --------------------------------------------------------------------
     /**
-     * return a boolean representing whether in source editing view
+     * Return a boolean representing whether in source editing view
      */
     private boolean viewingCode()
     {
@@ -2408,16 +2415,16 @@ implements bluej.editor.Editor, BlueJEventListener, HyperlinkListener, DocumentL
 
     // --------------------------------------------------------------------
     /**
-     * Find and return a line by line number
+     * Find and return a line (by line number) in the source document
      */
-    private Element getLine(int lineNo)
+    private Element getSourceLine(int lineNo)
     {
-        return document.getDefaultRootElement().getElement(lineNo - 1);
+        return sourceDocument.getDefaultRootElement().getElement(lineNo - 1);
     }
 
     // --------------------------------------------------------------------
     /**
-     * Find and return a line by text position
+     * Find and return a line by text position in the current document
      */
     private Element getLineAt(int pos)
     {
@@ -2426,16 +2433,16 @@ implements bluej.editor.Editor, BlueJEventListener, HyperlinkListener, DocumentL
 
     // --------------------------------------------------------------------
     /**
-     * Find and return a position in a line.
+     * Find and return a position in the source document.
      */
     private int getPositionInLine(int lineNo)
     {
-        return getLine(lineNo).getStartOffset();
+        return getSourceLine(lineNo).getStartOffset();
     }
 
     // --------------------------------------------------------------------
     /**
-     * Return the number of the line containing position 'pos'.
+     * Return the number of the line containing position 'pos' in the source document.
      */
     private int getLineNumberAt(int pos)
     {
@@ -2610,7 +2617,7 @@ implements bluej.editor.Editor, BlueJEventListener, HyperlinkListener, DocumentL
     }
 
     /**
-     * returns the position of the matching bracket for the source pane's
+     * Returns the position of the matching bracket for the source pane's
      * current caret position. Returns -1 if not found or not valid/appropriate
      * 
      * @return the int representing bracket position
@@ -3278,8 +3285,10 @@ implements bluej.editor.Editor, BlueJEventListener, HyperlinkListener, DocumentL
     }
 
     /**
-     * Sets the find panel to be visible and if there is a selection it starts a automatic
-     * find of what was in selected in the text (or uses last search if not). If the interface
+     * Sets the find panel to be visible and if there is a selection/or previous search 
+     * it starts a automatic find of what was selected in the text/or previous search. If 
+     * it is the source pane then the replace button is enabled; if it is the interface pane 
+     * then the replace button and replace panel are set to disabled and invisible
      */
     public void initFindPanel()
     {
@@ -3325,15 +3334,6 @@ implements bluej.editor.Editor, BlueJEventListener, HyperlinkListener, DocumentL
     {
         return currentTextPane;
     }    
-    
-    /**
-     * Get the currently displaye document - either the source document,
-     * or the documentation document (HTML).
-     */
-    public Document getDisplayedDocument()
-    {
-        return document;
-    }
     
     /**
      * Get the source document that this editor is editing.

@@ -125,33 +125,33 @@ public final class Package extends Graph
     /** error code */
     public static final int CREATE_ERROR = 5;
 
-    /*
+    /**
      * In the top left corner of each package we have a fixed target - either a
      * ParentPackageTarget or a ReadmeTarget. These are there locations
      */
     public static final int FIXED_TARGET_X = 10;
     public static final int FIXED_TARGET_Y = 10;
 
-    /* the Project this package is in */
+    /** the Project this package is in */
     private final Project project;
 
-    /*
+    /**
      * the parent Package object for this package or null if this is the unnamed
      * package ie. the root of the package tree
      */
     private final Package parentPackage;
 
-    /* base name of package (eg util) ("" for the unnamed package) */
+    /** base name of package (eg util) ("" for the unnamed package) */
     private final String baseName;
 
-    /*
+    /**
      * this properties object contains the properties loaded off disk for this
      * package, or the properties which were most recently saved to disk for
      * this package
      */
     private SortedProperties lastSavedProps = new SortedProperties();
 
-    /* all the targets in a package */
+    /** all the targets in a package */
     private TargetCollection targets;
 
     /** all the uses-arrows in a package */
@@ -177,15 +177,15 @@ public final class Package extends Graph
      */
     private String lastSourceName = "";
 
-    /** state constant */
+    /** state constant - normal state */
     public static final int S_IDLE = 0;
-    /** state constant */
+    /** state constant - choose the "from" target of a "uses" dependency arrow */
     public static final int S_CHOOSE_USES_FROM = 1;
-    /** state constant */
+    /** state constant - choose the "to" target for a "uses" dependency arrow */
     public static final int S_CHOOSE_USES_TO = 2;
-    /** state constant */
+    /** state constant - choose the "from" target of an "extends" arrow */
     public static final int S_CHOOSE_EXT_FROM = 3;
-    /** state constant */
+    /** state constant - choose the "to" target for an "extends" arrow */
     public static final int S_CHOOSE_EXT_TO = 4;
 
     /** determines the maximum length of the CallHistory of a package */
@@ -1176,11 +1176,18 @@ public final class Package extends Graph
         }
     }
     
-    
     /**
      * Compile a single class.
      */
     public void compile(ClassTarget ct)
+    {
+        compile(ct, false);
+    }
+    
+    /**
+     * Compile a single class.
+     */
+    public void compile(ClassTarget ct, boolean forceQuiet)
     {
         if (!checkCompile()) {
             return;
@@ -1212,8 +1219,13 @@ public final class Package extends Graph
             bluej.compiler.CompilerWarningDialog.getDialog().reset();
 
             if (ct != null) {
-                searchCompile(ct, 1, new Stack<ClassTarget>(),
-                        new PackageCompileObserver());
+                CompileObserver observer;
+                if (forceQuiet) {
+                    observer = new QuietPackageCompileObserver();
+                } else {
+                    observer = new PackageCompileObserver();
+                }
+                searchCompile(ct, 1, new Stack<ClassTarget>(), observer);
             }
 
             if (assocTarget != null) {
@@ -1245,21 +1257,28 @@ public final class Package extends Graph
             return;
         }
 
+        // Saving a class target can change its name; we need to copy the set of targets
+        // first, and iterate through the copied list, to avoid "concurrent" modification
+        // problems.
         List<ClassTarget> compileTargets = new ArrayList<ClassTarget>();
+        for (Iterator<Target> it = targets.iterator(); it.hasNext();) {
+            Target target = it.next();
+            if (target instanceof ClassTarget) {
+                compileTargets.add((ClassTarget) target);
+            }
+        }
 
         try {
-            for (Iterator<Target> it = targets.iterator(); it.hasNext();) {
-                Target target = it.next();
-                
-                if (target instanceof ClassTarget) {
-                    ClassTarget ct = (ClassTarget) target;
-                    // we don't want to try and compile if it is a class target without src
-                    if (ct.hasSourceCode()) {
-                        ct.ensureSaved();
-                        ct.setState(ClassTarget.S_INVALID);
-                        ct.setQueued(true);
-                        compileTargets.add(ct);
-                    }
+            for (Iterator<ClassTarget> i = compileTargets.iterator(); i.hasNext(); ) {
+                ClassTarget ct = i.next();
+                // we don't want to try and compile if it is a class target without src
+                if (ct.hasSourceCode()) {
+                    ct.ensureSaved();
+                    ct.setState(ClassTarget.S_INVALID);
+                    ct.setQueued(true);
+                }
+                else {
+                    i.remove();
                 }
             }
             project.removeClassLoader();
@@ -2006,8 +2025,7 @@ public final class Package extends Graph
                         ClassTarget to = (ClassTarget) t;
 
                         // if the target is an interface then we have an
-                        // implements
-                        // dependency
+                        // implements dependency
                         if (to.isInterface()) {
                             Dependency d = new ImplementsDependency(this, from, to);
 
@@ -2022,12 +2040,14 @@ public final class Package extends Graph
                         }
                         else {
                             // an extends dependency can only be from a class to
-                            // another
-                            // class
-                            if (!from.isInterface()) {
+                            // another class
+                            if (!from.isInterface() && !to.isEnum() && !from.isEnum()) {
                                 Dependency d = new ExtendsDependency(this, from, to);
                                 userAddExtendsClassDependency(d);
                                 addDependency(d, true);
+                            }
+                            else {
+                                // TODO display an error dialog or status
                             }
                         }
                     }
