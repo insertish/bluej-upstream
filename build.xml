@@ -15,12 +15,12 @@
      After changing the version number the target "update-version-number" should be run -->
     <property name="bluej.version.major" value="4" />
     <property name="bluej.version.minor" value="2" />
-    <property name="bluej.version.release" value="0" />
+    <property name="bluej.version.release" value="1" />
     <property name="bluej.version.suffix" value="" />
     <!-- suffix with no spaces, eg "pre2" -->
     <property name="bluej.version.nonspace.suffix" value="" />
     <!-- Suffix added after version number in output files -->
-    <property name="bluej.rcsuffix" value="-rc4"/>
+    <property name="bluej.rcsuffix" value="-rc2"/>
     
     <property name="bluej.version" value="${bluej.version.major}.${bluej.version.minor}.${bluej.version.release}${bluej.version.suffix}" />
     <property name="bluej.version.nosuffix" value="${bluej.version.major}.${bluej.version.minor}.${bluej.version.release}" />
@@ -65,6 +65,17 @@
         <pathelement location="${openjfx_path}/lib/javafx.properties.jar"/>
         <pathelement location="${openjfx_path}/lib/javafx.swing.jar"/>
         <pathelement location="${openjfx_path}/lib/javafx.web.jar"/>
+        <!-- Ubuntu version, needed for building on Ubuntu if using apt-installed JavaFX: -->
+        <pathelement location="${openjfx_path}/javafx-base.jar"/>
+        <pathelement location="${openjfx_path}/javafx-controls.jar"/>
+        <!-- Needed because of NSMenuFX -->
+        <pathelement location="${openjfx_path}/javafx-fxml.jar"/>
+        <pathelement location="${openjfx_path}/javafx-graphics.jar"/>
+        <!-- Needed for sound support, which is BlueJ because of Stride support for sound preview -->
+        <pathelement location="${openjfx_path}/javafx-media.jar"/>
+        <pathelement location="${openjfx_path}/javafx-properties.jar"/>
+        <pathelement location="${openjfx_path}/javafx-swing.jar"/>
+        <pathelement location="${openjfx_path}/javafx-web.jar"/>
     </path>
     
     <!-- Set up classpath (does not include jar files built by us) -->

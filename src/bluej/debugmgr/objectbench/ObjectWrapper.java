@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2015,2016,2017,2018  Michael Kolling and John Rosenberg
+ Copyright (C) 1999-2015,2016,2017,2018,2019  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -22,6 +22,7 @@
 package bluej.debugmgr.objectbench;
 
 import java.awt.Color;
+import java.lang.reflect.Array;
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -357,7 +358,30 @@ public class ObjectWrapper extends StackPane implements InvokeListener, NamedVal
     {
         String className = obj.getClassName();
         Class<?> cl = pkg.loadClass(className);
-        
+        if (cl == null && obj.isArray() && className.endsWith("[]"))
+        {
+            String memberType = className.substring(0, className.length() - 2);
+            switch (memberType)
+            {
+                case "boolean":
+                    return boolean[].class;
+                case "byte":
+                    return byte[].class;
+                case "short":
+                    return short[].class;
+                case "int":
+                    return int[].class;
+                case "long":
+                    return long[].class;
+                case "float":
+                    return float[].class;
+                case "double":
+                    return double[].class;
+                case "char":
+                    return char[].class;
+            }
+            cl = Array.newInstance(pkg.loadClass(memberType), 0).getClass();
+        }
         // If the class is inaccessible, use the invocation type.
         if (cl != null) {
             if (! classIsAccessible(cl)) {
@@ -477,7 +501,7 @@ public class ObjectWrapper extends StackPane implements InvokeListener, NamedVal
                 
                 // Determine visibility of package private / protected members
                 filter = new ViewFilter(StaticOrInstance.INSTANCE, currentPackageName);
-                
+
                 // map generic type paramaters to the current superclass
                 curType = curType.mapToSuper(currentClass.getName());
                 

@@ -58,7 +58,7 @@ public class Boot
     // and then the update-version target should be executed.
     public static final int BLUEJ_VERSION_MAJOR = 4;
     public static final int BLUEJ_VERSION_MINOR = 2;
-    public static final int BLUEJ_VERSION_RELEASE = 0;
+    public static final int BLUEJ_VERSION_RELEASE = 1;
     public static final String BLUEJ_VERSION_SUFFIX = "";
 
     // public static final int BLUEJ_VERSION_NUMBER = BLUEJ_VERSION_MAJOR * 1000 +
@@ -212,6 +212,22 @@ public class Boot
      */
     public URL[] getJavaFXClassPath()
     {
+        // Ubuntu names its JARs differently, so the entire set of paths is passed in as a command-line argument:
+        String javafxJarsProp = commandLineProps.getProperty("javafxjars", null);
+        if (javafxJarsProp != null)
+        {
+            return Arrays.stream(javafxJarsProp.split(":")).map(s -> {
+                try
+                {
+                    return new File(s).toURI().toURL();
+                }
+                catch (MalformedURLException e)
+                {
+                    throw new RuntimeException(e);
+                }
+            }).toArray(URL[]::new);
+        }
+        
         String javafxPathProp = commandLineProps.getProperty("javafxpath", null);
         File javafxPath;
         if (javafxPathProp != null)

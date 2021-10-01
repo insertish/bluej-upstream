@@ -310,6 +310,7 @@ public class PkgMgrFrame
     private UntitledCollapsiblePane teamAndTestFoldout;
     @OnThread(Tag.FX)
     private BooleanExpression teamShowSharedButtons;
+    private AboutDialogTemplate aboutDialog = null;
 
     /**
      * Create a new PkgMgrFrame which does not show a package.
@@ -1601,7 +1602,7 @@ public class PkgMgrFrame
     {
         String title = Config.getString( "pkgmgr.newPkg.title" );
 
-        File newnameFile = FileUtility.getSaveProjectFX(getFXWindow(), title);
+        File newnameFile = FileUtility.getSaveProjectFX(getProject(), getFXWindow(), title);
         if (newnameFile == null)
             return;
         if (! newProject(newnameFile.getAbsolutePath()))
@@ -1733,7 +1734,18 @@ public class PkgMgrFrame
         
         if (oPath == null)
             return false;
-        
+        for (File file: oPath.listFiles())
+        {
+            if (file.isDirectory())
+            { 
+                // When opening a zip file that is made on the Mac
+                // some extra directories that could be included need to be ignored 
+                if (!file.getName().equals("__MACOSX") && Project.isProject(file.getPath()))
+                {
+                    return openProject(file.getPath());
+                }
+            }
+        };
         if (Project.isProject(oPath.getPath())) {
             return openProject(oPath.getPath());
         }
@@ -1830,8 +1842,8 @@ public class PkgMgrFrame
             p.put("objectbench.height", Integer.toString((int)objbench.getViewportBounds().getHeight()));
 
             // These are the actual ones we use in FX:
-            p.put("package.editor.x", Integer.toString((int)stageProperty.getValue().getX()));
-            p.put("package.editor.y", Integer.toString((int)stageProperty.getValue().getY()));
+            p.put("package.editor.x", Integer.toString((int) Math.max(stageProperty.getValue().getX(), 0)));
+            p.put("package.editor.y", Integer.toString((int) Math.max(stageProperty.getValue().getY(), 0)));
 
             p.put("package.frame.width", Integer.toString((int)stageProperty.getValue().getWidth()));
             p.put("package.frame.height", Integer.toString((int)stageProperty.getValue().getHeight()));
@@ -2007,8 +2019,16 @@ public class PkgMgrFrame
         };
 
         Image image = new Image(Boot.class.getResource("gen-bluej-splash.png").toString());
-        new AboutDialogTemplate(getFXWindow(), Boot.BLUEJ_VERSION,
-                "http://www.bluej.org/", image, translatorNames, previousTeamMembers).showAndWait();
+        if (aboutDialog == null)
+        {
+            aboutDialog = new AboutDialogTemplate(getFXWindow().getOwner(), Boot.BLUEJ_VERSION,
+                    "http://www.bluej.org/", image, translatorNames, previousTeamMembers);
+            aboutDialog.showAndWait();
+        }
+        else if (!aboutDialog.isShowing())
+        {
+            aboutDialog.showAndWait();
+        }
     }
 
     /**
