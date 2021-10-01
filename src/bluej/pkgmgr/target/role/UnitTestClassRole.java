@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -404,7 +404,9 @@ public class UnitTestClassRole extends ClassRole
                             Map.Entry<String,DebuggerObject> mapent = it.next();
                             DebuggerObject objVal = mapent.getValue();
                             
-                            pmf.putObjectOnBench(mapent.getKey(), objVal, objVal.getGenType(), null);
+                            if (! objVal.isNullObject()) {
+                                pmf.putObjectOnBench(mapent.getKey(), objVal, objVal.getGenType(), null);
+                            }
                         }
                     }
                 });

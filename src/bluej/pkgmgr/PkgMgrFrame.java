@@ -29,6 +29,7 @@ import java.awt.Dimension;
 import java.awt.EventQueue;
 import java.awt.Font;
 import java.awt.Frame;
+import java.awt.Image;
 import java.awt.Insets;
 import java.awt.KeyboardFocusManager;
 import java.awt.Point;
@@ -44,19 +45,12 @@ import java.awt.print.PageFormat;
 import java.awt.print.Paper;
 import java.awt.print.PrinterJob;
 import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.ListIterator;
 import java.util.Properties;
 import java.util.StringTokenizer;
-import java.util.jar.JarEntry;
-import java.util.jar.JarInputStream;
 
 import javax.swing.AbstractButton;
 import javax.swing.Action;
@@ -88,7 +82,9 @@ import bluej.BlueJTheme;
 import bluej.Config;
 import bluej.debugger.Debugger;
 import bluej.debugger.DebuggerObject;
+import bluej.debugger.ExceptionDescription;
 import bluej.debugger.gentype.GenTypeClass;
+import bluej.debugmgr.ExecutionEvent;
 import bluej.debugmgr.ExpressionInformation;
 import bluej.debugmgr.Invoker;
 import bluej.debugmgr.LibraryCallDialog;
@@ -167,7 +163,6 @@ import bluej.views.MethodView;
 
 import com.apple.eawt.Application;
 import com.apple.eawt.ApplicationEvent;
-import java.awt.Image;
 
 /**
  * The main user interface frame which allows editing of packages
@@ -1404,169 +1399,26 @@ public class PkgMgrFrame extends JFrame
      */
     private boolean openArchive(File archive)
     {
-        JarInputStream jarInStream = null;
-
-        try { 
-            // first need to determine the output path. If the jar file
-            // contains a root-level (eg bluej.pkg) entry, extract into a directory
-            // whose name is the basename of the archive file. Otherwise, if
-            // all entries have a common ancestor, extract to that directory
-            // (after checking it doesn't exist).
-            
-            String prefixFolder = getArchivePrefixFolder(archive);
-            
-            // Determine the output path.
-            File oPath = archive.getParentFile();
-            if (prefixFolder == null) {
-                // Try to extract to directory which has same name as the jar
-                // file, with the .jar or .bjar extension stripped.
-                String archiveName = archive.getName();
-                int dotIndex = archiveName.lastIndexOf('.');
-                String strippedName = null;
-                if(dotIndex != -1) {
-                    strippedName = archiveName.substring(0, dotIndex);
-                } else {
-                    strippedName = archiveName;
-                }
-                oPath = new File(oPath, strippedName);
-                if (oPath.exists()) {
-                    DialogManager.showErrorWithText(this, "jar-output-dir-exists", oPath.toString());
-                    return false;
-                }
-                else if (! oPath.mkdir()) {
-                    DialogManager.showErrorWithText(this, "jar-output-no-write", archive.toString());
-                    return false;
-                }
-            }
-            else {
-                File prefixFolderFile = new File(oPath, prefixFolder);
-                if (prefixFolderFile.exists()) {
-                    DialogManager.showErrorWithText(this, "jar-output-dir-exists", prefixFolderFile.toString());
-                    return false;
-                }
-                if (! prefixFolderFile.mkdir()) {
-                    DialogManager.showErrorWithText(this, "jar-output-no-write", archive.toString());
-                    return false;
-                }
-            }
-            
-            // Need to extract the project somewhere, then open it
-            FileInputStream is = new FileInputStream(archive);
-            jarInStream = new JarInputStream(is);
-            
-            // Extract entries in the jar file
-            JarEntry je = jarInStream.getNextJarEntry();
-            while (je != null) {
-                File outFile = new File(oPath, je.getName());
-                
-                // An entry could represent a file or directory
-                if (je.getName().endsWith("/"))
-                    outFile.mkdirs();
-                else {
-                    outFile.getParentFile().mkdirs();
-                    OutputStream os = new FileOutputStream(outFile);
-                    
-                    // try to read 8k at a time
-                    byte [] buffer = new byte[8192];
-                    int rlength = jarInStream.read(buffer);
-                    while (rlength != -1) {
-                        os.write(buffer, 0, rlength);
-                        rlength = jarInStream.read(buffer);
-                    }
-                    
-                    jarInStream.closeEntry();
-                }
-                je = jarInStream.getNextJarEntry();
-            }
-            
-            // Now, the jar file may contain a bluej project, or it may
-            // be a regular jar file in which case we should convert it
-            // to a bluej project first.
-            
-            if (prefixFolder != null)
-                oPath = new File(oPath, prefixFolder);
-            if (Project.isProject(oPath.getPath())) {
+        // Determine the output path.
+        File oPath = Utility.maybeExtractArchive(archive, this);
+        
+        if (oPath == null)
+            return false;
+        
+        if (Project.isProject(oPath.getPath())) {
+            return openProject(oPath.getPath());
+        }
+        else {
+            // Convert to a BlueJ project
+            if (Import.convertNonBlueJ(this, oPath)) {
                 return openProject(oPath.getPath());
             }
             else {
-                // Convert to a BlueJ project
-                if (Import.convertNonBlueJ(this, oPath)) {
-                    return openProject(oPath.getPath());
-                }
-            }            
-        }
-        catch (Exception e) {
-            e.printStackTrace();
-            DialogManager.showError(this, "jar-extraction-error");
-        }
-        finally {
-            try {
-                if (jarInStream != null)
-                    jarInStream.close();
+                return false;
             }
-            catch (IOException ioe) {}
-        }
+        }        
+    }
 
-        return false;
-    }
-    
-    /**
-     * Attempt to determine the prefix folder of a zip or jar archive.
-     * That is, if all files in the archive are stored under a first-level
-     * folder, return the name of that folder; otherwise return null.
-     * 
-     * @param arName   The archive file
-     * @return         The prefix folder of the archive, or null.
-     * @throws FileNotFoundException
-     * @throws IOException
-     */
-    private String getArchivePrefixFolder(File arName)
-    throws FileNotFoundException, IOException
-    {
-        JarInputStream jarInStream = null;
-        FileInputStream is = null;
-        String prefixFolder = null;
-        try {
-            is = new FileInputStream(arName);
-            jarInStream = new JarInputStream(is);
-            
-            // Extract entries in the jar file
-            JarEntry je = jarInStream.getNextJarEntry();
-            while (je != null) {
-                String entryName = je.getName();
-                int slashIndex = entryName.indexOf('/');
-                if (slashIndex == -1) {
-                    prefixFolder = null;
-                    break;
-                }
-                
-                String prefix = entryName.substring(0, slashIndex);
-                if (prefixFolder == null)
-                    prefixFolder = prefix;
-                else if (! prefixFolder.equals(prefix)) {
-                    prefixFolder = null;
-                    break;
-                }
-                
-                je = jarInStream.getNextJarEntry();
-            }
-        }
-        catch (FileNotFoundException fnfe) {
-            throw fnfe;  // rethrow after processing finally block
-        }
-        catch (IOException ioe) {
-            throw ioe; // rethrow after processing finally block
-        }
-        finally {
-            if (jarInStream != null)
-                jarInStream.close();
-            if (is != null)
-                is.close();
-        }
-        
-        return prefixFolder;
-    }
-    
     /**
      * Close all frames which show packages from the specified project. This
      * causes the project itself to close.
@@ -1956,18 +1808,34 @@ public class PkgMgrFrame extends JFrame
             // completion of the call and then places the object on the object
             // bench
             watcher = new ResultWatcher() {
+                public void beginCompile()
+                {
+                    setWaitCursor(true);
+                    setStatus(Config.getString("pkgmgr.creating"));
+                }
+                
+                public void beginExecution(InvokerRecord ir)
+                {
+                    BlueJEvent.raiseEvent(BlueJEvent.METHOD_CALL, ir.toExpression());
+                    setWaitCursor(false);
+                }
+                
                 public void putResult(DebuggerObject result, String name, InvokerRecord ir)
                 {
+                    ExecutionEvent executionEvent = new ExecutionEvent(pkg, cv.getClassName(), null);
+                    executionEvent.setParameters(cv.getParamTypes(false), ir.getArgumentValues());
+                    executionEvent.setResult(ExecutionEvent.NORMAL_EXIT);
+                    executionEvent.setResultObject(result);
+                    BlueJEvent.raiseEvent(BlueJEvent.EXECUTION_RESULT, executionEvent);
+                    
+                    getPackage().getProject().updateInspectors();
+                    setStatus(Config.getString("pkgmgr.createDone"));
+                    
                     // this shouldn't ever happen!! (ajp 5/12/02)
                     if ((name == null) || (name.length() == 0))
                         name = "result";
 
                     if (result != null) {
-                        //BeanShell does not need to use the realresult, but
-                        // can use result directly
-                        //DebuggerObject realResult =
-                        // result.getInstanceFieldObject(0);
-
                         ObjectWrapper wrapper = ObjectWrapper.getWrapper(PkgMgrFrame.this, getObjectBench(), result,
                                 result.getGenType(), name);
                         getObjectBench().addObject(wrapper);
@@ -1977,18 +1845,38 @@ public class PkgMgrFrame extends JFrame
                         getObjectBench().addInteraction(ir);
                     }
                     else {
-                        // we can get here if the machine is terminated mid way
-                        // through
-                        // a construction. If so, lets do nothing
+                        // This shouldn't happen, but let's play it safe.
                     }
                 }
 
-                public void putError(String msg)
-                {}
-                public void putException(String msg)
-                {}
-                public void putVMTerminated()
-                {}
+                public void putError(String msg, InvokerRecord ir)
+                {
+                    setStatus("");
+                    setWaitCursor(false);
+                }
+                
+                public void putException(ExceptionDescription exception, InvokerRecord ir)
+                {
+                    ExecutionEvent executionEvent = new ExecutionEvent(pkg, cv.getClassName(), null);
+                    executionEvent.setParameters(cv.getParamTypes(false), ir.getArgumentValues());
+                    executionEvent.setResult(ExecutionEvent.EXCEPTION_EXIT);
+                    executionEvent.setException(exception);
+                    BlueJEvent.raiseEvent(BlueJEvent.EXECUTION_RESULT, executionEvent);
+                    
+                    setStatus("");
+                    getPackage().exceptionMessage(exception);
+                    getPackage().getProject().updateInspectors();
+                }
+                
+                public void putVMTerminated(InvokerRecord ir)
+                {
+                    ExecutionEvent executionEvent = new ExecutionEvent(pkg, cv.getClassName(), null);
+                    executionEvent.setParameters(cv.getParamTypes(false), ir.getArgumentValues());
+                    executionEvent.setResult(ExecutionEvent.TERMINATED_EXIT);
+                    BlueJEvent.raiseEvent(BlueJEvent.EXECUTION_RESULT, executionEvent);
+                    
+                    setStatus("");
+                }
             };
         }
         else if (cv instanceof MethodView) {
@@ -2000,8 +1888,31 @@ public class PkgMgrFrame extends JFrame
             watcher = new ResultWatcher() {
                 private ExpressionInformation expressionInformation = new ExpressionInformation(mv, getName());
 
+                public void beginCompile()
+                {
+                    setWaitCursor(true);
+                    if (mv.isMain()) {
+                        getProject().removeClassLoader();
+                        getProject().newRemoteClassLoaderLeavingBreakpoints();
+                    }
+                }
+                
+                public void beginExecution(InvokerRecord ir)
+                {
+                    BlueJEvent.raiseEvent(BlueJEvent.METHOD_CALL, ir.toExpression());
+                    setWaitCursor(false);
+                }
+                
                 public void putResult(DebuggerObject result, String name, InvokerRecord ir)
                 {
+                    ExecutionEvent executionEvent = new ExecutionEvent(pkg, cv.getClassName(), null);
+                    executionEvent.setMethodName(mv.getName());
+                    executionEvent.setParameters(cv.getParamTypes(false), ir.getArgumentValues());
+                    executionEvent.setResult(ExecutionEvent.NORMAL_EXIT);
+                    executionEvent.setResultObject(result);
+                    BlueJEvent.raiseEvent(BlueJEvent.EXECUTION_RESULT, executionEvent);
+                    
+                    getPackage().getProject().updateInspectors();
                     expressionInformation.setArgumentValues(ir.getArgumentValues());
                     getObjectBench().addInteraction(ir);
 
@@ -2019,18 +1930,37 @@ public class PkgMgrFrame extends JFrame
                     BlueJEvent.raiseEvent(BlueJEvent.METHOD_CALL, viewer.getResult());
                 }
 
-                public void putError(String msg)
-                {}
-                public void putException(String msg)
-                {}
-                public void putVMTerminated()
-                {}
+                public void putError(String msg, InvokerRecord ir)
+                {
+                    setWaitCursor(false);
+                }
+                
+                public void putException(ExceptionDescription exception, InvokerRecord ir)
+                {
+                    ExecutionEvent executionEvent = new ExecutionEvent(pkg, cv.getClassName(), null);
+                    executionEvent.setParameters(cv.getParamTypes(false), ir.getArgumentValues());
+                    executionEvent.setResult(ExecutionEvent.EXCEPTION_EXIT);
+                    executionEvent.setException(exception);
+                    BlueJEvent.raiseEvent(BlueJEvent.EXECUTION_RESULT, executionEvent);
+                    
+                    getPackage().getProject().updateInspectors();
+                    getPackage().exceptionMessage(exception);
+                }
+                
+                public void putVMTerminated(InvokerRecord ir)
+                {
+                    ExecutionEvent executionEvent = new ExecutionEvent(pkg, cv.getClassName(), null);
+                    executionEvent.setParameters(cv.getParamTypes(false), ir.getArgumentValues());
+                    executionEvent.setResult(ExecutionEvent.TERMINATED_EXIT);
+                    BlueJEvent.raiseEvent(BlueJEvent.EXECUTION_RESULT, executionEvent);
+                }
             };
         }
 
         // create an Invoker to handle the actual invocation
-
-        new Invoker(this, cv, watcher).invokeInteractive();
+        if (checkDebuggerState()) {
+            new Invoker(this, cv, watcher).invokeInteractive();
+        }
     }
 
     /**
@@ -2096,7 +2026,7 @@ public class PkgMgrFrame extends JFrame
      * @param iType    The "interface type" of the object. This is the type of the object
      *               for purposes of method calls etc if the actual type is inaccessible
      *               (private to another package or class).
-     * @param ir    The invoker record (for recording interaction).
+     * @param ir    The invoker record (for recording interaction). May be null.
      */
     public void putObjectOnBench(String newInstanceName, DebuggerObject object, GenTypeClass iType, InvokerRecord ir)
     {
@@ -2108,7 +2038,9 @@ public class PkgMgrFrame extends JFrame
             // load the object into runtime scope
             getPackage().getDebugger().addObject(pkg.getId(), newInstanceName, object);
 
-            ir.setBenchName(newInstanceName, wrapper.getObject().getGenClassName());
+            if (ir != null) {
+                ir.setBenchName(newInstanceName, wrapper.getObject().getGenClassName());
+            }
         }
     }
 

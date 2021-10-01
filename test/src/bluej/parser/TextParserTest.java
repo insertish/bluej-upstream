@@ -38,7 +38,6 @@ import bluej.parser.nodes.ParsedCUNode;
  * Test that void results are handled correctly by the textpad parser.
  * 
  * @author Davin McCall
- * @version $Id: TextParserTest.java 7768 2010-06-16 04:55:19Z davmac $
  */
 public class TextParserTest extends TestCase
 {
@@ -136,6 +135,15 @@ public class TextParserTest extends TestCase
         
         r = tp.parseCommand("Class.forName(\"java.lang.Object\")");
         assertEquals("java.lang.Class<?>", r);
+        
+        // Now try dynamically
+        String aSrc = "class A {\n" +
+            "  static int nn() { return 0; }\n" +
+            "}\n";
+        ParsedCUNode aNode = cuForSource(aSrc, "");
+        resolver.addCompilationUnit("", aNode);
+        r = tp.parseCommand("A.nn()");
+        assertEquals("int", r);
     }
 
     public void testStaticVariable()
@@ -145,6 +153,14 @@ public class TextParserTest extends TestCase
         assertEquals("java.io.PrintStream", r);
         r = tp.parseCommand("java.lang.System.out");
         assertEquals("java.io.PrintStream", r);
+        
+        String aSrc = "class A {\n" +
+            "  static int nn = 1;\n" +
+            "}\n";
+        ParsedCUNode aNode = cuForSource(aSrc, "");
+        resolver.addCompilationUnit("", aNode);
+        r = tp.parseCommand("A.nn");
+        assertEquals("int", r);
     }
 
     public void testNewExpression()
@@ -324,6 +340,12 @@ public class TextParserTest extends TestCase
 
         r = tp.parseCommand("\"string\" + new Object()");
         assertEquals("java.lang.String", r);
+        
+        r = tp.parseCommand("4 + \"a string\"");
+        assertEquals("java.lang.String", r);
+        
+        r = tp.parseCommand("new int[3] + \" a string!\"");
+        assertEquals("java.lang.String", r);
     }
     
     public void testUnboxing()
@@ -363,6 +385,87 @@ public class TextParserTest extends TestCase
         assertEquals("boolean", r);
         r = tp.parseCommand("3 >= 4");
         assertEquals("boolean", r);
+        
+        r = tp.parseCommand("! true");
+        assertEquals("boolean", r);
+        r = tp.parseCommand("true || false");
+        assertEquals("boolean", r);
+        r = tp.parseCommand("true && false");
+        assertEquals("boolean", r);
+        
+        r = tp.parseCommand("~4");
+        assertEquals("int", r);
+        r = tp.parseCommand("~4l");
+        assertEquals("long", r);
+        r = tp.parseCommand("4 & 5");
+        assertEquals("int", r);
+        r = tp.parseCommand("4 | 5");
+        assertEquals("int", r);
+        r = tp.parseCommand("4 ^ 5"); // xor
+        assertEquals("int", r);
+    }
+    
+    public void testOperators2()
+    {
+        TextAnalyzer tp = new TextAnalyzer(resolver, "", objectBench);
+        
+        String r = tp.parseCommand("true ? 3 : 4");
+        assertEquals("int", r);
+        r = tp.parseCommand("true ? \"a string\" : \"b string\"");
+        assertEquals("java.lang.String", r);
+        r = tp.parseCommand("true ? \"a string\" : 4");
+        assertEquals("java.lang.Object", r);
+        
+        // If one side is a byte and the other is a constant which could be narrowed to
+        // a byte, then the result type should be byte:
+        r = tp.parseCommand("true ? (byte) 3 : 4");
+        assertEquals("byte", r);
+    }
+    
+    public void testOperators3()
+    {
+        String lalaSrc = ""
+            + "public class Lala\n"
+            + "{\n"
+            + "  public static long a = 4;\n"
+            + "}\n";
+        
+        ParsedCUNode lalaNode = cuForSource(lalaSrc, "");
+        resolver.addCompilationUnit("", lalaNode);
+
+        EntityResolver res = new PackageResolver(this.resolver, "");
+        TextAnalyzer tp = new TextAnalyzer(res, "", objectBench);
+        
+        String r = tp.parseCommand("Lala.a++");
+        assertEquals("long", r);
+        r = tp.parseCommand("Lala.a--");        
+        assertEquals("long", r);
+        r = tp.parseCommand("++Lala.a");
+        assertEquals("long", r);
+        r = tp.parseCommand("--Lala.a");
+        assertEquals("long", r);
+        r = tp.parseCommand("Lala.a += 1");
+        assertEquals("long", r);
+        r = tp.parseCommand("Lala.a -= 1");
+        assertEquals("long", r);
+        r = tp.parseCommand("Lala.a *= 1");
+        assertEquals("long", r);
+        r = tp.parseCommand("Lala.a /= 1");
+        assertEquals("long", r);
+        r = tp.parseCommand("Lala.a %= 1");
+        assertEquals("long", r);
+        r = tp.parseCommand("Lala.a &= 1");
+        assertEquals("long", r);
+        r = tp.parseCommand("Lala.a |= 1");
+        assertEquals("long", r);
+        r = tp.parseCommand("Lala.a ^= 1");
+        assertEquals("long", r);
+        r = tp.parseCommand("Lala.a <<= 1");
+        assertEquals("long", r);
+        r = tp.parseCommand("Lala.a >>= 1");
+        assertEquals("long", r);
+        r = tp.parseCommand("Lala.a >>>= 1");
+        assertEquals("long", r);
     }
     
     public void testUnboxingNumericComparison()
@@ -384,10 +487,10 @@ public class TextParserTest extends TestCase
         assertEquals("boolean", r);
         
         r = tp.parseCommand("new Integer(7) < null");
-        assertNull(r);
+        assertEquals("", r); // expression form, but invalid
         
         r = tp.parseCommand("3 < null");
-        assertNull(r);
+        assertEquals("", r); // expression form, but invalid
         
         r = tp.parseCommand("3.0f < (Integer)null");
         assertEquals("boolean", r);
@@ -583,6 +686,27 @@ public class TextParserTest extends TestCase
         assertEquals("java.lang.String", r);
     }
     
-    //TODO test instanceof
-
+    public void testMethodResolution6()
+    {
+        TextAnalyzer tp = new TextAnalyzer(resolver, "", objectBench);
+        
+        String r = tp.parseCommand("java.util.Arrays.asList(\"one\", \"two\", \"three\")");
+        assertEquals("java.util.List<java.lang.String>", r);
+    }
+    
+    public void testInstanceof()
+    {
+        TextAnalyzer tp = new TextAnalyzer(resolver, "", objectBench);
+        
+        String r = tp.parseCommand("(new Object()) instanceof String");
+        assertEquals("boolean", r);
+    }
+    
+    public void testArrayLength()
+    {
+        TextAnalyzer tp = new TextAnalyzer(resolver, "", objectBench);
+        
+        String r = tp.parseCommand("new String[5].length");
+        assertEquals("int", r);
+    }
 }

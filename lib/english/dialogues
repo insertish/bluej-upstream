@@ -15,11 +15,6 @@ An error occurred in a file for which the
 source cannot be found.
 class: source line number:
 
-system-exit
-The method finished through an explicit
-"exit" instruction. No result was
-returned. The exit code is:
-
 no-help
 No help available for this message.
 Please mail the text of the error message
@@ -100,10 +95,10 @@ Cancel
 null
 
 invalid-class-name
-Invalid Class Name.
+Invalid class name.
 
 invalid-package-name
-Invalid Package Name.
+Invalid package name.
 
 must-be-identifier
 The name is not valid. It
@@ -526,6 +521,11 @@ repository.
 Keep my version
 Use repository version
 null
+
+team-error-saving-project
+An error occurred when trying to save the project files:
+	$
+Committing or updating may have unexpected results.
 
 not-all-compiled
 Not all classes in this project are compiled. To deploy the MIDlet

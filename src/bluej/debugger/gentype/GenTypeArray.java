@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -34,12 +34,12 @@ import bluej.utility.JavaReflective;
  */
 public class GenTypeArray extends GenTypeSolid
 {
-    GenTypeParameter baseType;
+    JavaType baseType;
     
     /**
      * Construct a new GenTypeArray, with the given component type.
      */
-    public GenTypeArray(GenTypeParameter baseType)
+    public GenTypeArray(JavaType baseType)
     {
         super();
         this.baseType = baseType;
@@ -65,10 +65,20 @@ public class GenTypeArray extends GenTypeSolid
     {
         return "[" + baseType.getUpperBound().arrayComponentName();
     }
+    
+    @Override
+    public JavaType getCapture()
+    {
+        JavaType baseCap = baseType.getCapture();
+        if (baseCap == baseType) {
+            return this;
+        }
+        return new GenTypeArray(baseCap);
+    }
         
     public JavaType getArrayComponent()
     {
-        return baseType.getUpperBound();
+        return baseType;
     }
     
     public GenTypeSolid getLowerBound()
@@ -85,7 +95,7 @@ public class GenTypeArray extends GenTypeSolid
     @Override
     public void erasedSuperTypes(Set<Reflective> s)
     {
-        GenTypeSolid baseSolid = baseType.getUpperBound();
+        GenTypeSolid baseSolid = baseType.getUpperBound().asSolid();
         if (baseSolid != null) {
             Set<Reflective> bSupers = new HashSet<Reflective>();
             baseSolid.erasedSuperTypes(bSupers);
@@ -156,16 +166,25 @@ public class GenTypeArray extends GenTypeSolid
     @Override
     public GenTypeClass[] getReferenceSupertypes()
     {
-        throw new UnsupportedOperationException();
+        // There's not really much we can do here
+        return new GenTypeClass[0];
     }
     
     @Override
-    public GenTypeSolid mapTparsToTypes(
-            Map<String, ? extends GenTypeParameter> tparams)
+    public GenTypeParameter mapTparsToTypes(Map<String, ? extends GenTypeParameter> tparams)
     {
-        JavaType mappedBase = baseType.getCapture().mapTparsToTypes(tparams);
+        GenTypeParameter mappedBase = baseType.mapTparsToTypes(tparams);
         if (mappedBase != baseType) {
-            return new GenTypeArray(mappedBase);
+            if (mappedBase.isWildcard()) {
+                // An array of wildcard should be represented instead as a wildcard
+                // with array bounds.
+                GenTypeSolid ubound = mappedBase.getUpperBound().asSolid();
+                ubound = (ubound == null) ? ubound : ubound.getArray();
+                GenTypeSolid lbound = mappedBase.getLowerBound();
+                lbound = (lbound == null) ? lbound : lbound.getArray();
+                new GenTypeWildcard(ubound, lbound);
+            }
+            return new GenTypeArray(mappedBase.getUpperBound());
         }
         return this;
     }

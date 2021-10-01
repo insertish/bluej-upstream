@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -27,22 +27,23 @@ import java.util.Map;
 import bluej.utility.Debug;
 
 /**
- * A wildcard type with an upper and/or lower bound.<p>
+ * A wildcard type with an upper and/or lower bound.
  * 
- * Note that both an upper and lower bound is allowed. This type doesn't occur
+ * <p>Note that both an upper and lower bound is allowed. This type doesn't occur
  * naturally- it can't be specified in the Java language. But in some cases we
- * can deduce the type of some object to be this.<p>
+ * can deduce the type of some object to be this.
  *
- * This is an Immutable type.
- * 
  * @author Davin McCall
- * @version $Id: GenTypeWildcard.java 7631 2010-05-20 05:00:59Z davmac $
  */
 public class GenTypeWildcard extends GenTypeParameter
 {
     GenTypeSolid upperBound; // ? extends upperBound
     GenTypeSolid lowerBound; // ? super lowerBound
     
+    /**
+     * Constructor for a wildcard with a specific upper and lower bound, either of
+     * which may be null.
+     */
     public GenTypeWildcard(GenTypeSolid upper, GenTypeSolid lower)
     {
         upperBound = upper;
@@ -50,18 +51,19 @@ public class GenTypeWildcard extends GenTypeParameter
     }
     
     /**
-     * Constructor with a given range of upper and lower bounds. The arrays
-     * used should not be modified afterwards.
+     * Constructor with a given range of upper and lower bounds.
      * 
      * @param uppers  The upper bounds
      * @param lowers  The lower bounds
      */
     public GenTypeWildcard(GenTypeSolid [] uppers, GenTypeSolid [] lowers)
     {
-        if (uppers.length != 0)
+        if (uppers.length != 0) {
             upperBound = IntersectionType.getIntersection(uppers);
-        if (lowers.length != 0)
+        }
+        if (lowers.length != 0) {
             lowerBound = GenTypeSolid.lub(lowers);
+        }
     }
     
     public String toString()
@@ -92,12 +94,7 @@ public class GenTypeWildcard extends GenTypeParameter
         return getErasedType().arrayComponentName();
     }
     
-    /*
-     * Do not create abominations such as "? extends ? extends ...".
-     *   "? extends ? super ..."    => "?" (ie. the bounds is eliminated).
-     *   "? extends ? extends X"    => "? extends X".
-     *   "? super ? super X"        => "? super X".
-     */
+    @Override
     public GenTypeWildcard mapTparsToTypes(Map<String, ? extends GenTypeParameter> tparams)
     {
         GenTypeSolid newUpper = null;
@@ -105,18 +102,19 @@ public class GenTypeWildcard extends GenTypeParameter
         
         // Find new upper bounds
         if (upperBound != null) {
-            ArrayList newUppers = new ArrayList();
+            ArrayList<GenTypeSolid> newUppers = new ArrayList<GenTypeSolid>();
             GenTypeSolid [] upperBounds = upperBound.getUpperBounds();
             
             // find the new upper bounds
             for (int i = 0; i < upperBounds.length; i++) {
-                GenTypeParameter newBound = (GenTypeParameter) upperBounds[i].mapTparsToTypes(tparams);
+                GenTypeParameter newBound = upperBounds[i].mapTparsToTypes(tparams);
                 if (newBound instanceof GenTypeWildcard) {
                     GenTypeWildcard newWcBound = (GenTypeWildcard) newBound;
                     newUppers.add(newWcBound.upperBound);
                 }
-                else
-                    newUppers.add(newBound);
+                else {
+                    newUppers.add((GenTypeSolid) newBound);
+                }
             }
             GenTypeSolid [] newUppersA = (GenTypeSolid []) newUppers.toArray(new GenTypeSolid[newUppers.size()]);
             newUpper = IntersectionType.getIntersection(newUppersA);
@@ -126,7 +124,7 @@ public class GenTypeWildcard extends GenTypeParameter
         // This is easier. If the lower bound is an intersection type, it comes from
         // lub() and therefore contains no immediate type parameters.
         if (lowerBound != null) {
-            GenTypeParameter newLowerP = (GenTypeParameter) lowerBound.mapTparsToTypes(tparams);
+            GenTypeParameter newLowerP = lowerBound.mapTparsToTypes(tparams);
             newLower = newLowerP.getLowerBound();
         }
         
@@ -138,8 +136,12 @@ public class GenTypeWildcard extends GenTypeParameter
         if (this == other)
             return true;
         
+        if (! other.isWildcard()) {
+            return false;
+        }
+        
         GenTypeSolid otherLower = other.getLowerBound();
-        GenTypeSolid otherUpper = other.getUpperBound();
+        JavaType otherUpper = other.getUpperBound();
         
         if (upperBound != null && ! upperBound.equals(otherUpper))
             return false;
@@ -153,7 +155,7 @@ public class GenTypeWildcard extends GenTypeParameter
         return true;
     }
     
-    public void getParamsFromTemplate(Map map, GenTypeParameter template)
+    public void getParamsFromTemplate(Map<String,GenTypeParameter> map, GenTypeParameter template)
     {
         // This should never actually be called on a wildcard type (I think).
         // TODO fix. Actually it probably can get called. When it is called, it
@@ -183,6 +185,12 @@ public class GenTypeWildcard extends GenTypeParameter
     {
         // This shouldn't be called.
         return false;
+    }
+    
+    @Override
+    public boolean isWildcard()
+    {
+        return true;
     }
     
     /**

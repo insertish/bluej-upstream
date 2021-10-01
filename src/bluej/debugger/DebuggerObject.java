@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -28,10 +28,10 @@ import bluej.debugger.gentype.JavaType;
 import bluej.debugger.gentype.GenTypeClass;
 
 /**
- *  A class representing an object in the debugged VM.
+ * A class representing an object, and its type, in the debugged VM. The "null" value
+ * can also be represented.
  *
- *@author     Michael Kolling
- *@version    $Id: DebuggerObject.java 7751 2010-06-03 10:55:25Z nccb $
+ * @author     Michael Kolling
  */
 public abstract class DebuggerObject
 {
@@ -67,9 +67,10 @@ public abstract class DebuggerObject
     public abstract DebuggerClass getClassRef();
     
     /**
-     *  Get the complete generic type of this object.
+     * Get the complete generic type of this object, if known. If not known, the raw
+     * dynamic type of the object is returned, or null if this is the null object.
      * 
-     *  @return    The object type.
+     * @return    The object type (or null for the null object).
      */
     public abstract GenTypeClass getGenType();
 
@@ -214,12 +215,48 @@ public abstract class DebuggerObject
      * "(hidden)" means that the field is declared in a superclass of the
      * object class and shadowed by a field with the same name declared in
      * a descendant class.
+     * 
+     * <p>Values are represented differently depending on their type:
+     * <ul>
+     * <li>A String value is represented as a valid Java string expression.
+     * <li>A null value is represented as "null".
+     * <li>An Enum value is represented as the name of the Enum constant.
+     * <li>Any other object reference is represented as "&lt;object reference&gt;".
+     * <li>A primitive value is represented as the value itself.
+     * </ul>
      *
-     *@param  includeModifiers  Whether to include the access modifier
-     *@return                   The InstanceFields value
+     * @param  includeModifiers  Whether to include the access modifier
+     * @param restrictedClasses  a map of class names for which the field should be filtered;
+     *                           the class name maps to list of fields which should not be
+     *                           filtered (i.e. a whitelist). 
      */
     public abstract List<String> getInstanceFields(boolean includeModifiers, Map<String, List<String>> restrictedClasses);
     
+    /**
+     * A single-item form of getInstanceFields that only gets a single field.
+     * All parameters are as in getInstanceFields.  In general, it should be the case that
+     * this code:
+     * 
+     * List<String> list = new LinkedList<String>();
+     * for (int i = 0; i < getInstanceFieldCount();i++)
+     *     list.add(getInstanceField(i, includeModifiers));
+     *     
+     * Should produce the same list as:
+     * 
+     * List<String> list = getInstanceFields(includeModifiers, null);
+     * 
+     * Array objects should override this to provide a more efficient implementation.
+     */
+    public String getInstanceField(int slot, boolean includeModifiers)
+    {
+        return getInstanceFields(includeModifiers).get(slot);
+    }
+    
+    /**
+     * Get a list of the instance fields of this object.
+     * @param includeModifiers  Whether to include modifiers ("private" etc).
+     * @see #getInstanceFields(boolean, java.util.Map)
+     */
     public final List<String> getInstanceFields(boolean includeModifiers)
     {
         return getInstanceFields(includeModifiers, null);

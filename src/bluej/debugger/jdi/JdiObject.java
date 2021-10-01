@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -40,7 +40,8 @@ import com.sun.jdi.ReferenceType;
 import com.sun.jdi.Value;
 
 /**
- * Represents an object running on the user (remote) machine.
+ * Represents an object running on the user (remote) machine, together with an optional generic
+ * type of the object.
  *
  * @author  Michael Kolling
  */
@@ -113,8 +114,10 @@ public class JdiObject extends DebuggerObject
     private JdiObject(ObjectReference obj)
     {
         this.obj = obj;
-        obj.disableCollection();
-        getRemoteFields();
+        if (obj != null) {
+            obj.disableCollection();
+            getRemoteFields();
+        }
     }
 
     private JdiObject(ObjectReference obj, GenTypeClass expectedType)
@@ -122,9 +125,7 @@ public class JdiObject extends DebuggerObject
         this.obj = obj;
         if (obj != null) {
             obj.disableCollection();
-        }
-        getRemoteFields();
-        if( obj != null ) {
+            getRemoteFields();
             Reflective reflective = new JdiReflective(obj.referenceType());
             if( expectedType.isGeneric() ) {
                 genType = expectedType.mapToDerived(reflective);
@@ -134,7 +135,9 @@ public class JdiObject extends DebuggerObject
     
     protected void finalize()
     {
-        obj.enableCollection();
+        if (obj != null) {
+            obj.enableCollection();
+        }
     }
     
     public String toString()
@@ -204,9 +207,12 @@ public class JdiObject extends DebuggerObject
         if(genType != null) {
             return genType;
         }
-        else {
+        else if (obj != null) {
             Reflective r = new JdiReflective(obj.referenceType());
             return new GenTypeClass(r);
+        }
+        else {
+            return null;
         }
     }
     
@@ -379,16 +385,12 @@ public class JdiObject extends DebuggerObject
         return obj;
     }
 
-    /**
-     *  Return a list of strings with the description of each instance field
-     *  in the format "<modifier> <type> <name> = <value>".
-     *
-     *@param  includeModifiers  Description of Parameter
-     *@return                   The InstanceFields value
+    /*
+     * @see bluej.debugger.DebuggerObject#getInstanceFields(boolean, java.util.Map)
      */
     public List<String> getInstanceFields(boolean includeModifiers, Map<String, List<String>> restrictedClasses)
     {
-        List<String> fieldStrings = new ArrayList<String>(fields.size());
+        List<String> fieldStrings = new ArrayList<String>(obj == null ? 0 : fields.size());
         
         if (obj == null)
             return fieldStrings;

@@ -158,6 +158,14 @@ public abstract class JavaType extends GenTypeParameter
     }
 
     abstract public boolean equals(JavaType other);
+    
+    public boolean equals(GenTypeParameter other)
+    {
+        if (other instanceof JavaType) {
+            return equals((JavaType) other);
+        }
+        return false;
+    }
 
     /**
      * Determine whether a variable of this type could legally be assigned
@@ -188,7 +196,7 @@ public abstract class JavaType extends GenTypeParameter
      *                to the raw type.
      * @return A type with parameters mapped
      */
-    abstract public JavaType mapTparsToTypes(Map<String, ? extends GenTypeParameter> tparams);
+    abstract public GenTypeParameter mapTparsToTypes(Map<String, ? extends GenTypeParameter> tparams);
     
     /**
      * If this is an array type, get the component type. If this is not an

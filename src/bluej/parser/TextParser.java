@@ -86,6 +86,10 @@ public class TextParser extends JavaParser
     private static final int METHOD_CALL_OP = MEMBER_CALL_OP + 1;
     private static final int CONSTRUCTOR_CALL_OP = METHOD_CALL_OP + 1;
     
+    private static final int UNARY_PLUS_OP = CONSTRUCTOR_CALL_OP + 1;
+    private static final int UNARY_MINUS_OP = UNARY_PLUS_OP + 1;
+    
+    
     private static final int STATE_NONE = 0;
     private static final int STATE_NEW = 1;  // just saw "new"
     private static final int STATE_NEW_ARGS = 2;  // expecting "new" arguments or array dimensions
@@ -150,6 +154,21 @@ public class TextParser extends JavaParser
         switch (tokenType) {
         case PAREN_OPERATOR:
             return -1;
+        case JavaTokenTypes.ASSIGN:
+        case JavaTokenTypes.BAND_ASSIGN:
+        case JavaTokenTypes.BOR_ASSIGN:
+        case JavaTokenTypes.PLUS_ASSIGN:
+        case JavaTokenTypes.MINUS_ASSIGN:
+        case JavaTokenTypes.STAR_ASSIGN:
+        case JavaTokenTypes.DIV_ASSIGN:
+        case JavaTokenTypes.SL_ASSIGN:
+        case JavaTokenTypes.SR_ASSIGN:
+        case JavaTokenTypes.BSR_ASSIGN:
+        case JavaTokenTypes.MOD_ASSIGN:
+        case JavaTokenTypes.BXOR_ASSIGN:
+            return 0;
+        case JavaTokenTypes.QUESTION:
+            return 1;
         case JavaTokenTypes.EQUAL:
         case JavaTokenTypes.NOT_EQUAL:
             return 8;
@@ -168,6 +187,13 @@ public class TextParser extends JavaParser
         case JavaTokenTypes.STAR:
         case JavaTokenTypes.DIV:
             return 12;
+        case JavaTokenTypes.LNOT:
+        case JavaTokenTypes.BNOT:
+        case UNARY_PLUS_OP:
+        case UNARY_MINUS_OP:
+        case JavaTokenTypes.INC:
+        case JavaTokenTypes.DEC:
+            return 13;
         case JavaTokenTypes.DOT:
             return 25;
         case CAST_OPERATOR:
@@ -224,9 +250,30 @@ public class TextParser extends JavaParser
         case JavaTokenTypes.GE:
         case JavaTokenTypes.EQUAL:
         case JavaTokenTypes.NOT_EQUAL:
+        case JavaTokenTypes.ASSIGN:
+        case JavaTokenTypes.BAND_ASSIGN:
+        case JavaTokenTypes.BOR_ASSIGN:
+        case JavaTokenTypes.PLUS_ASSIGN:
+        case JavaTokenTypes.MINUS_ASSIGN:
+        case JavaTokenTypes.STAR_ASSIGN:
+        case JavaTokenTypes.DIV_ASSIGN:
+        case JavaTokenTypes.SL_ASSIGN:
+        case JavaTokenTypes.SR_ASSIGN:
+        case JavaTokenTypes.BSR_ASSIGN:
+        case JavaTokenTypes.MOD_ASSIGN:
+        case JavaTokenTypes.BXOR_ASSIGN:
             arg2 = popValueStack();
             arg1 = popValueStack();
             checkArgs(arg1, arg2, token);
+            break;
+        case JavaTokenTypes.LNOT:
+        case JavaTokenTypes.BNOT:
+        case JavaTokenTypes.INC:
+        case JavaTokenTypes.DEC:
+        case UNARY_MINUS_OP:
+        case UNARY_PLUS_OP:
+            arg1 = popValueStack();
+            checkArg(arg1, token);
             break;
         case CAST_OPERATOR:
             popValueStack(); // remove the value being cast, leave the cast-to type.
@@ -243,8 +290,12 @@ public class TextParser extends JavaParser
         case BAD_CAST_OPERATOR:
             popValueStack(); // remove the value being cast
             valueStack.push(new ErrorEntity());
+            break;
+        case JavaTokenTypes.QUESTION:
+            processQuestionOperator();
+            break;
         }
-        // TODO
+        // TODO logical not, bitwise not/and/or/xor
     }
     
     @Override
@@ -369,10 +420,25 @@ public class TextParser extends JavaParser
 
         valueStack.push(new ValueEntity(suitable.get(0).retType));
     }
+
+    /**
+     * For a unary operator, check that the argument is valid,
+     * then process the operator.
+     */
+    private void checkArg(JavaEntity arg1, Operator op)
+    {
+        JavaEntity rarg1 = arg1.resolveAsValue();
+        if (rarg1 == null) {
+            valueStack.push(new ErrorEntity());
+            return;
+        }
+        
+        doUnaryOp(rarg1, op);
+    }
     
     /**
-     * For a binary operator, check that both arguments are values before processing
-     * the operator.
+     * For a binary operator, check that both arguments are values, and
+     * then process the operator.
      */
     private void checkArgs(JavaEntity arg1, JavaEntity arg2, Operator op)
     {
@@ -386,6 +452,28 @@ public class TextParser extends JavaParser
         doBinaryOp(rarg1, rarg2, op);
     }
     
+    private void doUnaryOp(JavaEntity arg, Operator op)
+    {
+        JavaType argType = arg.getType().getCapture();
+        
+        int ttype = op.getType();
+        switch (ttype) {
+        case JavaTokenTypes.LNOT:
+            // TODO: check that the argument is boolean (or boxed boolean)
+            valueStack.push(new ValueEntity(JavaPrimitiveType.getBoolean()));
+            break;
+        case JavaTokenTypes.BNOT:
+            // TODO: check type is (possibly boxed) numeric
+            valueStack.push(new ValueEntity(argType));
+            break;
+        case JavaTokenTypes.INC:
+        case JavaTokenTypes.DEC:
+            // TODO: check value is a (possibly boxed) numeric
+            valueStack.push(new ValueEntity(argType));
+            break;
+        }
+    }
+    
     /**
      * Process a binary operator. Arguments have been resolved as values.
      * The result is pushed back onto the value stack.
@@ -397,16 +485,24 @@ public class TextParser extends JavaParser
         
         int ttype = op.getType();
         switch (ttype) {
-        // TODO and remember unboxing conversion
         case JavaTokenTypes.PLUS:
-            if (! a1type.isNumeric() && !(TextAnalyzer.unBox(a1type).isNumeric())) {
-                GenTypeClass [] rstypes = a1type.asSolid().getReferenceSupertypes();
-                if (rstypes != null && rstypes[0].getReflective().getName().equals("java.lang.String")) {
+            // either the first or second argument might be a String,
+            // in which case the result will be a String also.
+            GenTypeSolid a1solid = a1type.asSolid();
+            GenTypeSolid a2solid = a2type.asSolid();
+            if (a1solid != null && !TextAnalyzer.unBox(a1type).isNumeric()) {
+                GenTypeClass [] rstypes = a1solid.getReferenceSupertypes();
+                if (rstypes.length != 0 && rstypes[0].getReflective().getName().equals("java.lang.String")) {
                     valueStack.push(new ValueEntity(rstypes[0]));
                     return;
                 }
-                valueStack.push(new ErrorEntity());
-                return;
+            }
+            if (a2solid != null) {
+                GenTypeClass [] rstypes = a2solid.getReferenceSupertypes();
+                if (rstypes.length != 0 && rstypes[0].getReflective().getName().equals("java.lang.String")) {
+                    valueStack.push(new ValueEntity(rstypes[0]));
+                    return;
+                }
             }
         case JavaTokenTypes.MINUS:
         case JavaTokenTypes.STAR:
@@ -475,10 +571,60 @@ public class TextParser extends JavaParser
                 valueStack.push(new ErrorEntity());
             }
             break;
+        case JavaTokenTypes.ASSIGN:
+        case JavaTokenTypes.BAND_ASSIGN:
+        case JavaTokenTypes.BOR_ASSIGN:
+        case JavaTokenTypes.PLUS_ASSIGN:
+        case JavaTokenTypes.MINUS_ASSIGN:
+        case JavaTokenTypes.STAR_ASSIGN:
+        case JavaTokenTypes.DIV_ASSIGN:
+        case JavaTokenTypes.SL_ASSIGN:
+        case JavaTokenTypes.SR_ASSIGN:
+        case JavaTokenTypes.BSR_ASSIGN:
+        case JavaTokenTypes.MOD_ASSIGN:
+        case JavaTokenTypes.BXOR_ASSIGN:
+            valueStack.push(arg1);
+            break;
         case JavaTokenTypes.DOT:
             // This is handled elsewhere
             valueStack.push(new ErrorEntity());
         default:
+        }
+    }
+    
+    private void processQuestionOperator()
+    {
+        // JLS 15.25
+        JavaEntity rhs = popValueStack();
+        JavaEntity lhs = popValueStack();
+        JavaEntity condition = popValueStack();
+        
+        condition = condition.resolveAsValue();
+        if (condition == null) {
+            valueStack.push(new ErrorEntity());
+            return;
+        }
+        
+        JavaType ctype = condition.getType();
+        if (!ctype.typeIs(JavaType.JT_BOOLEAN) && !ctype.toString().equals("java.lang.Boolean")) {
+            // Condition is not a boolean
+            valueStack.push(new ErrorEntity());
+            return;
+        }
+        
+        rhs = rhs.resolveAsValue();
+        lhs = lhs.resolveAsValue();
+        if (rhs == null || lhs == null) {
+            valueStack.push(new ErrorEntity());
+            return;
+        }
+        
+        JavaType rtype = TextAnalyzer.questionOperator15(lhs, rhs);
+        if (rtype == null) {
+            valueStack.push(new ErrorEntity());
+        }
+        else {
+            valueStack.push(new ValueEntity(rtype));
         }
     }
     
@@ -520,6 +666,10 @@ public class TextParser extends JavaParser
         else if (token.getType() == JavaTokenTypes.STRING_LITERAL) {
             ValueEntity ent = new ValueEntity(new GenTypeClass(new JavaReflective(String.class)));
             valueStack.push(ent);
+        }
+        else if (token.getType() == JavaTokenTypes.LITERAL_true
+                || token.getType() == JavaTokenTypes.LITERAL_false) {
+            valueStack.push(new ValueEntity(JavaPrimitiveType.getBoolean()));
         }
         else if (token.getType() == JavaTokenTypes.LITERAL_this) {
             if (staticAccess) {
@@ -569,6 +719,19 @@ public class TextParser extends JavaParser
     {
         String ident = token.getText();
         JavaEntity top = valueStack.pop();
+        
+        // handle array "length" member
+        if (token.getText().equals("length")) {
+            JavaEntity topVal = top.resolveAsValue();
+            if (topVal != null) {
+                if (topVal.getType().getArrayComponent() != null) {
+                    // This is an array
+                    valueStack.push(new ValueEntity(JavaPrimitiveType.getInt()));
+                    return;
+                }
+            }
+        }
+        
         JavaEntity newTop = top.getSubentity(ident, getAccessSource());
         if (newTop != null) {
             valueStack.push(newTop);
@@ -597,7 +760,28 @@ public class TextParser extends JavaParser
     }
     
     @Override
+    protected void gotUnaryOperator(LocatableToken token)
+    {
+        int ttype = token.getType();
+        if (ttype == JavaTokenTypes.PLUS) {
+            ttype = UNARY_PLUS_OP;
+        }
+        else if (ttype == JavaTokenTypes.MINUS) {
+            ttype = UNARY_MINUS_OP;
+        }
+        processHigherPrecedence(getPrecedence(ttype));
+        operatorStack.push(new Operator(ttype, token));
+    }
+    
+    @Override
     protected void gotBinaryOperator(LocatableToken token)
+    {
+        processHigherPrecedence(getPrecedence(token.getType()));
+        operatorStack.push(new Operator(token.getType(), token));
+    }
+    
+    @Override
+    protected void gotQuestionOperator(LocatableToken token)
     {
         processHigherPrecedence(getPrecedence(token.getType()));
         operatorStack.push(new Operator(token.getType(), token));

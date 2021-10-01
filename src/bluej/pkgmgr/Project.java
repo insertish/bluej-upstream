@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -33,8 +33,8 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedHashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -1046,9 +1046,10 @@ public class Project implements DebuggerListener, InspectorManager
      * Request all open editor windows for the current project to save their
      * contents (if modified).
      */
-    public void saveAllEditors()
+    public void saveAllEditors() throws IOException
     {
         Iterator<Package> i = packages.values().iterator();
+        IOException exception = null;
 
         while(i.hasNext()) {
             Package pkg = (Package) i.next();
@@ -1056,9 +1057,15 @@ public class Project implements DebuggerListener, InspectorManager
                 pkg.saveFilesInEditors();
             }
             catch(IOException ioe) {
+                exception = ioe;
                 Debug.reportError("Error while trying to save editor file:", ioe);
             }
-        } 
+        }
+        
+        if (exception != null) {
+            // Propagate the exception - let the caller know that something went wrong.
+            throw exception;
+        }
     }
     
     /**
@@ -1067,7 +1074,8 @@ public class Project implements DebuggerListener, InspectorManager
      * This function is used after a major change to the contents
      * of the project directory ie an import.
      */
-    public void reloadAll() {
+    public void reloadAll()
+    {
         Iterator<Package> i = packages.values().iterator();
 
         while (i.hasNext()) {
@@ -1590,8 +1598,12 @@ public class Project implements DebuggerListener, InspectorManager
      * A debugger event was fired. Analyse which event it was, and take
      * appropriate action.
      */
-    public void debuggerEvent(final DebuggerEvent event)
+    public void processDebuggerEvent(final DebuggerEvent event, boolean skipUpdate)
     {
+        if (skipUpdate) {
+            return;
+        }
+        
         EventQueue.invokeLater(new Runnable() {
             public void run() {
                 if (event.getID() == DebuggerEvent.DEBUGGER_STATECHANGED) {
@@ -1616,6 +1628,7 @@ public class Project implements DebuggerListener, InspectorManager
                     // check whether a good VM just disappeared
                     if ((oldState == Debugger.IDLE) &&
                             (newState == Debugger.NOTREADY)) {
+                        removeStepMarks();
                         vmClosed();
                     }
 
@@ -1627,38 +1640,38 @@ public class Project implements DebuggerListener, InspectorManager
                     return;
                 }
 
-                if (event.getID() == DebuggerEvent.DEBUGGER_REMOVESTEPMARKS) {
-                    removeStepMarks();
-
-                    return;
-                }
-
                 DebuggerThread thr = event.getThread();
+                if (thr == null) {
+                    return; // Not a thread event
+                }
                 String packageName = JavaNames.getPrefix(thr.getClass(0));
                 Package pkg = getPackage(packageName);
 
                 if (pkg != null) {
                     switch (event.getID()) {
-                        case DebuggerEvent.THREAD_BREAKPOINT:
-                            pkg.hitBreakpoint(thr);
+                    case DebuggerEvent.THREAD_BREAKPOINT:
+                        pkg.hitBreakpoint(thr);
+                        break;
 
-                            break;
-
-                        case DebuggerEvent.THREAD_HALT:
-                            pkg.hitHalt(thr);
-
-                            break;
-
-                            //case DebuggerEvent.THREAD_CONTINUE:
-                            //  break;
-                        case DebuggerEvent.THREAD_SHOWSOURCE:
-                            pkg.showSourcePosition(thr);
-
-                            break;
+                    case DebuggerEvent.THREAD_HALT:
+                        pkg.hitHalt(thr);
+                        break;
                     }
                 }
             }
         });
+    }
+    
+    /**
+     * Show the source code corresponding to the top of the given thread stack.
+     */
+    public void showSource(DebuggerThread thread)
+    {
+        String packageName = JavaNames.getPrefix(thread.getClass(0));
+        Package pkg = getPackage(packageName);
+        if (pkg != null) {
+            pkg.showSourcePosition(thread);
+        }
     }
 
     // ---- end of DebuggerListener interface ----
@@ -1720,7 +1733,7 @@ public class Project implements DebuggerListener, InspectorManager
      */
     public Set<File> getFilesInProject(boolean includePkgFiles, boolean includeDirs)
     {
-        Set<File> files = new HashSet<File>();
+        Set<File> files = new LinkedHashSet<File>();
         if (includeDirs) {
             files.add(projectDir);
         }
@@ -1905,5 +1918,10 @@ public class Project implements DebuggerListener, InspectorManager
         if (tsc != null) {
             tsc.prepareCreateDir(dir);
         }
+    }
+
+    public boolean examineDebuggerEvent(DebuggerEvent e)
+    {
+        return false;
     }
 }

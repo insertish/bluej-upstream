@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -21,10 +21,11 @@
  */
 package bluej;
 
-import java.awt.*;
+import java.awt.Dimension;
+import java.awt.Image;
 
-import javax.swing.*;
-import javax.swing.border.AbstractBorder;
+import javax.swing.BorderFactory;
+import javax.swing.JButton;
 import javax.swing.border.Border;
 import javax.swing.plaf.FontUIResource;
 import javax.swing.plaf.metal.DefaultMetalTheme;
@@ -48,6 +49,10 @@ public class BlueJTheme extends DefaultMetalTheme
         new FontUIResource(controlFont);  
     private final FontUIResource menuFont = 
         new FontUIResource(PrefMgr.getStandardMenuFont());
+
+    private static final String SMALL_ICON_SUFFIX = "-icon-32.png";
+    private static final String MEDIUM_ICON_SUFFIX = "-icon-48.png";
+    private static final String LARGE_ICON_SUFFIX = "-icon-256.png";
 
     // icon to be used for BlueJ windows
     private static Image iconImage = null;
@@ -115,35 +120,43 @@ public class BlueJTheme extends DefaultMetalTheme
 
     /**
      * Get the icon for most BlueJ frames.
-     * 
+     *
      * @return	an icon to be used as the frame icon for most BlueJ windows
      */
     public static Image getIconImage()
+    {
+        String appName = Config.getApplicationName().toLowerCase();
+        return getApplicationIcon (appName);
+    }
+
+    /**
+     * Get the icon for most BlueJ frames.
+     *
+     * @return	an icon to be used as the frame icon for most BlueJ windows
+     */
+    public static Image getApplicationIcon(String baseName)
     {
         if (Config.isMacOS())
             return null;        // don't set window icon on Mac - Mac OS generates dynamic icons
 
         if (iconImage == null) {
             if (Config.isModernWinOS()) {
-                // needs to be tested:
-                //  does Win7 need an icon set internally at all, or does it pick it up from file?
-                //  does Java process .ico files?
-               // iconImage = Config.getFixedImageAsIcon("bluej.ico").getImage();
-                iconImage = Config.getFixedImageAsIcon("bluej-icon-256.png").getImage();
+                // Win Vista, 7, or newer
+                iconImage = Config.getFixedImageAsIcon(baseName + LARGE_ICON_SUFFIX).getImage();
             }
             else if (Config.isWinOS()) {
                 // for Win XP
-                iconImage = Config.getFixedImageAsIcon("bluej-icon-32.png").getImage();
+                iconImage = Config.getFixedImageAsIcon(baseName + SMALL_ICON_SUFFIX).getImage();
             }
             else {
                 // Linux, etc.
-                iconImage = Config.getFixedImageAsIcon("bluej-icon-48.png").getImage();
+                iconImage = Config.getFixedImageAsIcon(baseName + MEDIUM_ICON_SUFFIX).getImage();
             }
         }
 
         return iconImage;
     }
-    
+
     /**
      * Needed for Greenfoot
      */

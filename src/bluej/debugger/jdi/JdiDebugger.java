@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -22,24 +22,48 @@
 package bluej.debugger.jdi;
 
 import java.io.File;
-import java.util.*;
-
-import javax.swing.event.EventListenerList;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 
 import bluej.Config;
 import bluej.classmgr.BPClassLoader;
-import bluej.debugger.*;
+import bluej.debugger.Debugger;
+import bluej.debugger.DebuggerClass;
+import bluej.debugger.DebuggerEvent;
+import bluej.debugger.DebuggerListener;
+import bluej.debugger.DebuggerObject;
+import bluej.debugger.DebuggerResult;
+import bluej.debugger.DebuggerTerminal;
+import bluej.debugger.DebuggerTestResult;
+import bluej.debugger.DebuggerThreadTreeModel;
+import bluej.debugger.ExceptionDescription;
+import bluej.debugger.SourceLocation;
 import bluej.debugger.gentype.JavaType;
 import bluej.debugmgr.Invoker;
 import bluej.utility.Debug;
 import bluej.utility.JavaNames;
 
-import com.sun.jdi.*;
+import com.sun.jdi.ArrayReference;
+import com.sun.jdi.ClassType;
+import com.sun.jdi.Field;
+import com.sun.jdi.InvocationException;
+import com.sun.jdi.ObjectReference;
+import com.sun.jdi.ReferenceType;
+import com.sun.jdi.StringReference;
+import com.sun.jdi.ThreadReference;
+import com.sun.jdi.VMDisconnectedException;
+import com.sun.jdi.VMOutOfMemoryException;
+import com.sun.jdi.Value;
 
 /**
  * A class implementing the execution and debugging primitives needed by BlueJ.
  * 
- * This class is tightly coupled with the classes VMReference and
+ * <p>This class is tightly coupled with the classes VMReference and
  * VMEventHandler. JdiDebugger is the half of the debugger that is persistent
  * across debugger sessions. VMReference and VMEventHandler will be constructed
  * anew each time a remote VM is started. VMReference handles most of the work
@@ -47,14 +71,13 @@ import com.sun.jdi.*;
  * listens for remote VM events and calls back into VMReference on reciept of
  * these events.
  * 
- * Most of the actual access to the virtual machine occurs through the
+ * <p>Most of the actual access to the virtual machine occurs through the
  * MachineLoader thread. When the vm is restarted by user request, a new loader
  * thread is created immediately so that any method calls/etc will execute on
  * the new machine (after waiting until it has loaded).
  * 
  * @author Michael Kolling
  * @author Andrew Patterson
- * @version $Id: JdiDebugger.java 7803 2010-06-24 10:00:55Z nccb $
  */
 public class JdiDebugger extends Debugger
 {
@@ -86,7 +109,7 @@ public class JdiDebugger extends Debugger
     private JdiThreadTreeModel treeModel;
 
     // listeners for events that occur in the debugger
-    private EventListenerList listenerList = new EventListenerList();
+    private List<DebuggerListener> listenerList = new ArrayList<DebuggerListener>();
 
     // the directory to launch the VM in
     private File startingDirectory;
@@ -159,9 +182,10 @@ public class JdiDebugger extends Debugger
         // start the MachineLoader (a separate thread) to load the
         // remote virtual machine in the background
 
-        if (!selfRestart)
+        if (!selfRestart) {
             // if selfRestart == true, this has already been done
             machineLoader = new MachineLoaderThread();
+        }
         selfRestart = false;
         // lower priority to improve GUI response time
         machineLoader.setPriority(loaderPriority);
@@ -228,9 +252,11 @@ public class JdiDebugger extends Debugger
      * @param l
      *            the DebuggerListener to add
      */
-    public synchronized void addDebuggerListener(DebuggerListener l)
+    public void addDebuggerListener(DebuggerListener l)
     {
-        listenerList.add(DebuggerListener.class, l);
+        synchronized (listenerList) {
+            listenerList.add(l);
+        }
     }
 
     /**
@@ -239,9 +265,21 @@ public class JdiDebugger extends Debugger
      * @param l
      *            the DebuggerListener to remove
      */
-    public synchronized void removeDebuggerListener(DebuggerListener l)
+    public void removeDebuggerListener(DebuggerListener l)
     {
-        listenerList.remove(DebuggerListener.class, l);
+        synchronized (listenerList) {
+            listenerList.remove(l);
+        }
+    }
+    
+    /**
+     * Get a copy of the listener list.
+     */
+    private DebuggerListener [] getListeners()
+    {
+        synchronized (listenerList) {
+            return listenerList.toArray(new DebuggerListener[listenerList.size()]);
+        }
     }
 
     /**
@@ -676,17 +714,20 @@ public class JdiDebugger extends Debugger
      * notify all listeners that have registered interest for
      * notification on this event type.
      */ 
-    private void fireTargetEvent(DebuggerEvent ce)
+    private void fireTargetEvent(DebuggerEvent ce, boolean skipUpdate)
     {
         // Guaranteed to return a non-null array
-        Object[] listeners = listenerList.getListenerList();
+        DebuggerListener[] listeners = getListeners();
         // Process the listeners last to first, notifying
         // those that are interested in this event
-        for (int i = listeners.length - 2; i >= 0; i -= 2) {
-            if (listeners[i] == DebuggerListener.class) {
-                ((DebuggerListener) listeners[i + 1]).debuggerEvent(ce);
-            }
+        for (int i = listeners.length - 1; i >= 0; i --) {
+            listeners[i].processDebuggerEvent(ce, skipUpdate);
         }
+    }
+    
+    private void fireTargetEvent(DebuggerEvent ce)
+    {
+        fireTargetEvent(ce, false);
     }
 
     void raiseStateChangeEvent(int newState)
@@ -697,22 +738,23 @@ public class JdiDebugger extends Debugger
         
         if (newState != machineState) {
             
-            // If going from running state to notready state, first pass
-            // through idle state
+            // Going from SUSPENDED to any other state must ass through RUNNING
+            if (machineState == SUSPENDED && newState != RUNNING) {
+                machineState = RUNNING;
+                fireTargetEvent(new DebuggerEvent(this, DebuggerEvent.DEBUGGER_STATECHANGED, SUSPENDED, RUNNING));
+            }
+            
+            // If going from RUNNING state to NOTREADY state, first pass
+            // through IDLE state
             if (machineState == RUNNING && newState == NOTREADY) {
-                fireTargetEvent(new DebuggerEvent(this, DebuggerEvent.DEBUGGER_STATECHANGED, RUNNING, IDLE));
                 machineState = IDLE;
+                fireTargetEvent(new DebuggerEvent(this, DebuggerEvent.DEBUGGER_STATECHANGED, RUNNING, IDLE));
             }
             
             int oldState = machineState;
             machineState = newState;
             fireTargetEvent(new DebuggerEvent(this, DebuggerEvent.DEBUGGER_STATECHANGED, oldState, newState));
         }
-    }
-
-    void raiseRemoveStepMarksEvent()
-    {
-        fireTargetEvent(new DebuggerEvent(this, DebuggerEvent.DEBUGGER_REMOVESTEPMARKS));
     }
 
     // ==== code for active debugging: setting breakpoints, stepping, etc ===
@@ -729,7 +771,7 @@ public class JdiDebugger extends Debugger
      * 
      * @return null if there was no problem, or an error string
      */
-    public String toggleBreakpoint(String className, int line, boolean set)
+    public String toggleBreakpoint(String className, int line, boolean set, Map<String, String> properties)
     {
         // Debug.message("[toggleBreakpoint]: " + className + " line " + line);
 
@@ -737,10 +779,33 @@ public class JdiDebugger extends Debugger
         try {
             if (vmr != null) {
                 if (set) {
-                    return vmr.setBreakpoint(className, line);
+                    return vmr.setBreakpoint(className, line, properties);
                 }
                 else {
                     return vmr.clearBreakpoint(className, line);
+                }
+            }
+            else {
+                return "VM terminated.";
+            }
+        }
+        catch (Exception e) {
+            Debug.reportError("breakpoint error: " + e);
+            e.printStackTrace(System.out);
+            return Config.getString("debugger.jdiDebugger.internalErrorMsg");
+        }
+    }
+    
+    public String toggleBreakpoint(String className, String method, boolean set, Map<String, String> properties)
+    {
+        VMReference vmr = getVM();
+        try {
+            if (vmr != null) {
+                if (set) {
+                    return vmr.setBreakpoint(className, method, properties);
+                }
+                else {
+                    return vmr.clearBreakpoint(className, method);
                 }
             }
             else {
@@ -761,28 +826,53 @@ public class JdiDebugger extends Debugger
      * @param tr   the thread in which code hit the breakpoint/step
      * @param bp   true for a breakpoint, false for a step
      */
-    public void breakpoint(final ThreadReference tr, final boolean bp)
+    public void breakpoint(final ThreadReference tr, final boolean bp, boolean skipUpdate, DebuggerEvent.BreakpointProperties props)
     {
         final JdiThread breakThread = allThreads.find(tr);
-        treeModel.syncExec(new Runnable() {
-            public void run()
-            {
-                JdiThreadNode jtn = treeModel.findThreadNode(tr);
-                // if the thread at the breakpoint is not currently displayed,
-                // display it now.
-                if (jtn == null) {
-                    JdiThreadNode root = treeModel.getThreadRoot();
-                    treeModel.insertNodeInto(new JdiThreadNode(breakThread), root, 0);
+        if (false == skipUpdate)
+            treeModel.syncExec(new Runnable() {
+                public void run()
+                {
+                    JdiThreadNode jtn = treeModel.findThreadNode(tr);
+                    // if the thread at the breakpoint is not currently displayed,
+                    // display it now.
+                    if (jtn == null) {
+                        JdiThreadNode root = treeModel.getThreadRoot();
+                        treeModel.insertNodeInto(new JdiThreadNode(breakThread), root, 0);
+                    }
+                    else {
+                        treeModel.nodeChanged(jtn);
+                    }
                 }
-                else
-                    treeModel.nodeChanged(jtn);
-            }
-        });
+            });
 
-        if (bp)
-            fireTargetEvent(new DebuggerEvent(this, DebuggerEvent.THREAD_BREAKPOINT, breakThread));
+        if (bp) {
+            fireTargetEvent(new DebuggerEvent(this, DebuggerEvent.THREAD_BREAKPOINT, breakThread, props), skipUpdate);
+        }
+        else {
+            fireTargetEvent(new DebuggerEvent(this, DebuggerEvent.THREAD_HALT, breakThread, props), skipUpdate);
+        }
+    }
+    
+
+    public boolean screenBreakpoint(ThreadReference thread, boolean breakpoint, DebuggerEvent.BreakpointProperties props)
+    {
+        JdiThread breakThread = allThreads.find(thread);
+        DebuggerEvent event;
+        if (breakpoint)
+            event = new DebuggerEvent(this, DebuggerEvent.THREAD_BREAKPOINT, breakThread, props);
         else
-            fireTargetEvent(new DebuggerEvent(this, DebuggerEvent.THREAD_HALT, breakThread));
+            event = new DebuggerEvent(this, DebuggerEvent.THREAD_HALT, breakThread, props);
+        
+        boolean done = false;
+        // Guaranteed to return a non-null array
+        DebuggerListener[] listeners = getListeners();
+        // Process the listeners last to first, notifying
+        // those that are interested in this event
+        for (int i = listeners.length - 1; i >= 0; i--) {
+            done = done || listeners[i].examineDebuggerEvent(event);
+        }
+        return done;
     }
 
     // - event handling
@@ -816,7 +906,6 @@ public class JdiDebugger extends Debugger
                 
                 launch();
                 
-                raiseRemoveStepMarksEvent();
                 raiseStateChangeEvent(Debugger.NOTREADY);
                 
                 usedNames.clear();
@@ -839,7 +928,7 @@ public class JdiDebugger extends Debugger
      */
     void threadStart(final ThreadReference tr)
     {
-        final JdiThread newThread = new JdiThread(treeModel, tr);
+        final JdiThread newThread = new JdiThread(this, tr);
         allThreads.add(newThread);
         treeModel.syncExec(new Runnable() {
             public void run()
@@ -1014,8 +1103,81 @@ public class JdiDebugger extends Debugger
         }
     }
 
-    public File getStartingDirectory()
+    /**
+     * Emit an event (to listeners) due to a thread being halted.
+     */
+    void emitThreadHaltEvent(JdiThread thread)
     {
-        return startingDirectory;
+        vmRef.emitThreadEvent(thread, true);
+    }
+    
+    /**
+     * Emit an event (to listeners) due to a thread being resumed.
+     */
+    void emitThreadResumedEvent(JdiThread thread)
+    {
+        vmRef.emitThreadEvent(thread, false);
+    }
+    
+    /**
+     * A thread has become halted; inform listeners.
+     */
+    void threadHalted(final JdiThread thread)
+    {
+        DebuggerEvent event = new DebuggerEvent(this, DebuggerEvent.THREAD_HALT, thread, null);
+        
+        boolean skipUpdate = false;
+        // Guaranteed to return a non-null array
+        DebuggerListener[] listeners = getListeners();
+        // Process the listeners last to first, notifying
+        // those that are interested in this event
+        for (int i = listeners.length - 1; i >= 0; i--) {
+            skipUpdate |= listeners[i].examineDebuggerEvent(event);
+        }
+        
+        if (! skipUpdate) {
+            treeModel.syncExec(new Runnable() {
+                public void run()
+                {
+                    JdiThreadNode threadNode = treeModel.findThreadNode(thread.getRemoteThread());
+                    if (threadNode != null) {
+                        treeModel.nodeChanged(threadNode);
+                    }
+                }
+            });
+        }
+        
+        fireTargetEvent(event, skipUpdate);
+    }
+    
+    /**
+     * A thread has been resumed; inform listeners.
+     */
+    void threadResumed(final JdiThread thread)
+    {
+        DebuggerEvent event = new DebuggerEvent(this, DebuggerEvent.THREAD_CONTINUE, thread, null);
+        
+        boolean skipUpdate = false;
+        // Guaranteed to return a non-null array
+        DebuggerListener [] listeners = getListeners();
+        // Process the listeners last to first, notifying
+        // those that are interested in this event
+        for (int i = listeners.length - 2; i >= 0; i -= 2) {
+            skipUpdate |= listeners[i].examineDebuggerEvent(event);
+        }
+
+        if (! skipUpdate) {
+            treeModel.syncExec(new Runnable() {
+                public void run()
+                {
+                    JdiThreadNode threadNode = treeModel.findThreadNode(thread.getRemoteThread());
+                    if (threadNode != null) {
+                        treeModel.nodeChanged(threadNode);
+                    }
+                }
+            });
+        }
+        
+        fireTargetEvent(event, skipUpdate);
     }
 }

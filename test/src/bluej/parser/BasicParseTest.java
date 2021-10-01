@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -305,11 +305,29 @@ public class BasicParseTest extends junit.framework.TestCase
     	assertTrue(implemented.contains("java.lang.Runnable"));
     	assertTrue(implemented.contains("java.lang.Iterable"));
     }
+    
+    public void testValidClassInfo3() throws Exception
+    {
+        StringReader sr = new StringReader(
+                "interface A extends Runnable, Iterable {\n" +
+                "}\n");
+        ClassInfo info = InfoParser.parse(sr,
+                new ClassLoaderResolver(this.getClass().getClassLoader()), null);
+        List<String> implemented = info.getImplements();
+        assertNotNull(implemented);
+        assertEquals(2, implemented.size());
+        assertTrue(implemented.contains("java.lang.Runnable"));
+        assertTrue(implemented.contains("java.lang.Iterable"));
+        Selection extendsSel = info.getExtendsInsertSelection();
+        assertNotNull(extendsSel);
+        assertEquals(1, extendsSel.getLine());
+        assertEquals(39, extendsSel.getColumn());
+    }
 
     /**
      * Test recognition of interfaces
      */
-    public void testValidClassInfo3() throws Exception
+    public void testValidClassInfo4() throws Exception
     {
     	StringReader sr = new StringReader(
     			"interface A {}"
@@ -321,12 +339,13 @@ public class BasicParseTest extends junit.framework.TestCase
     /**
      * Test recognition of enumerations
      */
-    public void testValidClassInfo4() throws Exception
+    public void testValidClassInfo5() throws Exception
     {
     	StringReader sr = new StringReader(
-    			"enum A { monday, tuesday, wednesday }"
+    			"enum A { monday { public int getAnInt() { return 3;} }, tuesday() {}, wednesday }"
     	);
     	ClassInfo info = InfoParser.parse(sr, null, null);
+    	assertNotNull(info);
     	assertTrue(info.isEnum());
     }
     

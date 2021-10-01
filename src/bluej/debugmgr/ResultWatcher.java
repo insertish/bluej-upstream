@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -22,6 +22,7 @@
 package bluej.debugmgr;
 
 import bluej.debugger.DebuggerObject;
+import bluej.debugger.ExceptionDescription;
 
 import bluej.testmgr.record.*;
 
@@ -32,14 +33,26 @@ import bluej.testmgr.record.*;
  *
  * @author  Michael Kolling
  * @author  Poul Henriksen
- * @version $Id: ResultWatcher.java 6671 2009-09-14 04:37:14Z davmac $
  */
 public interface ResultWatcher
 {
     /**
+     * The user has supplied any requested arguments, and compilation has begun. 
+     */
+    void beginCompile();
+    
+    /**
+     * Compilation (if needed) was successful, and execution has begun.
+     */
+    void beginExecution(InvokerRecord ir);
+    
+    /**
      * An invocation has completed - here is the result.
      * 
      * @param result   The invocation result object (null for a void result).
+     *                 For a constructor call, the result object is the newly created instance.
+     *                 For any other invocation, the result is a wrapper object with a single
+     *                 field containing the actual result.
      * @param name     The name of the result. For a constructed object, this
      *                 is the name supplied by the user. Otherwise this is  the
      *                 literal "result", or null if the result is void type.
@@ -50,16 +63,16 @@ public interface ResultWatcher
     /**
      * An invocation has failed (compilation error) - here is the error message.
      */
-    void putError(String message);
+    void putError(String message, InvokerRecord ir);
 	
     /**
-     * A runtime exception occurred - here is the exception text
+     * A runtime exception occurred - here is the exception text, and stack trace
      */
-    void putException(String message);
+    void putException(ExceptionDescription exception, InvokerRecord ir);
     
     /**
      * The debug VM terminated. This may have been due to an explicit user action in
      * the UI, or the executing code called System.exit().
      */
-    void putVMTerminated();
+    void putVMTerminated(InvokerRecord ir);
 }

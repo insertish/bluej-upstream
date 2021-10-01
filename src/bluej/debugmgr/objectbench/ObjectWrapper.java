@@ -21,7 +21,18 @@
  */
 package bluej.debugmgr.objectbench;
 
-import java.awt.*;
+import java.awt.AWTEvent;
+import java.awt.BasicStroke;
+import java.awt.Color;
+import java.awt.Cursor;
+import java.awt.Dimension;
+import java.awt.FontMetrics;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
+import java.awt.Image;
+import java.awt.Rectangle;
+import java.awt.RenderingHints;
+import java.awt.Stroke;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.awt.event.MouseEvent;
@@ -41,14 +52,15 @@ import javax.swing.JPopupMenu;
 import bluej.BlueJEvent;
 import bluej.Config;
 import bluej.debugger.DebuggerObject;
+import bluej.debugger.ExceptionDescription;
 import bluej.debugger.gentype.GenTypeClass;
 import bluej.debugger.gentype.GenTypeParameter;
 import bluej.debugger.gentype.JavaType;
+import bluej.debugmgr.ExecutionEvent;
 import bluej.debugmgr.ExpressionInformation;
 import bluej.debugmgr.Invoker;
 import bluej.debugmgr.NamedValue;
 import bluej.debugmgr.ResultWatcher;
-import bluej.debugmgr.inspector.ResultInspector;
 import bluej.extensions.BObject;
 import bluej.extensions.ExtensionBridge;
 import bluej.extmgr.MenuManager;
@@ -110,10 +122,11 @@ public class ObjectWrapper extends JComponent implements InvokeListener, NamedVa
     private static boolean itemHeightKnown = false;
     private static int itemsOnScreen;
 
-    // The Java object that this wraps
+    /** The Java object that this wraps */
     protected DebuggerObject obj;
     protected GenTypeClass iType;
 
+    /** Fully qualified type this object represents, including type parameters */
     private String className;
     private String instanceName;
     protected String displayClassName;
@@ -126,13 +139,6 @@ public class ObjectWrapper extends JComponent implements InvokeListener, NamedVa
 
     private boolean isSelected = false;
     
-    private Color[] shadowColours = {
-            new Color(0,0,0,11), //furthest out
-            new Color(0,0,0,22),     
-            new Color(0,0,0,33),
-            new Color(0,0,0,66)//closes to the center
-    };
-
     /**
      * Get an object wrapper for a user object. 
      * 
@@ -149,9 +155,6 @@ public class ObjectWrapper extends JComponent implements InvokeListener, NamedVa
                                             GenTypeClass iType,
                                             String instanceName)
     {
-        if(pmf.isEmptyFrame())
-            throw new IllegalArgumentException();
-
         if (obj.isArray()) {
             return new ArrayWrapper(pmf, ob, obj, instanceName);
         }
@@ -162,12 +165,10 @@ public class ObjectWrapper extends JComponent implements InvokeListener, NamedVa
 
     protected ObjectWrapper(PkgMgrFrame pmf, ObjectBench ob, DebuggerObject obj, GenTypeClass iType, String instanceName)
     {
-        if(pmf.isEmptyFrame())
-            throw new IllegalArgumentException();
-
         // first one we construct will give us more info about the size of the screen
-        if(!itemHeightKnown)
+        if(!itemHeightKnown) {
             itemsOnScreen = (int)Config.screenBounds.getHeight() / itemHeight;
+        }
 
         this.pmf = pmf;
         this.pkg = pmf.getPackage();
@@ -539,10 +540,6 @@ public class ObjectWrapper extends JComponent implements InvokeListener, NamedVa
         }
     }
 
-    public JPopupMenu getMenu(){
-    	return menu;
-    }
-
     /**
      * Creates a List containing all classes in an inheritance hierarchy
      * working back to Object
@@ -754,53 +751,92 @@ public class ObjectWrapper extends JComponent implements InvokeListener, NamedVa
         watcher = new ResultWatcher() {
             private ExpressionInformation expressionInformation = new ExpressionInformation(method,getName(),obj.getGenType());
             
+            public void beginCompile()
+            {
+                pmf.setWaitCursor(true);
+            }
+            
+            public void beginExecution(InvokerRecord ir)
+            {
+                BlueJEvent.raiseEvent(BlueJEvent.METHOD_CALL, ir.toExpression());
+                pmf.setWaitCursor(false);
+            }
+            
             public void putResult(DebuggerObject result, String name, InvokerRecord ir)
             {
+                ExecutionEvent executionEvent = new ExecutionEvent(pkg, obj.getClassName(), instanceName);
+                executionEvent.setMethodName(method.getName());
+                executionEvent.setParameters(method.getParamTypes(false), ir.getArgumentValues());
+                executionEvent.setResult(ExecutionEvent.NORMAL_EXIT);
+                executionEvent.setResultObject(result);
+                BlueJEvent.raiseEvent(BlueJEvent.EXECUTION_RESULT, executionEvent);
+                
+                pkg.getProject().updateInspectors();
                 expressionInformation.setArgumentValues(ir.getArgumentValues());
                 ob.addInteraction(ir);
                 
                 // a void result returns a name of null
-                if (name == null)
-                    return;
-                                    
-                ResultInspector viewer =
+                if (result != null && ! result.isNullObject()) {
                     pkg.getProject().getResultInspectorInstance(result, name, pkg,
-                                           ir, expressionInformation, pmf);
-                BlueJEvent.raiseEvent(BlueJEvent.METHOD_CALL,
-                                      viewer.getResult());
+                            ir, expressionInformation, pmf);
+                }
             }
-            public void putError(String msg) { }
-            public void putException(String msg) { }
-            public void putVMTerminated() { }
+            
+            public void putError(String msg, InvokerRecord ir)
+            {
+                pmf.setWaitCursor(false);
+            }
+            
+            public void putException(ExceptionDescription exception, InvokerRecord ir)
+            {
+                ExecutionEvent executionEvent = new ExecutionEvent(pkg, obj.getClassName(), instanceName);
+                executionEvent.setParameters(method.getParamTypes(false), ir.getArgumentValues());
+                executionEvent.setResult(ExecutionEvent.EXCEPTION_EXIT);
+                executionEvent.setException(exception);
+                BlueJEvent.raiseEvent(BlueJEvent.EXECUTION_RESULT, executionEvent);
+                
+                pkg.getProject().updateInspectors();
+                pkg.exceptionMessage(exception);
+            }
+            
+            public void putVMTerminated(InvokerRecord ir)
+            {
+                ExecutionEvent executionEvent = new ExecutionEvent(pkg, obj.getClassName(), instanceName);
+                executionEvent.setParameters(method.getParamTypes(false), ir.getArgumentValues());
+                executionEvent.setResult(ExecutionEvent.TERMINATED_EXIT);
+                BlueJEvent.raiseEvent(BlueJEvent.EXECUTION_RESULT, executionEvent);
+            }
         };
 
-        Invoker invoker = new Invoker(pmf, method, this, watcher);
-        invoker.invokeInteractive();
+        if (pmf.checkDebuggerState()) {
+            Invoker invoker = new Invoker(pmf, method, this, watcher);
+            invoker.invokeInteractive();
+        }
     }
     
     public void callConstructor(ConstructorView cv)
     {
         // do nothing (satisfy the InvokeListener interface)
     }
-    
-	/**
-	 * @return Returns the isSelected.
-	 */
-	public boolean isSelected() 
+
+    /**
+     * @return Returns the isSelected.
+     */
+    public boolean isSelected() 
     {
-		return isSelected;
-	}
-    
-	/**
-	 * @param isSelected The isSelected to set.
-	 */
-	public void setSelected(boolean isSelected) 
+        return isSelected;
+    }
+
+    /**
+     * @param isSelected The isSelected to set.
+     */
+    public void setSelected(boolean isSelected) 
     {
-		this.isSelected = isSelected;
-		if(isSelected) {
-		    pmf.setStatus(getName() + " : " + displayClassName);
-		}
+        this.isSelected = isSelected;
+        if(isSelected) {
+            pmf.setStatus(getName() + " : " + displayClassName);
+        }
         repaint();
         scrollRectToVisible(new Rectangle(0, 0, WIDTH, HEIGHT));
-	}
+    }
 }

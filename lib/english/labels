@@ -13,8 +13,6 @@ compiler.warningDialog.title=Compiler Warnings
 compiler.warningDialog.label=Warnings from last compilation 
 compiler.warningDialog.noWarnings=No warnings
 
-debugger.null=null
-
 debugger.assert.assertThat=Assert that:
 debugger.assert.resultIs=result is
 debugger.assert.equalTo=equal to
@@ -473,8 +471,8 @@ pkgmgr.printDialog.printSource=Print source code
 pkgmgr.printDialog.printReadme=Print project readme 
 
 # method call dialog
-pkgmgr.methodCall.titleCreate=BlueJ:  Create Object
-pkgmgr.methodCall.titleCall=BlueJ:  Method Call
+pkgmgr.methodCall.titleCreate=Create Object
+pkgmgr.methodCall.titleCall=Method Call
 pkgmgr.methodCall.namePrompt=Name of Instance:
 pkgmgr.methodCall.typeParametersPrompt=Type Parameters:
 pkgmgr.methodCall.typeParameterPrompt=Type Parameter:
@@ -484,7 +482,7 @@ error.methodCall.illegalName=The instance name must be a Java identifier.
 error.methodCall.duplicateName=An object with this name already exists.\nPlease choose a unique name.
 
 # Debugger dialog (ExecControls.java)
-debugger.execControls.windowTitle = BlueJ:  Debugger
+debugger.execControls.windowTitle = Debugger
 debugger.execControls.stackTitle = Call Sequence
 debugger.execControls.staticTitle = Static variables
 debugger.execControls.instanceTitle = Instance variables

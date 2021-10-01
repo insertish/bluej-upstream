@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 2000-2009,2010  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -23,6 +23,7 @@ package bluej.debugger.jdi;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import bluej.debugger.DebuggerObject;
 import bluej.debugger.gentype.GenTypeArray;
@@ -41,7 +42,6 @@ import com.sun.jdi.Value;
  *
  * @author     Michael Kolling
  * @created    December 26, 2000
- * @version    $Id: JdiArray.java 7751 2010-06-03 10:55:25Z nccb $
  */
 public class JdiArray extends JdiObject
 {    
@@ -153,9 +153,9 @@ public class JdiArray extends JdiObject
     }
     
     /**
-     *  Return true if this object is an array.
+     * Return true if this object is an array.
      *
-     *@return    The Array value
+     * @return    The Array value
      */
     public boolean isArray()
     {
@@ -177,17 +177,40 @@ public class JdiArray extends JdiObject
         return 0;
     }
 
-    /**
-     *  Return the number of object fields.
-     *
-     *@return    The InstanceFieldCount value
+    /*
+     * @see bluej.debugger.jdi.JdiObject#getInstanceFieldCount()
      */
     public int getInstanceFieldCount()
     {
         return ((ArrayReference) obj).length();
     }
 
-
+    @Override
+    public List<String> getInstanceFields(boolean includeModifiers,
+            Map<String, List<String>> restrictedClasses)
+    {
+        ArrayReference array = (ArrayReference) obj;
+        int len = array.length();
+        List<String> r = new ArrayList<String>(len);
+        for (int i = 0; i < len; i++) {
+            String field = getInstanceFieldName(i) + " = "
+                    + JdiUtils.getJdiUtils().getValueString(array.getValue(i));
+            r.add(field);
+        }
+        return r;
+    }
+    
+    @Override
+    public String getInstanceField(int slot, boolean includeModifiers)
+    {
+        ArrayReference array = (ArrayReference) obj;
+        String field = getInstanceFieldName(slot) + " = "
+            + JdiUtils.getJdiUtils().getValueString(array.getValue(slot));
+        return field;
+    }
+    
+    
+    
     /**
      *  Return the name of the static field at 'slot'.
      *

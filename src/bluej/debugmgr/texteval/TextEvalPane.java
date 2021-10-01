@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -51,7 +51,9 @@ import javax.swing.text.SimpleAttributeSet;
 import bluej.BlueJEvent;
 import bluej.Config;
 import bluej.debugger.DebuggerObject;
+import bluej.debugger.ExceptionDescription;
 import bluej.debugger.gentype.JavaType;
+import bluej.debugmgr.ExecutionEvent;
 import bluej.debugmgr.IndexHistory;
 import bluej.debugmgr.Invoker;
 import bluej.debugmgr.NamedValue;
@@ -72,7 +74,6 @@ import bluej.utility.Utility;
  * account in size computations.
  * 
  * @author Michael Kolling
- * @version $Id: TextEvalPane.java 7785 2010-06-21 05:14:06Z davmac $
  */
 public class TextEvalPane extends JEditorPane 
     implements ValueCollection, ResultWatcher, MouseMotionListener
@@ -82,7 +83,7 @@ public class TextEvalPane extends JEditorPane
     private static final Cursor objectCursor = new Cursor(Cursor.HAND_CURSOR);
     private static final Cursor textCursor = new Cursor(Cursor.TEXT_CURSOR);
     
-    private static final String nullLabel = Config.getString("debugger.null");
+    private static final String nullLabel = "null";
     
     private static final String uninitializedWarning = Config.getString("pkgmgr.codepad.uninitialized");
     
@@ -92,8 +93,12 @@ public class TextEvalPane extends JEditorPane
     private IndexHistory history;
     private Invoker invoker = null;
     private TextAnalyzer textParser = null;
+    
+    // Keeping track of invocation
     private boolean firstTry;
     private boolean wrappedResult;
+    private String errorMessage;
+    
     private boolean mouseInTag = false;
     private boolean mouseOverObject = false;
     private boolean busy = false;
@@ -221,13 +226,25 @@ public class TextEvalPane extends JEditorPane
     
     //   --- ResultWatcher interface ---
 
+    /*
+     * @see bluej.debugmgr.ResultWatcher#beginExecution()
+     */
+    public void beginCompile() { }
+    
+    /* (non-Javadoc)
+     * @see bluej.debugmgr.ResultWatcher#beginExecution()
+     */
+    public void beginExecution(InvokerRecord ir)
+    { 
+        BlueJEvent.raiseEvent(BlueJEvent.METHOD_CALL, currentCommand);
+    }
+    
     /**
      * An invocation has completed - here is the result.
      * If the invocation has a void result (note that is a void type), result == null.
      */
     public void putResult(final DebuggerObject result, final String name, final InvokerRecord ir)
     {
-        currentCommand = "";
         frame.getObjectBench().addInteraction(ir);
         
         // Newly declared variables are now initialized
@@ -264,7 +281,7 @@ public class TextEvalPane extends JEditorPane
             autoInitializedVars.clear();
         }
         
-        if (result != null) {
+        if (result != null && !result.isNullObject()) {
             //Debug.message("type:"+result.getFieldValueTypeString(0));
             
             String resultString = result.getFieldValueString(0);
@@ -286,11 +303,15 @@ public class TextEvalPane extends JEditorPane
                     output(resultString + "   (" + resultType + ")");
                 }
             }            
-            BlueJEvent.raiseEvent(BlueJEvent.METHOD_CALL, resultString);
         } 
-        else {
-            BlueJEvent.raiseEvent(BlueJEvent.METHOD_CALL, null);
-        }
+        
+        ExecutionEvent executionEvent = new ExecutionEvent(frame.getPackage());
+        executionEvent.setCommand(currentCommand);
+        executionEvent.setResult(ExecutionEvent.NORMAL_EXIT);
+        executionEvent.setResultObject(result);
+        BlueJEvent.raiseEvent(BlueJEvent.EXECUTION_RESULT, executionEvent);
+        
+        currentCommand = "";
         textParser.confirmCommand();
         setEditable(true);    // allow next input
         busy = false;
@@ -299,51 +320,72 @@ public class TextEvalPane extends JEditorPane
     /**
      * An invocation has failed - here is the error message
      */
-    public void putError(final String message)
+    public void putError(String message, InvokerRecord ir)
     {
         if(firstTry) {
-            // append("   --error, first try: " + message + "\n");
             if (wrappedResult) {
                 // We thought we knew what the result type should be, but there
                 // was a compile time error. So try again, assuming that we
-                // got it wrong.
+                // got it wrong, and we'll use the dynamic result type (meaning
+                // we won't get type arguments).
                 wrappedResult = false;
+                errorMessage = null; // use the error message from this second attempt
                 invoker = new Invoker(frame, this, currentCommand, TextEvalPane.this);
                 invoker.setImports(textParser.getImportStatements());
                 invoker.doFreeFormInvocation("");
             }
             else {
+                // We thought there was going to be a result, but compilation failed.
+                // Try again, but assume we have a statement this time.
                 firstTry = false;
-                invoker.tryAgain();
+                invoker = new Invoker(frame, this, currentCommand, TextEvalPane.this);
+                invoker.setImports(textParser.getImportStatements());
+                invoker.doFreeFormInvocation(null);
+                if (errorMessage == null) {
+                    errorMessage = message;
+                }
             }
         }
         else {
+            if (errorMessage == null) {
+                errorMessage = message;
+            }
+            
             // An error. Remove declared variables.
-            if (autoInitializedVars != null)
+            if (autoInitializedVars != null) {
                 autoInitializedVars.clear();
+            }
             
             removeNewlyDeclareds();
-            showErrorMsg(message);
+            showErrorMsg(errorMessage);
+            errorMessage = null;
         }
     }
     
     /**
      * A runtime exception occurred.
      */
-    public void putException(String message)
+    public void putException(ExceptionDescription exception, InvokerRecord ir)
     {
-        if (autoInitializedVars != null)
+        ExecutionEvent executionEvent = new ExecutionEvent(frame.getPackage());
+        executionEvent.setCommand(currentCommand);
+        executionEvent.setResult(ExecutionEvent.EXCEPTION_EXIT);
+        executionEvent.setException(exception);
+        BlueJEvent.raiseEvent(BlueJEvent.EXECUTION_RESULT, executionEvent);
+        
+        if (autoInitializedVars != null) {
             autoInitializedVars.clear();
+        }
         
         removeNewlyDeclareds();
-        showErrorMsg(message);
+        showErrorMsg(exception.getText());
     }
     
     /**
      * The remote VM terminated before execution completed (or as a result of
      * execution).
      */
-    public void putVMTerminated()
+    public void putVMTerminated(InvokerRecord ir)
     {
         if (autoInitializedVars != null)
             autoInitializedVars.clear();
@@ -787,8 +829,9 @@ public class TextEvalPane extends JEditorPane
          */
         final public void actionPerformed(ActionEvent event)
         {
-            if (busy)
+            if (busy) {
                 return;
+            }
             
             String line = getCurrentLine();
             currentCommand = (currentCommand + line).trim();
@@ -805,11 +848,13 @@ public class TextEvalPane extends JEditorPane
                     textParser = new TextAnalyzer(frame.getProject().getEntityResolver(),
                             frame.getPackage().getQualifiedName(), TextEvalPane.this);
                 }
-                String retType = textParser.parseCommand(currentCommand);
+                String retType;
+                retType = textParser.parseCommand(currentCommand);
                 wrappedResult = (retType != null && retType.length() != 0);
                 
                 // see if any variables were declared
                 if (retType == null) {
+                    firstTry = false; // Only try once.
                     currentCommand = textParser.getAmendedCommand();
                     List<DeclaredVar> declaredVars = textParser.getDeclaredVars();
                     if (declaredVars != null) {
@@ -853,7 +898,7 @@ public class TextEvalPane extends JEditorPane
                 if (!invoker.doFreeFormInvocation(retType)) {
                     // Invocation failed
                     firstTry = false;
-                    putError("Invocation failed.");
+                    putError("Invocation failed.", null);
                 }
             }
             else {
@@ -863,7 +908,7 @@ public class TextEvalPane extends JEditorPane
     }
 
     final class ContinueCommandAction extends AbstractAction {
-
+        
         /**
          * Create a new action object. This action reads the current
          * line as a start for a new command and continues reading the 

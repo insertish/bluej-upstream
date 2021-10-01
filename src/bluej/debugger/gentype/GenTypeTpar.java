@@ -71,16 +71,18 @@ public class GenTypeTpar extends GenTypeSolid
         return other == this;
     }
     
-    public GenTypeSolid mapTparsToTypes(Map<String, ? extends GenTypeParameter> tparams)
+    public GenTypeParameter mapTparsToTypes(Map<String, ? extends GenTypeParameter> tparams)
     {
         if (tparams == null)
             return this;
         
-        GenTypeParameter newType = (GenTypeParameter)tparams.get(name);
-        if( newType == null )
+        GenTypeParameter newType = tparams.get(name);
+        if( newType == null ) {
             return this;
-        else
-            return newType.getCapture().asClass();
+        }
+        else {
+            return newType;
+        }
     }
     
     public void getParamsFromTemplate(Map<String,GenTypeParameter> map, GenTypeParameter template)

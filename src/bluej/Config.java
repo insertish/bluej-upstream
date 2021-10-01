@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -314,7 +314,6 @@ public final class Config
         initialise(bluejLibDir, tempCommandLineProps, bootingGreenfoot);
 
     }
-    
 
     /**
      * Get the properties that were given on the command line and used 
@@ -349,7 +348,7 @@ public final class Config
                 return Config.propSource.getLabel(key);
             }
         };
-
+        commandProps = langProps;
     }
     
     public static boolean isInitialised() 
@@ -1550,9 +1549,10 @@ public final class Config
             }
             
             StringBuffer arg = new StringBuffer();
-            char c = str.charAt(i++);
+            char c;
             
-            do {
+            while (i < str.length()) {
+                c = str.charAt(i++);
                 if (c == '\\') {
                     if (i < str.length()) {
                         arg.append(str.charAt(i++));
@@ -1581,8 +1581,7 @@ public final class Config
                 else {
                     arg.append(c);
                 }
-                c = str.charAt(i++);
-            } while (i < str.length());
+            }
             strings.add(arg.toString());
         }
         

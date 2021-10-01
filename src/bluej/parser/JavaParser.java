@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -74,9 +74,8 @@ public class JavaParser
      */
     protected void error(String msg)
     {
-        //throw new RuntimeException("Parse error: (" + lexer.getLine() + ":" + lexer.getColumn() + ") " + msg);
         LocatableToken next = tokenStream.LA(1);
-        throw new RuntimeException("Parse error: (" + next.getLine() + ":" + next.getColumn() + ") :" + msg);
+        throw new ParseFailure("Parse error: (" + next.getLine() + ":" + next.getColumn() + ") :" + msg);
     }
 
     /**
@@ -362,6 +361,14 @@ public class JavaParser
     
     /** Saw a binary operator as part of an expression */
     protected void gotBinaryOperator(LocatableToken token) { }
+    
+    protected void gotUnaryOperator(LocatableToken token) { }
+    
+    /** Saw a "?" operator. This will be followed by the left-hand-side expression
+     * (demarked by beginExpression() and endExpression()) followed by a continuation
+     * of the current expression (for the right-hand-side).
+     */
+    protected void gotQuestionOperator(LocatableToken token) { }
     
     protected void gotArrayElementAccess() { }
     
@@ -739,6 +746,21 @@ public class JavaParser
                 parseArgumentList(token);
                 token = tokenStream.nextToken();
             }
+            
+            // "body"
+            if (token.getType() == JavaTokenTypes.LCURLY) {
+                beginAnonClassBody(token);
+                parseClassBody();
+                token = tokenStream.nextToken();
+                if (token.getType() != JavaTokenTypes.RCURLY) {
+                    error("Expected '}' at end of enum constant body");
+                    endAnonClassBody(token, false);
+                }
+                else {
+                    endAnonClassBody(token, true);
+                    token = tokenStream.nextToken();
+                }
+            }
 
             if (token.getType() == JavaTokenTypes.SEMI) {
                 return;
@@ -864,7 +886,10 @@ public class JavaParser
         
         return rval;
     }
-        
+
+    /**
+     * Having seen '{', parse the rest of a class body.
+     */
     public void parseClassBody()
     {
         LocatableToken token = tokenStream.nextToken();
@@ -2736,6 +2761,7 @@ public class JavaParser
             case 29: // INC
             case 30: // DEC
                 // Unary operator
+                gotUnaryOperator(token);
                 token = tokenStream.nextToken();
                 continue exprLoop;
             default:
@@ -2856,6 +2882,7 @@ public class JavaParser
                         continue;
                     }
                     else if (token.getType() == JavaTokenTypes.QUESTION) {
+                        gotQuestionOperator(token);
                         parseExpression();
                         token = tokenStream.nextToken();
                         if (token.getType() != JavaTokenTypes.COLON) {
@@ -2925,7 +2952,9 @@ public class JavaParser
                     tokenStream.pushBack(token);
                     endExprNew(token, false);
                 }
-                gotNewArrayDeclarator(withDimension);
+                else {
+                    gotNewArrayDeclarator(withDimension);
+                }
                 if (tokenStream.LA(1).getType() != JavaTokenTypes.LBRACK) {
                     break;
                 }

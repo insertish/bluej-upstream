@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -23,9 +23,6 @@ package bluej.parser;
 
 import java.io.Reader;
 import java.io.StringReader;
-import java.lang.reflect.Field;
-import java.lang.reflect.Method;
-import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -58,6 +55,8 @@ import bluej.parser.entity.PackageEntity;
 import bluej.parser.entity.PackageOrClass;
 import bluej.parser.entity.TypeEntity;
 import bluej.parser.entity.ValueEntity;
+import bluej.utility.Debug;
+import bluej.utility.JavaNames;
 import bluej.utility.JavaReflective;
 import bluej.utility.JavaUtils;
 
@@ -76,16 +75,12 @@ public class TextAnalyzer
     private String packageScope;  // evaluation package
     private ValueCollection objectBench;
 
-    private static JavaUtils jutils = JavaUtils.getJavaUtils();
-    //private static boolean java15 = Config.isJava15();
-    
     private List<DeclaredVar> declVars; // variables declared in the parsed statement block
     private String amendedCommand;  // command string amended with initializations for
                                     // all variables
     
     private ImportsCollection imports;
     private String importCandidate; // any import candidates.
-    //private JavaRecognizer parser;
     
     /**
      * TextParser constructor. Defines the class loader and package scope
@@ -104,7 +99,6 @@ public class TextAnalyzer
      */
     public void newClassLoader(ClassLoader newLoader)
     {
-        //classLoader = newLoader;
         imports.clear();
     }
     
@@ -124,70 +118,88 @@ public class TextAnalyzer
         importCandidate = "";
         amendedCommand = command;
         declVars = Collections.emptyList();
-        //AST rootAST;
         
         EntityResolver resolver = getResolver(); 
         
-        TypeEntity accessType = new TypeEntity(Object.class);
+        Reflective accessRef = new DummyReflective(JavaNames.combineNames(packageScope, "$SHELL"));
+        TypeEntity accessType = new TypeEntity(accessRef);
         TextParser parser = new TextParser(resolver, command, accessType, true);
         
-        // check if it's an import statement
         try {
-            parser.parseImportStatement();
-            if (parser.atEnd()) {
-                amendedCommand = "";
-                importCandidate = command;
-                return null;
+
+            // check if it's an import statement
+            try {
+                parser.parseImportStatement();
+                if (parser.atEnd()) {
+                    amendedCommand = "";
+                    importCandidate = command;
+                    return null;
+                }
             }
-        }
-        catch (Exception e) {}
-        
-        CodepadVarParser vparser = new CodepadVarParser(resolver, command);
-        try {
-            if (vparser.parseVariableDeclarations() != null) {
-                declVars = vparser.getVariables();
-                if (! declVars.isEmpty()) {
-                    for (DeclaredVar var : declVars) {
-                        if (! var.isInitialized() && ! var.isFinal()) {
-                            amendedCommand += "\n" + var.getName();
-                            String text;
-                            JavaType declVarType = var.getDeclaredType();
-                            if (declVarType.isPrimitive()) {
-                                if (declVarType.isNumeric()) {
-                                    text = " = 0";
+            catch (ParseFailure e) {}
+
+            CodepadVarParser vparser = new CodepadVarParser(resolver, command);
+            try {
+                if (vparser.parseVariableDeclarations() != null) {
+                    declVars = vparser.getVariables();
+                    if (! declVars.isEmpty()) {
+                        for (DeclaredVar var : declVars) {
+                            if (! var.isInitialized() && ! var.isFinal()) {
+                                amendedCommand += "\n" + var.getName();
+                                String text;
+                                JavaType declVarType = var.getDeclaredType();
+                                if (declVarType.isPrimitive()) {
+                                    if (declVarType.isNumeric()) {
+                                        text = " = 0";
+                                    }
+                                    else {
+                                        text = " = false";
+                                    }
                                 }
                                 else {
-                                    text = " = false";
+                                    // reference type
+                                    text = " = null";
                                 }
+                                amendedCommand += text + ";\n";
                             }
-                            else {
-                                // reference type
-                                text = " = null";
-                            }
-                            amendedCommand += text + ";\n";
                         }
+                        return null; // not an expression
                     }
-                    return null; // not an expression
                 }
             }
-        }
-        catch (Exception e) {}
-        
-        // Check if it's an expression
-        parser = new TextParser(resolver, command, accessType, true);
-        try {
-            parser.parseExpression();
-            if (parser.atEnd()) {
-                JavaEntity exprType = parser.getExpressionType();
-                if (exprType == null) {
-                    return "";
-                }
-                else {
-                    return exprType.resolveAsValue().getType().toString();
+            catch (ParseFailure e) {}
+
+            // Check if it's an expression
+            parser = new TextParser(resolver, command, accessType, true);
+            try {
+                // Note the TextParser will throw an exception if a parse error occurs.
+                // We must catch it.
+                parser.parseExpression();
+                if (parser.atEnd()) {
+                    JavaEntity exprType = parser.getExpressionType();
+                    if (exprType == null) {
+                        return "";
+                    }
+                    else {
+                        JavaEntity rval =  exprType.resolveAsValue();
+                        if (rval != null) {
+                            if (rval.getType().typeIs(JavaPrimitiveType.JT_VOID)) {
+                                return null;
+                            }
+                            return rval.getType().toString();
+                        }
+                        return "";
+                    }
                 }
             }
+            catch (ParseFailure e) {}
         }
-        catch (Exception e) {}
+        catch (Throwable t) {
+            // It's best at this stage if an exception (other than a parse failure) occurs that
+            // we still do a normal return from this method (so the codepad continues to function).
+            // However we'll log the problem.
+            Debug.reportError("Exception in parser", t);
+        }
 
         return null;
     }
@@ -395,100 +407,97 @@ public class TextAnalyzer
      * Java 1.5 version of the trinary "? :" operator.
      * See JLS section 15.25. Note that JLS 3rd ed. differs extensively
      * from JLS 2nd edition. The changes are not backwards compatible.
-     * 
-     * @throws RecognitionException
-     * @throws SemanticException
      */
-//    private JavaType questionOperator15(AST node) throws RecognitionException, SemanticException
-//    {
-//        AST trueAlt = node.getFirstChild().getNextSibling();
-//        AST falseAlt = trueAlt.getNextSibling();
-//        ExprValue trueAltEv = getExpressionType(trueAlt);
-//        ExprValue falseAltEv = getExpressionType(falseAlt);
-//        JavaType trueAltType = trueAltEv.getType();
-//        JavaType falseAltType = falseAltEv.getType();
-//        
-//        // if we don't know the type of both alternatives, we don't
-//        // know the result type:
-//        if (trueAltType == null || falseAltType == null)
-//            return null;
-//        
-//        // Neither argument can be a void type.
-//        if (trueAltType.isVoid() || falseAltType.isVoid())
-//            throw new SemanticException();
-//        
-//        // if the second & third arguments have the same type, then
-//        // that is the result type:
-//        if (trueAltType.equals(falseAltType))
-//            return trueAltType;
-//        
-//        JavaType trueUnboxed = unBox(trueAltType);
-//        JavaType falseUnboxed = unBox(falseAltType);
-//        
-//        // if one the arguments is of type boolean and the other
-//        // Boolean, the result type is boolean.
-//        if (trueUnboxed.typeIs(JavaType.JT_BOOLEAN) && falseUnboxed.typeIs(JavaType.JT_BOOLEAN))
-//            return trueUnboxed;
-//        
-//        // if one type is null and the other is a reference type, the
-//        // return is that reference type.
-//        //   Also partially handle the final case from the JLS,
-//        // involving boxing conversion & capture conversion (which
-//        // is trivial when non-parameterized types such as boxed types
-//        // are involved)
-//        // 
-//        // This precludes either type from being null later on.
-//        if (trueAltType.typeIs(JavaType.JT_NULL))
-//            return boxType(falseAltType);
-//        if (falseAltType.typeIs(JavaType.JT_NULL))
-//            return boxType(trueAltType);
-//        
-//        // if the two alternatives are convertible to numeric types,
-//        // there are several cases:
-//        if (trueUnboxed.isNumeric() && falseUnboxed.isNumeric()) {
-//            // If one is byte/Byte and the other is short/Short, the
-//            // result type is short.
-//            if (trueUnboxed.typeIs(JavaType.JT_BYTE) && falseUnboxed.typeIs(JavaType.JT_SHORT))
-//                return falseUnboxed;
-//            if (falseUnboxed.typeIs(JavaType.JT_BYTE) && trueUnboxed.typeIs(JavaType.JT_SHORT))
-//                return trueUnboxed;
-//            
-//            // If one type, when unboxed, is byte/short/char, and the
-//            // other is an integer constant whose value fits in the
-//            // first, the result type is the (unboxed) former type. (The JLS
-//            // takes four paragraphs to say this, but the result is the
-//            // same).
-//            if (isMinorInteger(trueUnboxed) && falseAltType.typeIs(JavaType.JT_INT) && falseAltEv.knownValue()) {
-//                int kval = falseAltEv.intValue();
-//                if (trueUnboxed.couldHold(kval))
-//                    return trueUnboxed;
-//            }
-//            if (isMinorInteger(falseUnboxed) && trueAltType.typeIs(JavaType.JT_INT) && trueAltEv.knownValue()) {
-//                int kval = trueAltEv.intValue();
-//                if (falseUnboxed.couldHold(kval))
-//                    return falseUnboxed;
-//            }
-//            
-//            // Otherwise apply binary numeric promotion
-//            return binaryNumericPromotion(trueAltType, falseAltType);
-//        }
-//        
-//        // Box both alternatives:
-//        trueAltType = boxType(trueAltType);
-//        falseAltType = boxType(falseAltType);
-//        
-//        if (trueAltType instanceof GenTypeSolid && falseAltType instanceof GenTypeSolid) {
-//            // apply capture conversion (JLS 5.1.10) to lub() of both
-//            // alternatives (JLS 15.12.2.7). I have no idea why capture conversion
-//            // should be performed here, but I follow the spec blindly.
-//            GenTypeSolid [] lubArgs = new GenTypeSolid[2];
-//            lubArgs[0] = (GenTypeSolid) trueAltType;
-//            lubArgs[1] = (GenTypeSolid) falseAltType;
-//            return captureConversion(GenTypeSolid.lub(lubArgs));
-//        }
-//        
-//        return null;
-//    }
+    public static JavaType questionOperator15(JavaEntity trueAlt, JavaEntity falseAlt)
+    {
+        JavaType trueAltType = trueAlt.getType();
+        JavaType falseAltType = falseAlt.getType();
+        
+        // if we don't know the type of both alternatives, we don't
+        // know the result type:
+        if (trueAltType == null || falseAltType == null)
+            return null;
+        
+        // Neither argument can be a void type.
+        if (trueAltType.isVoid() || falseAltType.isVoid()) {
+            return null;
+        }
+        
+        if (trueAltType.equals(falseAltType)) {
+            return trueAltType;
+        }
+        
+        // if the second & third arguments have the same type, then
+        // that is the result type:
+        if (trueAltType.equals(falseAltType))
+            return trueAltType;
+        
+        JavaType trueUnboxed = unBox(trueAltType);
+        JavaType falseUnboxed = unBox(falseAltType);
+        
+        // if one the arguments is of type boolean and the other
+        // Boolean, the result type is boolean.
+        if (trueUnboxed.typeIs(JavaType.JT_BOOLEAN) && falseUnboxed.typeIs(JavaType.JT_BOOLEAN))
+            return trueUnboxed;
+        
+        // if one type is null and the other is a reference type, the
+        // return is that reference type.
+        //   Also partially handle the final case from the JLS,
+        // involving boxing conversion & capture conversion (which
+        // is trivial when non-parameterized types such as boxed types
+        // are involved)
+        // 
+        // This precludes either type from being null later on.
+        if (trueAltType.typeIs(JavaType.JT_NULL))
+            return boxType(falseAltType);
+        if (falseAltType.typeIs(JavaType.JT_NULL))
+            return boxType(trueAltType);
+        
+        // if the two alternatives are convertible to numeric types,
+        // there are several cases:
+        if (trueUnboxed.isNumeric() && falseUnboxed.isNumeric()) {
+            // If one is byte/Byte and the other is short/Short, the
+            // result type is short.
+            if (trueUnboxed.typeIs(JavaType.JT_BYTE) && falseUnboxed.typeIs(JavaType.JT_SHORT))
+                return falseUnboxed;
+            if (falseUnboxed.typeIs(JavaType.JT_BYTE) && trueUnboxed.typeIs(JavaType.JT_SHORT))
+                return trueUnboxed;
+            
+            // If one type, when unboxed, is byte/short/char, and the
+            // other is an integer constant whose value fits in the
+            // first, the result type is the (unboxed) former type. (The JLS
+            // takes four paragraphs to say this, but the result is the
+            // same).
+            //if (isMinorInteger(trueUnboxed) && falseAltType.typeIs(JavaType.JT_INT) && falseAltEv.knownValue()) {
+            //    int kval = falseAltEv.intValue();
+            //    if (trueUnboxed.couldHold(kval))
+            //        return trueUnboxed;
+            //}
+            //if (isMinorInteger(falseUnboxed) && trueAltType.typeIs(JavaType.JT_INT) && trueAltEv.knownValue()) {
+            //    int kval = trueAltEv.intValue();
+            //    if (falseUnboxed.couldHold(kval))
+            //        return falseUnboxed;
+            //}
+            
+            // Otherwise apply binary numeric promotion
+            return binaryNumericPromotion(trueAltType, falseAltType);
+        }
+        
+        // Box both alternatives:
+        trueAltType = boxType(trueAltType);
+        falseAltType = boxType(falseAltType);
+        
+        if (trueAltType.asSolid() != null && falseAltType.asSolid() != null) {
+            // apply capture conversion (JLS 5.1.10) to lub() of both
+            // alternatives (JLS 15.12.2.7).
+            GenTypeSolid [] lubArgs = new GenTypeSolid[2];
+            lubArgs[0] = trueAltType.asSolid();
+            lubArgs[1] = falseAltType.asSolid();
+            return captureConversion(GenTypeSolid.lub(lubArgs));
+        }
+        
+        return null;
+    }
     
     /**
      * Capture conversion, as in the JLS 5.1.10
@@ -756,275 +765,6 @@ public class TextAnalyzer
 //    }
     
     /**
-     * Attempt to load, by its unqualified name,  a class which might be in the
-     * current package or which might be in java.lang.
-     * 
-     * @param className   the name of the class to try to load
-     * @param tryWildcardImports    indicates whether the class name can be resolved by
-     *                              checking wildcard imports (including java.lang.*)
-     * @throws ClassNotFoundException  if the class cannot be resolved/loaded
-     */
-//    private Class loadUnqualifiedClass(String className, boolean tryWildcardImports)
-//        throws ClassNotFoundException
-//    {
-//        // Try singly imported types first
-//        ClassEntity imported = imports.getTypeImport(className);
-//        if (imported != null) {
-//            try {
-//                String cname = ((GenTypeClass) imported.getType()).rawName();
-//                return classLoader.loadClass(cname);
-//            }
-//            catch (ClassNotFoundException cnfe) { }
-//        }
-//        
-//        // It's an unqualified name - try package scope
-//        try {
-//            if (packageScope.length() != 0)
-//                return classLoader.loadClass(packageScope + "." + className);
-//            else
-//                return classLoader.loadClass(className);
-//        }
-//        catch(ClassNotFoundException cnfe) {}
-//        
-//        // If not trying wildcard imports, bail out now
-//        if (! tryWildcardImports)
-//            throw new ClassNotFoundException(className);
-//        
-//        // Try wildcard imports
-//        imported = imports.getTypeImportWC(className);
-//        if (imported != null) {
-//            try {
-//                String cname = ((GenTypeClass) imported.getType()).rawName();
-//                return classLoader.loadClass(cname);
-//            }
-//            catch (ClassNotFoundException cnfe) { }
-//        }
-//        
-//        // Try java.lang
-//        return classLoader.loadClass("java.lang." + className);
-//    }
-    
-    
-    /**
-     * Get the type from a node which must by context be an inner class type.
-     * @param node   The node representing the type
-     * @param outer  The containing type
-     * *
-     * @throws SemanticException
-     * @throws RecognitionException
-     */
-//    JavaType getInnerType(AST node, GenTypeClass outer) throws SemanticException, RecognitionException
-//    {
-//        if (node.getType() == JavaTokenTypes.IDENT) {
-//            // A simple name<params> expression
-//            List<JavaType> params = getTypeArgs(node.getFirstChild());
-//            
-//            String name = outer.rawName() + '$' + node.getText();
-//            try {
-//                Class<?> theClass = classLoader.loadClass(name);
-//                Reflective r = new JavaReflective(theClass);
-//                return new GenTypeClass(r, params, outer);
-//            }
-//            catch (ClassNotFoundException cnfe) {
-//                throw new SemanticException();
-//            }
-//        }
-//        else if (node.getType() == JavaTokenTypes.DOT) {
-//            // A name.name<params> style expression
-//            // The children nodes are: the qualified class name, and then
-//            // the type arguments
-//            AST packageNode = node.getFirstChild();
-//            String dotnames = combineDotNames(packageNode, '$');
-//
-//            AST classNode = packageNode.getNextSibling();
-//            List<JavaType> params = getTypeArgs(classNode.getFirstChild());
-//
-//            String name = outer.rawName() + '$' + dotnames + '$' + node.getText();
-//            try {
-//                Class<?> c = classLoader.loadClass(name);
-//                Reflective r = new JavaReflective(c);
-//                return new GenTypeClass(r, params);
-//            }
-//            catch(ClassNotFoundException cnfe) {
-//                throw new SemanticException();
-//            }
-//            
-//        }
-//        else
-//            throw new RecognitionException();
-//    }
-    
-    /**
-     * Parse a node as an entity (which could be a package, class or value).
-     * @throws SemanticException
-     * @throws RecognitionException
-     */
-//    JavaEntity getEntity(AST node) throws SemanticException, RecognitionException
-//    {
-//        // simple case first:
-//        if (node.getType() == JavaTokenTypes.IDENT) {
-//            
-//            // Treat it first as a variable...
-//            String nodeText = node.getText();
-//            NamedValue nv = objectBench.getNamedValue(nodeText);
-//            if (nv != null)
-//                return new ValueEntity(nv.getGenType());
-//            
-//            // It's not a codepad or object bench variable, perhaps it's an import
-//            List l = imports.getStaticImports(nodeText);
-//            if (l != null) {
-//                Iterator i = l.iterator();
-//                while (i.hasNext()) {
-//                    ClassEntity importEntity = (ClassEntity) i.next();
-//                    try {
-//                        JavaEntity fieldEnt = importEntity.getStaticField(nodeText);
-//                        return fieldEnt;
-//                    }
-//                    catch (SemanticException se) { }
-//                }
-//            }
-//            
-//            // It might be a type
-//            try {
-//                Class c = loadUnqualifiedClass(nodeText, false);
-//                return new TypeEntity(c);
-//            }
-//            catch (ClassNotFoundException cnfe) { }
-//            
-//            // Wildcard static imports of fields override wildcard
-//            // imports of types
-//            l = imports.getStaticWildcardImports();
-//            Iterator i = l.iterator();
-//            while (i.hasNext()) {
-//                ClassEntity importEntity = (ClassEntity) i.next();
-//                try {
-//                    JavaEntity fieldEnt = importEntity.getStaticField(nodeText);
-//                    return fieldEnt;
-//                }
-//                catch (SemanticException se) { }
-//            }
-//            
-//            // Finally try wildcard type imports
-//            try {
-//                Class c = loadWildcardImportedType(nodeText);
-//                return new TypeEntity(c);
-//            }
-//            catch (ClassNotFoundException cnfe) {
-//                return new PackageEntity(nodeText);
-//            }
-//        }
-//        
-//        // A dot-node in the form xxx.identifier:
-//        if (node.getType() == JavaTokenTypes.DOT) {
-//            AST firstChild = node.getFirstChild();
-//            AST secondChild = firstChild.getNextSibling();
-//            if (secondChild.getType() == JavaTokenTypes.IDENT) {
-//                JavaEntity firstpart = getEntity(firstChild);
-//                return firstpart.getSubentity(secondChild.getText());
-//            }
-//            // Don't worry about xxx.super, it shouldn't be used at this
-//            // level.
-//        }
-//        
-//        // Anything else must be an expression, therefore a value:
-//        JavaType exprType = getExpressionType(node).getType();
-//        return new ValueEntity(exprType);
-//    }
-    
-    /**
-     * Get an entity which by context must be either a package or a (possibly
-     * generic) type.
-     */
-//    private PackageOrClass getPackageOrType(AST node)
-//        throws SemanticException, RecognitionException
-//    {
-//        return getPackageOrType(node, false);
-//    }
-    
-    /**
-     * Get an entity which by context must be either a package or a (possibly
-     * generic) type.
-     * @param node  The AST node representing the package/type
-     * @param fullyQualified   True if the type must be fully qualified
-     *            (if false, imports and the current package are checked for
-     *            definitions of a class with the initial name)
-     * 
-     * @throws SemanticException
-     */
-//    private PackageOrClass getPackageOrType(AST node, boolean fullyQualified)
-//        throws SemanticException, RecognitionException
-//    {
-//        // simple case first:
-//        if (node.getType() == JavaTokenTypes.IDENT) {
-//            // Treat it first as a type, then as a package.
-//            String nodeText = node.getText();
-//            List tparams = getTypeArgs(node.getFirstChild());
-//            
-//            try {
-//                Class c;
-//                if (fullyQualified) {
-//                    c = classLoader.loadClass(nodeText);
-//                }
-//                else {
-//                    c = loadUnqualifiedClass(nodeText, true);
-//                }
-//                TypeEntity r = new TypeEntity(c, tparams);
-//                return r;
-//            }
-//            catch (ClassNotFoundException cnfe) {
-//                // Could not be loaded as a class, so it must be a package.
-//                if (! tparams.isEmpty())
-//                    throw new SemanticException();
-//                return new PackageEntity(nodeText);
-//            }
-//        }
-//        
-//        // A dot-node in the form xxx.identifier:
-//        if (node.getType() == JavaTokenTypes.DOT) {
-//            AST firstChild = node.getFirstChild();
-//            AST secondChild = firstChild.getNextSibling();
-//            if (secondChild.getType() == JavaTokenTypes.IDENT) {
-//                List tparams = getTypeArgs(secondChild.getFirstChild());
-//                PackageOrClass firstpart = getPackageOrType(firstChild, fullyQualified);
-//
-//                PackageOrClass entity = firstpart.getPackageOrClassMember(secondChild.getText());
-//                if (! tparams.isEmpty()) {
-//                    // There are type parmaters, so we must have a type
-//                    if (entity.isClass()) {
-//                        entity = ((ClassEntity) entity).setTypeParams(tparams);
-//                    }
-//                    else
-//                        throw new SemanticException();
-//                }
-//                
-//                return entity;
-//            }
-//        }
-//        
-//        throw new SemanticException();
-//    }
-    
-    /**
-     * Get an expression list node as an array of GenType
-     * 
-     * @throws SemanticException
-     * @throws RecognitionException
-     */
-//    private JavaType [] getExpressionList(AST node) throws SemanticException, RecognitionException
-//    {
-//        int num = node.getNumberOfChildren();
-//        JavaType [] r = new JavaType[num];
-//        AST child = node.getFirstChild();
-//        
-//        // loop through the child nodes
-//        for (int i = 0; i < num; i++) {
-//            r[i] = getExpressionType(child).getType();
-//            child = child.getNextSibling();
-//        }
-//        return r;
-//    }
-    
-    /**
      * Check whether a particular method is callable with particular
      * parameters. If so return information about how specific the call is.
      * If the parameters cannot be applied to this method, return null.
@@ -1089,7 +829,7 @@ public class TextAnalyzer
             List<JavaType> expandedParams = new ArrayList<JavaType>(args.length);
             expandedParams.addAll(mparams);
             for (int i = mparams.size(); i < args.length; i++) {
-                expandedParams.set(i, vaType);
+                expandedParams.add(vaType);
             }
             mparams = expandedParams;
         }
@@ -1139,22 +879,22 @@ public class TextAnalyzer
                     continue;
                 
                 GenTypeSolid mparam = (GenTypeSolid) mparams.get(i);
-                mparam = mparam.mapTparsToTypes(tparMap);
+                mparam = mparam.mapTparsToTypes(tparMap).getCapture().asSolid();
                 processAtoFConstraint(args[i], mparam, tlbConstraints, teqConstraints);
             }
             
             // what we have now is a map with tpar constraints.
             // Some tpars may not have been constrained: these are inferred to be the
             // intersection of their upper bounds.
-            tpars = new ArrayList();
-            Iterator i = tparams.iterator();
+            tpars = new ArrayList<GenTypeClass>();
+            Iterator<GenTypeDeclTpar> i = tparams.iterator();
             while (i.hasNext()) {
                 GenTypeDeclTpar fTpar = (GenTypeDeclTpar) i.next();
                 String tparName = fTpar.getTparName();
                 GenTypeSolid eqConstraint = (GenTypeSolid) teqConstraints.get(tparName);
                 // If there's no equality constraint, use the lower bound constraints
                 if (eqConstraint == null) {
-                    Set lbConstraintSet = (Set) tlbConstraints.get(tparName);
+                    Set<GenTypeSolid> lbConstraintSet = tlbConstraints.get(tparName);
                     if (lbConstraintSet != null) {
                         GenTypeSolid [] lbounds = (GenTypeSolid []) lbConstraintSet.toArray(new GenTypeSolid[lbConstraintSet.size()]);
                         eqConstraint = GenTypeSolid.lub(lbounds); 
@@ -1204,7 +944,7 @@ public class TextAnalyzer
             JavaType givenParam = args[i];
             
             // Substitute type arguments.
-            formalArg = formalArg.mapTparsToTypes(tparMap);
+            formalArg = formalArg.mapTparsToTypes(tparMap).getUpperBound();
             
             // check if the given parameter doesn't match the formal argument
             if (! formalArg.isAssignableFrom(givenParam)) {
@@ -1219,7 +959,7 @@ public class TextAnalyzer
             }
         }
         
-        JavaType rType = m.getReturnType().mapTparsToTypes(tparMap);
+        JavaType rType = m.getReturnType().mapTparsToTypes(tparMap).getUpperBound();
         return new MethodCallDesc(m, mparams, varargs, boxingRequired, rType);
     }
 
@@ -1300,7 +1040,8 @@ public class TextAnalyzer
     /**
      * Process type parameters from a type inference constraint A convertible-to F.
      */
-    private static void processAtoFtpar(GenTypeParameter aPar, GenTypeParameter fPar, Map tlbConstraints, Map teqConstraints)
+    private static void processAtoFtpar(GenTypeParameter aPar, GenTypeParameter fPar,
+            Map<String,Set<GenTypeSolid>> tlbConstraints, Map<String,GenTypeSolid> teqConstraints)
     {
         if (fPar instanceof GenTypeSolid) {
             if (aPar instanceof GenTypeSolid) {
@@ -1332,7 +1073,8 @@ public class TextAnalyzer
     /**
      * Process a type inference constraint of the form "A is equal to F".
      */
-    private static void processAeqFConstraint(GenTypeSolid a, GenTypeSolid f, Map tlbConstraints, Map teqConstraints)
+    private static void processAeqFConstraint(GenTypeSolid a, GenTypeSolid f,
+            Map<String,Set<GenTypeSolid>> tlbConstraints, Map<String,GenTypeSolid> teqConstraints)
     {
         if (f instanceof GenTypeTpar) {
             // The constraint T == A is implied.
@@ -1362,14 +1104,14 @@ public class TextAnalyzer
             GenTypeClass af = a.asClass();
             if (af != null && cf != null) {
                 if (cf.classloaderName().equals(af.classloaderName())) {
-                    Map fMap = cf.getMap();
-                    Map aMap = af.getMap();
+                    Map<String,GenTypeParameter> fMap = cf.getMap();
+                    Map<String,GenTypeParameter> aMap = af.getMap();
                     if (fMap != null && aMap != null) {
-                        Iterator j = fMap.keySet().iterator();
+                        Iterator<String> j = fMap.keySet().iterator();
                         while (j.hasNext()) {
-                            String tpName = (String) j.next();
-                            GenTypeParameter fPar = (GenTypeParameter) fMap.get(tpName);
-                            GenTypeParameter aPar = (GenTypeParameter) aMap.get(tpName);
+                            String tpName = j.next();
+                            GenTypeParameter fPar = fMap.get(tpName);
+                            GenTypeParameter aPar = aMap.get(tpName);
                             processAeqFtpar(aPar, fPar, tlbConstraints, teqConstraints);
                         }
                     }
@@ -1381,7 +1123,8 @@ public class TextAnalyzer
     /**
      * Process type parameters from a type inference constraint A equal-to F.
      */
-    private static void processAeqFtpar(GenTypeParameter aPar, GenTypeParameter fPar, Map tlbConstraints, Map teqConstraints)
+    private static void processAeqFtpar(GenTypeParameter aPar, GenTypeParameter fPar,
+            Map<String,Set<GenTypeSolid>> tlbConstraints, Map<String,GenTypeSolid> teqConstraints)
     {
         if (aPar instanceof GenTypeSolid && fPar instanceof GenTypeSolid) {
             processAeqFConstraint((GenTypeSolid) aPar, (GenTypeSolid) fPar, tlbConstraints, teqConstraints);
@@ -1407,7 +1150,8 @@ public class TextAnalyzer
     /**
      * Process a type inference constraint of the form "F is convertible to A".
      */
-    private static void processFtoAConstraint(GenTypeSolid a, GenTypeSolid f, Map tlbConstraints, Map teqConstraints)
+    private static void processFtoAConstraint(GenTypeSolid a, GenTypeSolid f,
+            Map<String,Set<GenTypeSolid>> tlbConstraints, Map<String,GenTypeSolid> teqConstraints)
     {
         // This is pretty much nothing like what the JLS says it should be. As far as I can
         // make out, the JLS is just plain wrong.
@@ -1459,7 +1203,8 @@ public class TextAnalyzer
     /**
      * Process type parameters from a type inference constraint F convertible-to A.
      */
-    private static void processFtoAtpar(GenTypeParameter aPar, GenTypeParameter fPar, Map tlbConstraints, Map teqConstraints)
+    private static void processFtoAtpar(GenTypeParameter aPar, GenTypeParameter fPar,
+            Map<String,Set<GenTypeSolid>> tlbConstraints, Map<String,GenTypeSolid> teqConstraints)
     {
         if (fPar instanceof GenTypeSolid) {
             if (aPar instanceof GenTypeSolid) {
@@ -1502,167 +1247,7 @@ public class TextAnalyzer
             }
         }
     }
-
-    /**
-     * Get the return type of a method call expression. This is quite
-     * complicated; see JLS section 15.12
-     *
-     * @throws RecognitionException
-     * @throws SemanticException
-     */
-//    private JavaType getMethodCallReturnType(AST node) throws RecognitionException, SemanticException
-//    {
-//        // For a method call node, the first child is the method name
-//        // (possibly a dot-name) and the second is an ELIST.
-//        //
-//        // In the case of the method name being a dot-name, it may also
-//        // be a generic type. In this case the children of the dot-node
-//        // are:
-//        //
-//        // <object-expression> <type-arg-1> <type-arg-2> .... <methodname>
-//        //
-//        // Where <object-expression> may actually be a type (ie. invoking
-//        // a static method).
-//        
-//        AST firstArg = node.getFirstChild();
-//        AST secondArg = firstArg.getNextSibling();
-//        if (secondArg.getType() != JavaTokenTypes.ELIST)
-//            throw new RecognitionException();
-//        
-//        // we don't handle a variety of cases such
-//        // as "this.xxx()" or "super.xxxx()".
-//        
-//        if (firstArg.getType() == JavaTokenTypes.IDENT) {
-//            // It's an unqualified method call. In the context of a code pad
-//            // statement, it can only be an imported static method call.
-//            
-//            String mname = firstArg.getText();
-//            JavaType [] argumentTypes = getExpressionList(secondArg);
-//            
-//            List<ClassEntity> l = imports.getStaticImports(mname);
-//            MethodCallDesc candidate = findImportedMethod(l, mname, argumentTypes);
-//            
-//            if (candidate == null) {
-//                // There were no non-wildcard static imports. Try wildcard imports.
-//                l = imports.getStaticWildcardImports();
-//                candidate = findImportedMethod(l, mname, argumentTypes);
-//            }
-//            
-//            if (candidate != null)
-//                return captureConversion(candidate.retType);
-//            
-//            // no suitable candidates
-//            throw new SemanticException();
-//        }
-//        
-//        if (firstArg.getType() == JavaTokenTypes.DOT) {
-//            AST targetNode = firstArg.getFirstChild();
-//            JavaEntity callTarget = getEntity(targetNode);
-//            JavaType targetType = callTarget.getType();
-//                            
-//            // now get method name, and argument types;
-//            List typeArgs = new ArrayList(5);
-//            JavaType [] argumentTypes = getExpressionList(secondArg);
-//            String methodName = null;
-//            AST searchNode = targetNode.getNextSibling();
-//            
-//            // get the type arguments and method name
-//            while (searchNode != null) {
-//                int nodeType = searchNode.getType();
-//                // type argument?
-//                if (nodeType == JavaTokenTypes.TYPE_ARGUMENT) {
-//                    JavaType taType = getType(searchNode.getFirstChild());
-//                    typeArgs.add(taType);
-//                }
-//                // method name?
-//                else if (nodeType == JavaTokenTypes.IDENT) {
-//                    methodName = searchNode.getText();
-//                    break;
-//                }
-//                else
-//                    break;
-//                
-//                searchNode = searchNode.getNextSibling();
-//            }
-//            
-//            // If no method name, this doesn't seem to be valid grammar
-//            if (methodName == null)
-//                throw new RecognitionException();
-//            
-//            // getClass() is a special case, it should return Class<? extends
-//            // basetype>
-//            if (targetType instanceof GenTypeParameterizable) {
-//                if (methodName.equals("getClass") && argumentTypes.length == 0) {
-//                    List paramsl = new ArrayList(1);
-//                    paramsl.add(new GenTypeExtends((GenTypeSolid) targetType.getErasedType()));
-//                    return new GenTypeClass(new JavaReflective(Class.class), paramsl);
-//                }
-//            }
-//            
-//            // apply capture conversion to target
-//            targetType = captureConversion(targetType);
-//            
-//            if (! (targetType instanceof GenTypeSolid))
-//                throw new SemanticException();
-//                
-//            GenTypeSolid targetTypeS = (GenTypeSolid) targetType;
-//            GenTypeClass [] rsts = targetTypeS.getReferenceSupertypes();
-//            
-//            // match the call to a method:
-//            ArrayList suitableMethods = getSuitableMethods(methodName, rsts, argumentTypes, typeArgs);
-//            
-//            if (suitableMethods.size() != 0) {
-//                MethodCallDesc mcd = (MethodCallDesc) suitableMethods.get(0);
-//                // JLS 15.12.2.6, we must apply capture conversion
-//                return captureConversion(mcd.retType);
-//            }
-//            // ambiguity
-//            throw new SemanticException();
-//        }
-//        
-//        // anything else is an unknown
-//        throw new RecognitionException();
-//    }
-    
-    /**
-     * Find the most specific imported method with the given name and argument types
-     * in the given list of imports.
-     * 
-     * @param imports         A list of imports (ClassEntity)
-     * @param mname           The name of the method to find
-     * @param argumentTypes   The type of each supplied argument
-     * @return   A descriptor for the most specific method, or null if none found
-     */
-//    private MethodCallDesc findImportedMethod(List imports, String mname, JavaType [] argumentTypes)
-//    {
-//        MethodCallDesc candidate = null;
-//        
-//        // Iterate through the imports
-//        Iterator i = imports.iterator();
-//        while (i.hasNext()) {
-//            ClassEntity importEntity = (ClassEntity) i.next();
-//            List r = importEntity.getStaticMethods(mname);
-//            Iterator j = r.iterator();
-//            while (j.hasNext()) {
-//                // For each matching method, assess its applicability. If applicable,
-//                // and it is the most specific method yet found, keep it.
-//                Method m = (Method) j.next();
-//                MethodCallDesc mcd = isMethodApplicable(importEntity.getClassType(), Collections.EMPTY_LIST, m, argumentTypes);
-//                if (mcd != null) {
-//                    if (candidate == null) {
-//                        candidate = mcd;
-//                    }
-//                    else {
-//                        if (mcd.compareSpecificity(candidate) == 1)
-//                            candidate = mcd;
-//                    }
-//                }
-//            }
-//        }
-//        return candidate;
-//    }
-    
-    
+        
     /**
      * Get the candidate list of methods with the given name and argument types. The returned
      * list will be the maximally specific methods (as defined by the JLS 15.12.2.5). The
@@ -1880,152 +1465,6 @@ public class TextAnalyzer
 //        else
 //            return u;
 //    }
-    
-    /**
-     * Check if a member of some class is accessible from the context of the given
-     * package. This will be the case if the member is public, if the member is
-     * protected and declared in the same class, or if the member is package-
-     * private and declared in the same class.
-     * 
-     * @param declaringClass  The class which declares the member
-     * @param mods            The member modifier flags (as returned by getModifiers())
-     * @param pkg             The package to check access for
-     * @return  true if the package has access to the member
-     */
-    static boolean isAccessible(Class declaringClass, int mods, String pkg)
-    {
-        if (Modifier.isPrivate(mods))
-            return false;
-        
-        if (Modifier.isPublic(mods))
-            return true;
-        
-        // get the package of the class
-        String className = declaringClass.getName();
-        int lastDot = className.lastIndexOf('.');
-        if (lastDot == -1)
-            lastDot = 0;
-        String classPkg = className.substring(0, lastDot);
-        
-        // it's not private nor public - so it's package private (or protected).
-        // It is therefore accessible if the accessing package is the same as
-        // the declaring package.
-        return classPkg.equals(pkg);
-    }
-    
-    /**
-     * Find (if one exists) an accessible field with the given name in the given class (and
-     * its supertypes). The "getField(String)" method in java.lang.Class does the same thing,
-     * except it doesn't take into account accessible package-private fields which is
-     * important.
-     * 
-     * @param c    The class in which to find the field
-     * @param fieldName   The name of the accessible field to find
-     * @param pkg         The package context from which the field is accessed
-     * @param searchSupertypes  Whether to search in supertypes for the field
-     * @return      The field
-     * @throws NoSuchFieldException  if no accessible field with the given name exists
-     */
-    static Field getAccessibleField(Class c, String fieldName, String pkg, boolean searchSupertypes)
-        throws NoSuchFieldException
-    {
-        String className = c.getName();
-        int lastDot = className.lastIndexOf('.');
-        if (lastDot == -1)
-            lastDot = 0;
-        
-        String classPkg = className.substring(0, lastDot);
-        
-        // package private members accessible if the package is the same
-        boolean pprivateAccessible = classPkg.equals(pkg);
-
-        try {
-            // Try fields declared in this class
-            Field [] cfields = c.getDeclaredFields();
-            for (int i = 0; i < cfields.length; i++) {
-                if (cfields[i].getName().equals(fieldName)) {
-                    int mods = cfields[i].getModifiers();
-                    // rule out private fields
-                    if (! Modifier.isPrivate(mods)) {
-                        // now, if the fields is public, or package-private fields are
-                        // accessible, then the field is accessible.
-                        if (pprivateAccessible || Modifier.isPublic(mods)) {
-                            return cfields[i];
-                        }
-                    }
-                }
-            }
-            
-            if (searchSupertypes) {
-                // Try fields declared in superinterfaces
-                Class [] ifaces = c.getInterfaces();
-                for (int i = 0; i < ifaces.length; i++) {
-                    try {
-                        return getAccessibleField(ifaces[i], fieldName, pkg, true);
-                    }
-                    catch (NoSuchFieldException nsfe) { }
-                }
-                
-                // Try fields declared in superclass
-                Class sclass = c.getSuperclass();
-                if (sclass != null)
-                    return getAccessibleField(sclass, fieldName, pkg, true);
-            }
-        }
-        catch (LinkageError le) { }
-        
-        throw new NoSuchFieldException();
-    }
-    
-    /**
-     * Get a list of accessible static methods declared in the given class with the
-     * given name. The list includes public methods and, if the class is in the designated
-     * package, package-private and protected methods.
-     * 
-     * @param c  The class in which to find the methods
-     * @param methodName  The name of the methods to find
-     * @param pkg   The accessing package
-     * @return  A list of java.lang.reflect.Method
-     */
-    static List getAccessibleStaticMethods(Class c, String methodName, String pkg)
-    {
-        String className = c.getName();
-        int lastDot = className.lastIndexOf('.');
-        if (lastDot == -1)
-            lastDot = 0;
-        
-        String classPkg = className.substring(0, lastDot);
-        
-        // package private members accessible if the package is the same
-        boolean pprivateAccessible = classPkg.equals(pkg);
-
-        try {
-            List rlist = new ArrayList();
-            
-            // Now find methods declared in this class
-            Method [] cmethods = c.getDeclaredMethods();
-            methodLoop:
-            for (int i = 0; i < cmethods.length; i++) {
-                if (cmethods[i].getName().equals(methodName)) {
-                    int mods = cmethods[i].getModifiers();
-                    if (Modifier.isPrivate(mods) || ! Modifier.isStatic(mods))
-                        continue methodLoop;
-                    
-                    if (! Modifier.isPublic(mods) && ! pprivateAccessible)
-                        continue methodLoop;
-                    
-                    if (jutils.isSynthetic(cmethods[i]))
-                        continue methodLoop;
-                    
-                    rlist.add(cmethods[i]);
-                }
-            }
-            return rlist;
-        }
-        catch (LinkageError le) { }
-        
-        return Collections.EMPTY_LIST;
-    }
     
     /**
      * A simple structure to hold various information about a method call.

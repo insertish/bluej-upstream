@@ -292,6 +292,12 @@ implements bluej.editor.Editor, BlueJEventListener, HyperlinkListener, DocumentL
         this.docFilename = docFilename;
 
         if (bounds != null) {
+            if (bounds.x > (Config.screenBounds.width - 80))
+                bounds.x = Config.screenBounds.width - 80;
+            
+            if (bounds.y > (Config.screenBounds.height - 80))
+                bounds.y = Config.screenBounds.height - 80;
+        	
             if (bounds.width > 0 && bounds.height > 0) {
                 setBounds(bounds);
             }
@@ -3629,14 +3635,6 @@ implements bluej.editor.Editor, BlueJEventListener, HyperlinkListener, DocumentL
     public void setFindTextfield(String text)
     {
         finder.populateFindTextfield(text);
-    }
-    
-    /**
-     * Sets the dividerpanel to expand/collapse the naviview
-     */
-    public void setDividerPanelExpanded(boolean expanded)
-    {
-        dividerPanel.setExpanded(expanded);
     }
     
     /**
