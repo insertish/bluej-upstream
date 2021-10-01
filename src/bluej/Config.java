@@ -298,6 +298,7 @@ public final class Config
 
                     if (langString.substring(secondColon + 1).equals(iso3lang)) {
                         language = langString.substring(0, colonIndex);
+                        Config.putPropString("bluej.language", language);
                         break;
                     }
                 }
@@ -1937,28 +1938,6 @@ public final class Config
                             new Color(195, 195, 195)));
         }
         return normalBorder;
-    }
-
-    public static boolean isRetinaDisplay()
-    {
-     if (isMacOS()) {
-           // From http://bulenkov.com/2013/06/23/retina-support-in-oracle-jdk-1-7/
-           GraphicsEnvironment env = GraphicsEnvironment.getLocalGraphicsEnvironment();
-           final GraphicsDevice device = env.getDefaultScreenDevice();
-
-           try {
-               Field field = device.getClass().getDeclaredField("scale");
-               if (field != null) {
-                   field.setAccessible(true);
-                   Object scale = field.get(device);
-
-                   if (scale instanceof Integer && ((Integer)scale) == 2) {
-                       return true;
-                   }
-               }
-           } catch (Exception ignore) {}
-       }
-       return false;
     }
 
     public static void loadFXFonts()

@@ -622,6 +622,7 @@ public class PkgMgrFrame
      * an existing frame if this package is already being edited by a frame. If
      * an empty frame exists, that frame will be used to show the package.
      * @param aPkg The package to show in the frame
+     * @param parentWindow The parent package
      * @return The new frame
      */
     @OnThread(Tag.FXPlatform)
@@ -962,6 +963,7 @@ public class PkgMgrFrame
     /**
      * Displays the package in the frame for editing
      * @param aPkg The package to edit
+     * @param parentWindow The parent package
      */
     @OnThread(Tag.FXPlatform)
     public void openPackage(Package aPkg, PkgMgrFrame parentWindow)
@@ -1091,7 +1093,7 @@ public class PkgMgrFrame
             
             enableFunctions(true); // changes menu items
             setVisible(true);
-            
+
             Package pkgFinal = aPkg;
             // runAfterCurrent so that FX finishes initialising the menu,
             // then hop to Swing thread to actually change things:
@@ -2005,9 +2007,12 @@ public class PkgMgrFrame
         };
 
         String[] previousTeamMembers = {
+                "Amjad Altadmri",
                 "Damiano Bolla",
+                "Hamza Hamza",
                 "Fabio Hedayioglu",
                 "Poul Henriksen",
+                "Davin McCall",
                 "Clive Miller",
                 "Andrew Patterson",
                 "Bruce Quig",
@@ -2037,7 +2042,7 @@ public class PkgMgrFrame
     public void showCopyright()
     {
         DialogManager.showTextFX(getFXWindow(), String.join("\n",
-                "BlueJ \u00a9 2000-2018 Michael K\u00F6lling, John Rosenberg.", "",
+                "BlueJ \u00a9 2000-2019 Michael K\u00F6lling, John Rosenberg.", "",
                 Config.getString("menu.help.copyright.line1"),
                 Config.getString("menu.help.copyright.line2"),
                 Config.getString("menu.help.copyright.line3"),

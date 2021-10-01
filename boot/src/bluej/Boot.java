@@ -58,7 +58,7 @@ public class Boot
     // and then the update-version target should be executed.
     public static final int BLUEJ_VERSION_MAJOR = 4;
     public static final int BLUEJ_VERSION_MINOR = 2;
-    public static final int BLUEJ_VERSION_RELEASE = 1;
+    public static final int BLUEJ_VERSION_RELEASE = 2;
     public static final String BLUEJ_VERSION_SUFFIX = "";
 
     // public static final int BLUEJ_VERSION_NUMBER = BLUEJ_VERSION_MAJOR * 1000 +
@@ -101,7 +101,7 @@ public class Boot
         "guava-17.0.jar",
         "httpclient-4.1.1.jar", "httpcore-4.1.jar", "httpmime-4.1.1.jar"};
     private static final int greenfootUserBuildJars = 4;
-    public static String GREENFOOT_VERSION = "3.5.1";
+    public static String GREENFOOT_VERSION = "3.6.0";
     public static String GREENFOOT_API_VERSION = "3.0.0";
     // A singleton boot object so the rest of BlueJ can pick up args etc.
     private static Boot instance;
@@ -227,20 +227,8 @@ public class Boot
                 }
             }).toArray(URL[]::new);
         }
-        
-        String javafxPathProp = commandLineProps.getProperty("javafxpath", null);
-        File javafxPath;
-        if (javafxPathProp != null)
-        {
-            javafxPath = new File(javafxPathProp);
-        }
-        else
-        {
-            // If no javafxpath property passed, assume JavaFX is bundled
-            javafxPath = new File(getBluejLibDir(), "javafx");
-        }
-        
-        File javafxLibPath = new File(javafxPath, "lib");
+
+        File javafxLibPath = getJavaFXLibDir();
 
         URL[] urls = new URL[javafxJars.length];
         for (int i = 0; i < javafxJars.length; i++)
@@ -257,25 +245,29 @@ public class Boot
         return urls;
     }
 
-    /**
-     * Gets the path to the JavaFX src zip, which may or may not exist.
-     * @return
-     */
-    public File getJavaFXSourcePath()
+    public File getJavaFXLibDir()
     {
         String javafxPathProp = commandLineProps.getProperty("javafxpath", null);
         File javafxPath;
         if (javafxPathProp != null)
         {
             javafxPath = new File(javafxPathProp);
-        }
-        else
+        } else
         {
             // If no javafxpath property passed, assume JavaFX is bundled
             javafxPath = new File(getBluejLibDir(), "javafx");
         }
 
-        File javafxLibPath = new File(javafxPath, "lib");
+        return new File(javafxPath, "lib");
+    }
+
+    /**
+     * Gets the path to the JavaFX src zip, which may or may not exist.
+     * @return
+     */
+    public File getJavaFXSourcePath()
+    {
+        File javafxLibPath = getJavaFXLibDir();
         File javafxSrcPath = new File(javafxLibPath, "src.zip");
         return javafxSrcPath;
     }
