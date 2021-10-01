@@ -35,6 +35,7 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 
+import javax.accessibility.Accessible;
 import javax.swing.AbstractAction;
 import javax.swing.Action;
 import javax.swing.JEditorPane;
@@ -50,6 +51,7 @@ import javax.swing.text.SimpleAttributeSet;
 
 import bluej.BlueJEvent;
 import bluej.Config;
+import bluej.collect.DataCollector;
 import bluej.debugger.DebuggerField;
 import bluej.debugger.DebuggerObject;
 import bluej.debugger.ExceptionDescription;
@@ -76,7 +78,7 @@ import bluej.utility.Utility;
  * @author Michael Kolling
  */
 public class TextEvalPane extends JEditorPane 
-    implements ValueCollection, ResultWatcher, MouseMotionListener
+    implements Accessible, ValueCollection, ResultWatcher, MouseMotionListener
 {
     // The cursor to use while hovering over object icon
     private static final Cursor defaultCursor = new Cursor(Cursor.DEFAULT_CURSOR);
@@ -111,6 +113,7 @@ public class TextEvalPane extends JEditorPane
     public TextEvalPane(PkgMgrFrame frame)
     {
         super();
+        getAccessibleContext().setAccessibleName(Config.getString("pkgmgr.codepad.title"));
         this.frame = frame;
         setEditorKit(new MoeSyntaxEditorKit(true, null));
         doc = (MoeSyntaxDocument) getDocument();
@@ -295,6 +298,7 @@ public class TextEvalPane extends JEditorPane
             String resultString = resultField.getValueString();
             
             if(resultString.equals(nullLabel)) {
+                DataCollector.codePadSuccess(frame.getPackage(), ir.getOriginalCommand(), resultString);
                 output(resultString);
             }
             else {
@@ -304,11 +308,13 @@ public class TextEvalPane extends JEditorPane
                     DebuggerObject resultObject = resultField.getValueObject(null);
                     String resultType = resultObject.getGenType().toString(true);
                     String resultOutputString = resultString + "   (" + resultType + ")";
+                    DataCollector.codePadSuccess(frame.getPackage(), ir.getOriginalCommand(), resultOutputString);
                     objectOutput(resultOutputString,  new ObjectInfo(resultObject, ir));
                 }
                 else {
                     String resultType = resultField.getType().toString(true);
                     String resultOutputString = resultString + "   (" + resultType + ")";
+                    DataCollector.codePadSuccess(frame.getPackage(), ir.getOriginalCommand(), resultOutputString);
                     output(resultOutputString);
                 }
             }            
@@ -366,6 +372,7 @@ public class TextEvalPane extends JEditorPane
             }
             
             removeNewlyDeclareds();
+            DataCollector.codePadError(frame.getPackage(), ir.getOriginalCommand(), errorMessage);
             showErrorMsg(errorMessage);
             errorMessage = null;
         }
@@ -389,6 +396,7 @@ public class TextEvalPane extends JEditorPane
         
         removeNewlyDeclareds();
         String message = exception.getClassName() + " (" + exception.getText() + ")";
+        DataCollector.codePadException(frame.getPackage(), ir.getOriginalCommand(), message);
         showExceptionMsg(message);
     }
     
@@ -405,6 +413,7 @@ public class TextEvalPane extends JEditorPane
         
         
         String message = Config.getString("pkgmgr.codepad.vmTerminated");
+        DataCollector.codePadError(frame.getPackage(), ir.getOriginalCommand(), message);
         append(message);
         markAs(TextEvalSyntaxView.ERROR, Boolean.TRUE);
         

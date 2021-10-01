@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 2012  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -19,23 +19,35 @@
  This file is subject to the Classpath exception as provided in the  
  LICENSE.txt file that accompanied this code.
  */
-package bluej.graph;
+package bluej.collect;
+
+import java.util.List;
+import java.util.Map;
+
+import org.apache.http.entity.mime.MultipartEntity;
+
 
 /**
- * A strategy to move graph selections with keyboard input.
- * 
- * @author fisker
+ * An Event with no diffs to construct.  Package-visible.
  */
-public interface TraverseStragegy
+class PlainEvent implements Event
 {
-    /**
-     * Given a currently selected vertex and a key press, decide which vertex 
-     * should be selected next.
-     * 
-     * @param graph  The graph we're looking at.
-     * @param currentVertex  The currently selected vertex.
-     * @param key  The key that was pressed.
-     * @return     A vertex that should be selected now.
-     */
-    public Vertex findNextVertex(Graph graph, Vertex currentVertex, int key);
+    private MultipartEntity mpe;
+    
+    public PlainEvent(MultipartEntity mpe)
+    {
+        this.mpe = mpe;
+    }
+
+    @Override
+    public MultipartEntity makeData(int sequenceNum,
+            Map<FileKey, List<String>> fileVersions)
+    {
+        return mpe;
+    }
+
+    @Override
+    public void success(Map<FileKey, List<String>> fileVersions)
+    {
+    }
 }

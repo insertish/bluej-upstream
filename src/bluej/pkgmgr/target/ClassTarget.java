@@ -43,6 +43,7 @@ import javax.swing.AbstractAction;
 import javax.swing.JPopupMenu;
 
 import bluej.Config;
+import bluej.collect.DataCollector;
 import bluej.debugger.DebuggerClass;
 import bluej.debugger.gentype.Reflective;
 import bluej.debugmgr.objectbench.InvokeListener;
@@ -54,7 +55,7 @@ import bluej.extensions.BDependency;
 import bluej.extensions.ExtensionBridge;
 import bluej.extensions.event.ClassEvent;
 import bluej.extensions.event.ClassTargetEvent;
-import bluej.extmgr.ClassMenuObject;
+import bluej.extmgr.ClassExtensionMenu;
 import bluej.extmgr.ExtensionsManager;
 import bluej.extmgr.MenuManager;
 import bluej.graph.GraphEditor;
@@ -887,7 +888,7 @@ public class ClassTarget extends DependentTarget
             
             editor = EditorManager.getEditorManager().openClass(filename, docFilename,
                     project.getProjectCharset(),
-                    getBaseName(), this, isCompiled(), editorBounds, resolver,
+                    getBaseName() + " - " + project.getProjectName(), this, isCompiled(), editorBounds, resolver,
                     project.getJavadocResolver());
             
             // editor may be null if source has been deleted
@@ -978,6 +979,12 @@ public class ClassTarget extends DependentTarget
     {
         if (isCompiled() || ! modifiedSinceCompile) {
             String possibleError = getPackage().getDebugger().toggleBreakpoint(getQualifiedName(), lineNo, set, null);
+            
+            if (possibleError == null && getPackage() != null)
+            {
+                DataCollector.debuggerBreakpointToggle(getPackage(), getSourceFile(), lineNo, set);
+            }
+            
             return possibleError;
         }
         else {
@@ -1436,6 +1443,8 @@ public class ClassTarget extends DependentTarget
                 ExtensionBridge.changeBDependencyTargetName(bDependency, getQualifiedName());
             }
             
+            DataCollector.renamedClass(getPackage(), oldSourceFile, newSourceFile);
+            
             // Inform all listeners about the name change
             ClassEvent event = new ClassEvent(ClassEvent.CHANGED_NAME, getPackage(), getBClass(), oldName);
             ExtensionsManager.getInstance().delegateEvent(event);
@@ -1594,7 +1603,7 @@ public class ClassTarget extends DependentTarget
         role.createRoleMenuEnd(menu, this, state);
 
         MenuManager menuManager = new MenuManager(menu);
-        menuManager.setAttachedObject(new ClassMenuObject(this));
+        menuManager.setMenuGenerator(new ClassExtensionMenu(this));
         menuManager.addExtensionMenu(getPackage().getProject());
 
         return menu;
@@ -1924,6 +1933,8 @@ public class ClassTarget extends DependentTarget
     @Override
     public void remove()
     {
+        DataCollector.removeClass(getPackage(), getSourceFile());
+        
         prepareForRemoval();
         getPackage().removeTarget(this);
     }
@@ -2021,4 +2032,11 @@ public class ClassTarget extends DependentTarget
             return null;
         }
     }
+    
+    @Override
+    public void recordEdit(String latest, boolean includeOneLineEdits)
+    {
+        DataCollector.edit(getPackage(), getSourceFile(), latest, includeOneLineEdits);
+    }
+   
 }

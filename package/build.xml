@@ -27,6 +27,11 @@
         <include name="lib/svnkit.jar" />
         <include name="lib/svnkit-javahl.jar" />
         <include name="lib/trilead.jar" />
+    	<include name="lib/httpclient-4.1.1.jar" />
+    	<include name="lib/httpcore-4.1.jar" />
+    	<include name="lib/httpmime-4.1.1.jar" />
+    	<include name="lib/commons-logging-api-1.1.2.jar" />
+    	<include name="lib/diffutils-1.2.1.jar" />
     	<include name="lib/bjdoclet.jar" />
         <include name="lib/bluej.defs" />
         <include name="lib/moe.defs" />
@@ -481,8 +486,11 @@
             	<include name="doc/threading-issues.txt" />
 	            <include name="examples/**/*" />          
 	            <include name="icons/**/*" />           
-	            <include name="lib/**/*" />     
-	            <exclude name="lib/commons-*"/>
+	            <include name="lib/**/*" />
+            	
+            	<!-- exclude Greenfoot files -->
+	            <exclude name="lib/commons-httpclient-*"/>
+	            <exclude name="lib/commons-codec-*"/>
 	            <exclude name="lib/jl*"/>
 	            <exclude name="lib/bluej.jar"/>
 	            <exclude name="lib/bluejcore.jar"/>
@@ -490,6 +498,7 @@
 		        <exclude name="lib/bluejext.jar"/>
 		        <exclude name="lib/extensions/greenfoot.jar"/>
 		        <exclude name="lib/greenfoot/"/>
+            	
 	            <include name="package/**/*" />     
 	            <exclude name="package/commons-*"/>
 	            <exclude name="package/${bluej.source.zip}"/>

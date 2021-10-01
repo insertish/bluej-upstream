@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2010,2011,2012,2013  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2010,2011,2012  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -41,6 +41,8 @@ import java.util.Properties;
 import java.util.Set;
 
 import bluej.Config;
+import bluej.collect.DataCollectionCompileObserverWrapper;
+import bluej.collect.DataCollector;
 import bluej.compiler.CompileObserver;
 import bluej.compiler.Diagnostic;
 import bluej.compiler.EventqueueCompileObserver;
@@ -1107,6 +1109,8 @@ public final class Package extends Graph
         findSpaceForVertex(t);
         t.analyseSource();
         
+        DataCollector.addClass(this, destFile);
+
         return NO_ERROR;
     }
 
@@ -1434,7 +1438,7 @@ public final class Package extends Graph
             srcFiles[i++] = ct.getSourceFile();
         }
         
-        JobQueue.getJobQueue().addJob(srcFiles, observer, project.getClassLoader(), project.getProjectDir(),
+        JobQueue.getJobQueue().addJob(srcFiles, new DataCollectionCompileObserverWrapper(project, observer), project.getClassLoader(), project.getProjectDir(),
                 ! PrefMgr.getFlag(PrefMgr.SHOW_UNCHECKED), project.getProjectCharset());
     }
 

@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2013  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -21,23 +21,35 @@
  */
 package bluej.graph;
 
-import java.awt.*;
+import java.awt.Color;
+import java.awt.Component;
+import java.awt.Cursor;
+import java.awt.Dimension;
+import java.awt.GradientPaint;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
+import java.awt.PrintGraphics;
+import java.awt.event.FocusListener;
 import java.awt.event.MouseEvent;
 import java.awt.event.MouseMotionListener;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.Map.Entry;
 
-import javax.swing.JComponent;
+import javax.swing.JPanel;
 
 import bluej.Config;
 import bluej.pkgmgr.graphPainter.GraphPainterStdImpl;
+import bluej.utility.Debug;
 
 /**
  * Component to allow editing of general graphs.
  * 
  * @author Michael Cahill
  * @author Michael Kolling
- * @version $Id: GraphEditor.java 9013 2011-06-17 08:35:30Z mik $
+ * @version $Id: GraphEditor.java 10654 2013-05-10 09:39:02Z neil $
  */
-public class GraphEditor extends JComponent
+public class GraphEditor extends JPanel
     implements MouseMotionListener, GraphListener
 {
     protected final Color envOpColour = Config.ENV_COLOUR;
@@ -56,12 +68,14 @@ public class GraphEditor extends JComponent
     private SelectionController selectionController;
 
     private Cursor currentCursor = defaultCursor;  // currently shown cursor
+
+    private FocusListener focusListener;
     
     /**
      * Create a graph editor.
      * @param graph The graph being edited by this editor.
      */
-    public GraphEditor(Graph graph)
+    public GraphEditor(Graph graph, FocusListener focusListener)
     {
         this.graph = graph;
         marqueePainter = new MarqueePainter();
@@ -69,6 +83,12 @@ public class GraphEditor extends JComponent
         selectionController = new SelectionController(this);
         graph.addListener(this);
         setToolTipText(""); // Turn on tool-tips for this component
+        
+        this.focusListener = focusListener;
+        
+        // Get everything added:
+        setLayout(null);
+        graphChanged();
     }
 
     /**
@@ -108,7 +128,7 @@ public class GraphEditor extends JComponent
      * Paint this graph editor (this may be on screen or on a printer).
      */
     @Override
-    public void paint(Graphics g)
+    public void paintComponent(Graphics g)
     {
         Graphics2D g2D = (Graphics2D) g;
         //draw background
@@ -261,6 +281,48 @@ public class GraphEditor extends JComponent
     
     public void graphChanged()
     {
+        HashMap<Component, Boolean> keep = new HashMap<Component, Boolean>();
+        for (Component c : getComponents())
+        {
+            keep.put(c, false);
+        }
+        
+        // Add what needs to be added:
+        Iterator<? extends Vertex> it = graph.getVertices();
+        while (it.hasNext())
+        {
+            Vertex v = it.next();
+            if (!keep.containsKey(v))
+            {
+                add(v.getComponent());
+                v.getComponent().addFocusListener(focusListener);
+                v.getComponent().addFocusListener(selectionController);
+                v.getComponent().addKeyListener(selectionController);
+            }
+            // If it's in the vertices, keep it:
+            keep.put(v.getComponent(), true);
+        }
+        // Remove what needs to be removed (i.e. what we didn't see in the vertices):
+        for (Entry<Component, Boolean> e : keep.entrySet())
+        {
+            if (e.getValue().booleanValue() == false)
+            {
+                remove(e.getKey());
+            }
+        }
+        
         repaint();
+    }
+    
+    public boolean isGraphComponent(Component c)
+    {
+        Iterator<? extends Vertex> it = graph.getVertices();
+        while (it.hasNext())
+        {
+            Vertex v = it.next();
+            if (v.getComponent() == c)
+                return true;
+        }
+        return false;
     }
 }

@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2011,2012,2013  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2011,2012  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -48,6 +48,7 @@ import javax.swing.JPopupMenu;
 import org.junit.Test;
 
 import bluej.Config;
+import bluej.collect.DataCollector;
 import bluej.debugger.DebuggerObject;
 import bluej.debugmgr.objectbench.ObjectWrapper;
 import bluej.editor.Editor;
@@ -451,6 +452,7 @@ public class UnitTestClassRole extends ClassRole
                 
                 EventQueue.invokeLater(new Runnable() {
                     public void run() {
+                        List<DataCollector.NamedTyped> recordObjects = new ArrayList<DataCollector.NamedTyped>();
                         Iterator<Map.Entry<String,DebuggerObject>> it = dobs.entrySet().iterator();
                         
                         while(it.hasNext()) {
@@ -458,8 +460,14 @@ public class UnitTestClassRole extends ClassRole
                             DebuggerObject objVal = mapent.getValue();
                             
                             if (! objVal.isNullObject()) {
-                                pmf.putObjectOnBench(mapent.getKey(), objVal, objVal.getGenType(), null);
+                                String actualName = pmf.putObjectOnBench(mapent.getKey(), objVal, objVal.getGenType(), null);
+                                recordObjects.add(new DataCollector.NamedTyped(actualName, objVal.getClassName()));
                             }
+                        }
+                        
+                        if (recordAsFixtureToBench)
+                        {
+                            DataCollector.fixtureToObjectBench(pmf.getPackage(), ct.getSourceFile(), recordObjects);
                         }
                     }
                 });
@@ -640,6 +648,7 @@ public class UnitTestClassRole extends ClassRole
                 {
                     names.add(obj.getName());
                 }
+                DataCollector.objectBenchToFixture(pmf.getPackage(), ct.getSourceFile(), names);
             }
             
             // find the curly brackets for the setUp() method

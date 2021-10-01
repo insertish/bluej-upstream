@@ -29,10 +29,12 @@ import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 
+import javax.accessibility.Accessible;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 
 import bluej.Config;
+import bluej.collect.DataCollector;
 import bluej.debugmgr.NamedValue;
 import bluej.debugmgr.ValueCollection;
 import bluej.pkgmgr.PkgMgrFrame;
@@ -46,7 +48,7 @@ import bluej.utility.JavaNames;
  * @author  Michael Cahill
  * @author  Andrew Patterson
  */
-public class ObjectBench extends JPanel implements ValueCollection,
+public class ObjectBench extends JPanel implements Accessible, ValueCollection,
     FocusListener, KeyListener, MouseListener, ObjectBenchInterface
 {
     private static final Color BACKGROUND_COLOR = Config.getOptionalItemColour("colour.objectbench.background");
@@ -70,6 +72,7 @@ public class ObjectBench extends JPanel implements ValueCollection,
         objects = new ArrayList<ObjectWrapper>();
         createComponent();
         this.pkgMgrFrame = pkgMgrFrame;
+        getAccessibleContext().setAccessibleName(Config.getString("pkgmgr.objBench.title"));
     }
 
     /**
@@ -190,6 +193,8 @@ public class ObjectBench extends JPanel implements ValueCollection,
         if(wrapper == selectedObject)
             setSelectedObject(null);
      
+        DataCollector.removeObject(wrapper.getPackage(), wrapper.getName());
+        
         wrapper.prepareRemove();
         wrapper.getPackage().getDebugger().removeObject(scopeId, wrapper.getName());
         obp.remove(wrapper);
@@ -376,10 +381,8 @@ public class ObjectBench extends JPanel implements ValueCollection,
                 break;
 
             case KeyEvent.VK_ENTER:
-                showPopupMenu();
-                break;
-
             case KeyEvent.VK_SPACE:
+            case KeyEvent.VK_CONTEXT_MENU:
                 showPopupMenu();
                 break;
 

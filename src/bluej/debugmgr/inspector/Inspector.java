@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2010,2011,2012,2013  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2010,2011,2012  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -64,6 +64,7 @@ import bluej.debugger.DebuggerField;
 import bluej.debugger.DebuggerObject;
 import bluej.pkgmgr.Package;
 import bluej.pkgmgr.PackageEditor;
+import bluej.pkgmgr.PkgMgrFrame;
 import bluej.testmgr.record.GetInvokerRecord;
 import bluej.testmgr.record.InvokerRecord;
 import bluej.testmgr.record.ObjectInspectInvokerRecord;
@@ -504,6 +505,12 @@ public abstract class Inspector extends JFrame
             }
             
             ir.addAssertion(assertPanel.getAssertStatement());
+            
+            PkgMgrFrame pmf = PkgMgrFrame.findFrame(pkg);
+            if (pmf != null)
+            {
+                assertPanel.recordAssertion(pkg, pmf.getTestIdentifier(), ir.getUniqueIdentifier());
+            }
         }
         return true;
     }

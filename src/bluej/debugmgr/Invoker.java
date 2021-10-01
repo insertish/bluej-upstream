@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2011,2012,2013  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2011,2012  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -36,6 +36,7 @@ import java.util.Map;
 import javax.swing.JFrame;
 
 import bluej.Config;
+import bluej.collect.DataCollector;
 import bluej.compiler.CompileObserver;
 import bluej.compiler.Diagnostic;
 import bluej.compiler.EventqueueCompileObserver;
@@ -1052,6 +1053,8 @@ public class Invoker
      */
     private void errorMessage(String filename, long lineNo, String message)
     {
+        DataCollector.invokeCompileError(pkg, commandString, message);
+        
         if (dialog != null) {
             dialog.setErrorMessage("Error: " + message);
         }
@@ -1222,6 +1225,8 @@ public class Invoker
                         }
                         
                         PkgMgrFrame pmf = PkgMgrFrame.findFrame(pkg);
+                        
+                        DataCollector.invokeMethodSuccess(pkg, commandString, benchName, resultType, pmf == null ? -1 : pmf.getTestIdentifier(), ir.getUniqueIdentifier());
                     }
                     
                     ir.setResultObject(resultObj);
@@ -1230,11 +1235,20 @@ public class Invoker
 
                 case Debugger.EXCEPTION :
                     ExceptionDescription exc = result.getException();
+                    if (!codepad)
+                    {
+                        //Only record this if it wasn't on behalf of the codepad (codepad records separately):
+                        DataCollector.invokeMethodException(pkg, commandString, exc);
+                    }
                     watcher.putException(exc, ir);
                     break;
 
                 case Debugger.TERMINATED : // terminated by user
                     if (!codepad)
+                    {
+                        //Only record this if it wasn't on behalf of the codepad (codepad records separately):
+                        DataCollector.invokeMethodTerminated(pkg, commandString);
+                    }
                     watcher.putVMTerminated(ir);
                     break;
 

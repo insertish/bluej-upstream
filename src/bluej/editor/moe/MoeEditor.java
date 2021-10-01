@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2010,2011,2012,2013  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2010,2011,2012  Michael Kolling and John Rosenberg 
 
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -270,6 +270,7 @@ public final class MoeEditor extends JFrame
     
     // Blackbox data recording:
     private ArrayList<String> previousDoc = null;
+    private int oldCaretLineNumber = -1;
 
 
     /**
@@ -480,6 +481,9 @@ public final class MoeEditor extends JFrame
     {
         IOException failureException = null;
         if (saveState.isChanged()) {
+            // Record any edits with the data collection system:
+            recordEdit(true);
+            
             Writer writer = null;
             try {
                 // The crash file is used during writing and will remain in
@@ -1248,6 +1252,8 @@ public final class MoeEditor extends JFrame
         // by binding '}' key to a specialised action. TODO.
         SwingUtilities.invokeLater(doTextInsert);
         
+        recordEdit(false);        
+        
         scheduleReparseRunner();
     }
 
@@ -1264,6 +1270,8 @@ public final class MoeEditor extends JFrame
             setChanged();
         }
         actions.userAction();
+        
+        recordEdit(false);
         
         scheduleReparseRunner();
     }
@@ -2799,6 +2807,12 @@ public final class MoeEditor extends JFrame
             doBracketMatch();
         }
         actions.userAction();
+        
+        if (oldCaretLineNumber != getLineNumberAt(caretPos))
+        {
+            recordEdit(true);
+        }
+        oldCaretLineNumber = getLineNumberAt(caretPos);
     }
 
     /**
@@ -3833,6 +3847,19 @@ public final class MoeEditor extends JFrame
                 e.printStackTrace();
             }
             lines.add(line);
+        }
+    }
+    
+    private void recordEdit(boolean includeOneLineEdits)
+    {
+        if (watcher != null)
+        {
+            try {
+                watcher.recordEdit(sourceDocument.getText(0, sourceDocument.getLength()), includeOneLineEdits);
+            }
+            catch (BadLocationException e) {
+                e.printStackTrace();
+            }
         }
     }
 }

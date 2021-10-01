@@ -45,6 +45,7 @@ import java.awt.print.PageFormat;
 import java.awt.print.Paper;
 import java.awt.print.PrinterJob;
 import java.io.File;
+import java.util.Arrays;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
@@ -81,6 +82,7 @@ import bluej.BlueJEvent;
 import bluej.BlueJEventListener;
 import bluej.BlueJTheme;
 import bluej.Config;
+import bluej.collect.DataCollector;
 import bluej.debugger.Debugger;
 import bluej.debugger.DebuggerObject;
 import bluej.debugger.ExceptionDescription;
@@ -95,8 +97,8 @@ import bluej.debugmgr.objectbench.ObjectWrapper;
 import bluej.debugmgr.texteval.TextEvalArea;
 import bluej.extmgr.ExtensionsManager;
 import bluej.extmgr.MenuManager;
-import bluej.extmgr.ToolsMenuObject;
-import bluej.extmgr.ViewMenuObject;
+import bluej.extmgr.ToolsExtensionMenu;
+import bluej.extmgr.ViewExtensionMenu;
 import bluej.groupwork.actions.CheckoutAction;
 import bluej.groupwork.actions.TeamActionGroup;
 import bluej.groupwork.ui.ActivityIndicator;
@@ -683,7 +685,8 @@ public class PkgMgrFrame extends JFrame
         this.pkg = pkg;
 
         if(! Config.isGreenfoot()) {
-            this.editor = new PackageEditor(pkg, this);
+            this.editor = new PackageEditor(pkg, this, this);
+            editor.getAccessibleContext().setAccessibleName(Config.getString("pkgmgr.graphEditor.title"));
             editor.setFocusable(true);
             editor.setTransferHandler(new FileTransferHandler(this));
             editor.addMouseListener(this); // This mouse listener MUST be before
@@ -738,10 +741,10 @@ public class PkgMgrFrame extends JFrame
             
             updateTextEvalBackground(isEmptyFrame());
                     
-            this.toolsMenuManager.setAttachedObject(new ToolsMenuObject(pkg));
+            this.toolsMenuManager.setMenuGenerator(new ToolsExtensionMenu(pkg));
             this.toolsMenuManager.addExtensionMenu(pkg.getProject());
 
-            this.viewMenuManager.setAttachedObject(new ViewMenuObject(pkg));
+            this.viewMenuManager.setMenuGenerator(new ViewExtensionMenu(pkg));
             this.viewMenuManager.addExtensionMenu(pkg.getProject());
         
             teamActions = pkg.getProject().getTeamActions();
@@ -759,6 +762,8 @@ public class PkgMgrFrame extends JFrame
             }                
         }
         
+        DataCollector.packageOpened(pkg);
+
         extMgr.packageOpened(pkg);
     }
     
@@ -820,8 +825,8 @@ public class PkgMgrFrame extends JFrame
             classScroller.setBorder(Config.normalBorder);
             editor.removeMouseListener(this);
             editor.removeFocusListener(this);
-            this.toolsMenuManager.setAttachedObject(new ToolsMenuObject(pkg));
-            this.viewMenuManager.setAttachedObject(new ViewMenuObject(pkg));
+            this.toolsMenuManager.setMenuGenerator(new ToolsExtensionMenu(pkg));
+            this.viewMenuManager.setMenuGenerator(new ViewExtensionMenu(pkg));
             
             getObjectBench().removeAllObjects(getProject().getUniqueId());
             clearTextEval();
@@ -832,6 +837,8 @@ public class PkgMgrFrame extends JFrame
 
         getPackage().closeAllEditors();
         
+        DataCollector.packageClosed(pkg);
+
         Project proj = getProject();
 
         editor = null;
@@ -1012,7 +1019,7 @@ public class PkgMgrFrame extends JFrame
      */
     public void focusLost(FocusEvent e)
     {
-        if (!e.isTemporary()) {
+        if (!e.isTemporary() && e.getOppositeComponent() != editor && !editor.isGraphComponent(e.getOppositeComponent())) {
             classScroller.setBorder(Config.normalBorder);
             editor.setHasFocus(false);
         }
@@ -1077,6 +1084,7 @@ public class PkgMgrFrame extends JFrame
                         tryAgain = false; // cancelled
                     }
                     else if (JavaNames.isIdentifier(newObjectName)) {
+                        DataCollector.benchGet(getPackage(), newObjectName, e.getDebuggerObject().getClassName(), getTestIdentifier());
                         putObjectOnBench(newObjectName, e.getDebuggerObject(), e.getIType(), e.getInvokerRecord());
                         tryAgain = false;
                     }
@@ -1213,13 +1221,15 @@ public class PkgMgrFrame extends JFrame
 
         if (editor != null) {
             editor.revalidate();
-            editor.scrollRectToVisible(target.getRectangle());
+            editor.scrollRectToVisible(target.getBounds());
             editor.repaint();
         }
 
         if (target.getRole() instanceof UnitTestClassRole) {
             pkg.compileQuiet(target);
         }
+        
+        DataCollector.addClass(pkg, target.getSourceFile());
         
         return true;
     }
@@ -2055,12 +2065,12 @@ public class PkgMgrFrame extends JFrame
     public void doRemove()
     {
         Component permanentFocusOwner = KeyboardFocusManager.getCurrentKeyboardFocusManager().getPermanentFocusOwner();
-        if (permanentFocusOwner == editor) { // focus in diagram
+        if (permanentFocusOwner == editor || Arrays.asList(editor.getComponents()).contains(permanentFocusOwner)) { // focus in diagram
             if (!(doRemoveTargets() || doRemoveDependency())) {
                 DialogManager.showError(this, "no-class-selected");
             }
         }
-        else if (permanentFocusOwner == objbench) { // focus in object bench
+        else if (permanentFocusOwner == objbench || objbench.getObjects().contains(permanentFocusOwner)) { // focus in object bench
             objbench.removeSelectedObject(pkg.getId());
         }
         else {
@@ -2167,6 +2177,8 @@ public class PkgMgrFrame extends JFrame
         if (testTarget != null) {
             testRecordingEnded();
             
+            DataCollector.endTestMethod(getPackage(), testIdentifier);
+            
             if (testTarget.getRole() instanceof UnitTestClassRole) {
                 UnitTestClassRole utcr = (UnitTestClassRole) testTarget.getRole();
                 
@@ -2193,6 +2205,8 @@ public class PkgMgrFrame extends JFrame
     {
         testRecordingEnded();
         
+        DataCollector.cancelTestMethod(getPackage(), testIdentifier);
+
         // remove objects from object bench (may have been put there
         // when testing was started)
         getProject().removeClassLoader();
@@ -2242,6 +2256,7 @@ public class PkgMgrFrame extends JFrame
         this.testTargetMethod = testName;
         this.testTarget = testClass;
         this.testIdentifier = nextTestIdentifier.incrementAndGet(); // Allocate next test identifier
+        DataCollector.startTestMethod(getPackage(), testIdentifier, testClass.getSourceFile(), testName);
     }
 
     /**
@@ -2365,6 +2380,7 @@ public class PkgMgrFrame extends JFrame
         if (!isEmptyFrame())
         {
             getProject().restartVM();
+            DataCollector.restartVM(getProject());
         }
     }
 
@@ -3032,8 +3048,10 @@ public class PkgMgrFrame extends JFrame
 
             // If this is the first frame create the extension tools menu now.
             // (Otherwise, it will be created during project open.)
-            if (frames.size() <= 1)
+            if (frames.size() <= 1) {
+                toolsMenuManager.setMenuGenerator(new ToolsExtensionMenu(null));
                 toolsMenuManager.addExtensionMenu(null);
+            }
         }
 
         menu = new JMenu(Config.getString("menu.view"));
