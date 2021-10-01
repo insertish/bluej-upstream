@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2010  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2010,2011  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -23,7 +23,6 @@ package bluej.pkgmgr.target;
 
 import java.awt.Color;
 import java.awt.EventQueue;
-import java.awt.Font;
 import java.awt.Paint;
 import java.awt.Rectangle;
 import java.awt.event.ActionEvent;
@@ -31,6 +30,8 @@ import java.awt.event.MouseEvent;
 import java.io.File;
 import java.io.FileFilter;
 import java.io.IOException;
+import java.lang.annotation.Annotation;
+import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -78,7 +79,6 @@ import bluej.pkgmgr.target.role.InterfaceClassRole;
 import bluej.pkgmgr.target.role.MIDletClassRole;
 import bluej.pkgmgr.target.role.StdClassRole;
 import bluej.pkgmgr.target.role.UnitTestClassRole;
-import bluej.prefmgr.PrefMgr;
 import bluej.utility.Debug;
 import bluej.utility.DialogManager;
 import bluej.utility.FileEditor;
@@ -96,7 +96,6 @@ import bluej.views.MethodView;
  * @author Michael Cahill
  * @author Michael Kolling
  * @author Bruce Quig
- * @author Damiano Bolla
  */
 public class ClassTarget extends DependentTarget
     implements Moveable, InvokeListener
@@ -110,10 +109,7 @@ public class ClassTarget extends DependentTarget
     private final static String createTestStr = Config.getString("pkgmgr.classmenu.createTest");
 
     // Define Background Colours
-    private final static Color compbg = Config.getItemColour("colour.target.bg.compiling");
-
-    private final static Color colBorder = Config.getItemColour("colour.target.border");
-    private final static Color textfg = Config.getItemColour("colour.text.fg");
+    private final static Color compbg = new Color(200,150,100);
 
     private static String usesArrowMsg = Config.getString("pkgmgr.usesArrowMsg");
 
@@ -169,6 +165,7 @@ public class ClassTarget extends DependentTarget
     
     //properties map to store values used in the editor from the props (if necessary)
     private Map<String,String> properties = new HashMap<String,String>();
+    
     /**
      * Create a new class target in package 'pkg'.
      * 
@@ -201,7 +198,7 @@ public class ClassTarget extends DependentTarget
                 role = new AppletClassRole();
             }
             else if (template.startsWith("unittest")) {
-                role = new UnitTestClassRole();
+                role = new UnitTestClassRole(true);
             }
             else if (template.startsWith("abstract")) {
                 role = new AbstractClassRole();
@@ -229,8 +226,9 @@ public class ClassTarget extends DependentTarget
      */
     public synchronized final BClass getBClass ()
     {
-        if ( singleBClass == null )
-          singleBClass = ExtensionBridge.newBClass(this);
+        if ( singleBClass == null ) {
+            singleBClass = ExtensionBridge.newBClass(this);
+        }
           
         return singleBClass;
     }
@@ -310,6 +308,7 @@ public class ClassTarget extends DependentTarget
      * 
      * @return The displayName value
      */
+    @Override
     public String getDisplayName()
     {
         return super.getDisplayName() + getTypeParameters();
@@ -332,6 +331,7 @@ public class ClassTarget extends DependentTarget
      * 
      * @param newState The new state value
      */
+    @Override
     public void setState(int newState)
     {
         if (state != newState) {
@@ -370,21 +370,63 @@ public class ClassTarget extends DependentTarget
     /**
      * Set the role for this class target.
      * 
-     * Avoids changing over the role object if the new one is of the same type
+     * <p>Avoids changing over the role object if the new one is of the same type.
      * 
      * @param newRole The new role value
      */
     protected void setRole(ClassRole newRole)
     {
-        if ((role == null) || !(newRole.getClass().equals(role.getClass()))) {
+        if (role.getRoleName() != newRole.getRoleName()) {
             role = newRole;
         }
     }
 
     /**
+     * Test if a given class is a Junit 4 test class.
+     * 
+     * <p>In Junit4, test classes can be of any type.
+     * The only way to test is to check if it has one of the following annotations:
+     * @Before, @Test or @After
+     * 
+     * @param cl class to test
+     */
+    @SuppressWarnings("unchecked")
+    public static boolean isJunit4TestClass(Class<?> cl)
+    {
+        ClassLoader clLoader = cl.getClassLoader();
+        try {
+            Class<? extends Annotation> beforeClass =
+                (Class<? extends Annotation>) Class.forName("org.junit.Before", false, clLoader);
+            Class<? extends Annotation> afterClass =
+                (Class<? extends Annotation>) Class.forName("org.junit.After", false, clLoader);
+            Class<? extends Annotation> testClass =
+                (Class<? extends Annotation>) Class.forName("org.junit.Test", false, clLoader);
+
+            Method[] methods = cl.getDeclaredMethods();
+            for (int i=0; i<methods.length; i++) {
+                if (methods[i].getAnnotation(beforeClass) != null) {
+                    return true;
+                }
+                if (methods[i].getAnnotation(afterClass) != null) {
+                    return true;
+                }
+                if (methods[i].getAnnotation(testClass) != null) {
+                    return true;
+                }
+            }
+
+        }
+        catch (ClassNotFoundException cnfe) {}
+        catch (LinkageError le) {}
+
+        // No suitable annotations found, so not a test class
+        return false;
+    }
+    
+    /**
      * Use a variety of tests to determine what our role is.
      * 
-     * All tests must be very quick and should not rely on any significant
+     * <p>All tests must be very quick and should not rely on any significant
      * computation (ie. reparsing). If computation is required, the existing
      * role will do for the time being.
      * 
@@ -442,7 +484,7 @@ public class ClassTarget extends DependentTarget
                 setRole(new AppletClassRole());
             }
             else if (junitClass.isAssignableFrom(cl)) {
-                setRole(new UnitTestClassRole());
+                setRole(new UnitTestClassRole(false));
             }
             else if (Modifier.isInterface(cl.getModifiers())) {
                 setRole(new InterfaceClassRole());
@@ -455,6 +497,9 @@ public class ClassTarget extends DependentTarget
             }
             else if ( ( midletClass != null )  &&  ( midletClass.isAssignableFrom(cl) ) ) {
                 setRole(new MIDletClassRole());
+            }
+            else if (isJunit4TestClass(cl)) {
+                setRole(new UnitTestClassRole(true));
             }
             else {
                 setRole(new StdClassRole());
@@ -472,7 +517,7 @@ public class ClassTarget extends DependentTarget
                     setRole(new MIDletClassRole());
                 }          
                 else if (classInfo.isUnitTest()) {
-                    setRole(new UnitTestClassRole());
+                    setRole(new UnitTestClassRole(false));
                 }
                 else if (classInfo.isInterface()) {
                     setRole(new InterfaceClassRole());
@@ -502,12 +547,12 @@ public class ClassTarget extends DependentTarget
     /**
      * Load existing information about this class target
      * 
-     * 
      * @param props the properties object to read
      * @param prefix an internal name used for this target to identify its
      *            properties in a properties file used by multiple targets.
      * @exception NumberFormatException Description of the Exception
      */
+    @Override
     public void load(Properties props, String prefix)
         throws NumberFormatException
     {
@@ -528,7 +573,10 @@ public class ClassTarget extends DependentTarget
             setRole(new MIDletClassRole());
         }
         else if (UnitTestClassRole.UNITTEST_ROLE_NAME.equals(type)) {
-            setRole(new UnitTestClassRole());
+            setRole(new UnitTestClassRole(false));
+        }
+        else if (UnitTestClassRole.UNITTEST_ROLE_NAME_JUNIT4.equals(type)) {
+            setRole(new UnitTestClassRole(true));
         }
         else if (AbstractClassRole.ABSTRACT_ROLE_NAME.equals(type)) {
             setRole(new AbstractClassRole());
@@ -556,6 +604,7 @@ public class ClassTarget extends DependentTarget
      * @param prefix an internal name used for this target to identify its
      *            properties in a properties file used by multiple targets.
      */
+    @Override
     public void save(Properties props, String prefix)
     {
         super.save(props, prefix);
@@ -700,35 +749,6 @@ public class ClassTarget extends DependentTarget
         }
     }
 
-    /**
-     * Gets the borderColour attribute of the ClassTarget object
-     * 
-     * @return The borderColour value
-     */
-    Color getBorderColour()
-    {
-        return colBorder;
-    }
-
-    /**
-     * Gets the textColour attribute of the ClassTarget object
-     * 
-     * @return The textColour value
-     */
-    Color getTextColour()
-    {
-        return textfg;
-    }
-
-    /**
-     * Gets the font attribute of the ClassTarget object
-     * 
-     * @return The font value
-     */
-    Font getFont()
-    {
-        return PrefMgr.getTargetFont();
-    }
 
     // --- EditableTarget interface ---
 
@@ -849,6 +869,7 @@ public class ClassTarget extends DependentTarget
             }
             
             editor = EditorManager.getEditorManager().openClass(filename, docFilename,
+                    project.getProjectCharset(),
                     getBaseName(), this, isCompiled(), editorBounds, resolver,
                     project.getJavadocResolver());
             
@@ -869,6 +890,7 @@ public class ClassTarget extends DependentTarget
      * <p>This can cause saveEvent() to be generated, which might move
      * the class to a new package (if the package line has been changed).
      */
+    @Override
     public void ensureSaved() throws IOException
     {
         if(editor != null) {
@@ -889,6 +911,7 @@ public class ClassTarget extends DependentTarget
             int state = 0;
             DebuggerClass clss;
             
+            @Override
             public void run() {
                 switch (state) {
                     // This is the intial state. Try and load the class.
@@ -911,6 +934,7 @@ public class ClassTarget extends DependentTarget
 
     // --- EditorWatcher interface ---
 
+    @Override
     public void modificationEvent(Editor editor)
     {
         invalidate();
@@ -922,6 +946,7 @@ public class ClassTarget extends DependentTarget
         sourceInfo.setSourceModified();
     }
 
+    @Override
     public void saveEvent(Editor editor)
     {
         ClassInfo info = analyseSource();
@@ -931,6 +956,7 @@ public class ClassTarget extends DependentTarget
         determineRole(null);
     }
 
+    @Override
     public String breakpointToggleEvent(Editor editor, int lineNo, boolean set)
     {
         if (isCompiled() || ! modifiedSinceCompile) {
@@ -990,6 +1016,7 @@ public class ClassTarget extends DependentTarget
      * 
      * @param editor Description of the Parameter
      */
+    @Override
     public void compile(Editor editor)
     {
         getPackage().compile(this);
@@ -1464,8 +1491,8 @@ public class ClassTarget extends DependentTarget
 
         if (state == S_NORMAL) {
             // handle error causes when loading classes which are compiled
-        	// but not loadable in the current VM. (Eg if they were compiled
-        	// for a later VM).
+            // but not loadable in the current VM. (Eg if they were compiled
+            // for a later VM).
             // we detect the error, remove the class file, and invalidate
             // to allow them to be recompiled
             cl = getPackage().loadClass(getQualifiedName());
@@ -1608,8 +1635,7 @@ public class ClassTarget extends DependentTarget
 
         public void actionPerformed(ActionEvent e)
         {
-        	getPackage().compile(ClassTarget.this);
-
+            getPackage().compile(ClassTarget.this);
         }
     }
 
@@ -1643,8 +1669,8 @@ public class ClassTarget extends DependentTarget
         }
 
         public void actionPerformed(ActionEvent e)
-        {	
-            if (checkDebuggerState()){
+        {
+            if (checkDebuggerState()) {
                 inspect();
             }
         }
@@ -1655,6 +1681,7 @@ public class ClassTarget extends DependentTarget
      * 
      * @param evt Description of the Parameter
      */
+    @Override
     public void doubleClick(MouseEvent evt)
     {
         open();
@@ -1753,6 +1780,7 @@ public class ClassTarget extends DependentTarget
      * @param x The new pos value
      * @param y The new pos value
      */
+    @Override
     public void setPos(int x, int y)
     {
         super.setPos(x, y);
@@ -1765,6 +1793,7 @@ public class ClassTarget extends DependentTarget
      * @param width The new size value
      * @param height The new size value
      */
+    @Override
     public void setSize(int width, int height)
     {
         super.setSize(Math.max(width, MIN_WIDTH), Math.max(height, MIN_HEIGHT));
@@ -1933,6 +1962,7 @@ public class ClassTarget extends DependentTarget
         properties.put(key, value);
     }
     
+    @Override
     public String getTooltipText()
     {
         if (!getSourceInfo().isValid()) {

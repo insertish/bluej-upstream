@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2010  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2010,2011  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -89,7 +89,6 @@ import bluej.debugmgr.ExpressionInformation;
 import bluej.debugmgr.Invoker;
 import bluej.debugmgr.LibraryCallDialog;
 import bluej.debugmgr.ResultWatcher;
-import bluej.debugmgr.inspector.ResultInspector;
 import bluej.debugmgr.objectbench.ObjectBench;
 import bluej.debugmgr.objectbench.ObjectWrapper;
 import bluej.debugmgr.texteval.TextEvalArea;
@@ -155,7 +154,6 @@ import bluej.utility.DialogManager;
 import bluej.utility.FileUtility;
 import bluej.utility.GradientFillPanel;
 import bluej.utility.JavaNames;
-import bluej.utility.SortedProperties;
 import bluej.utility.Utility;
 import bluej.views.CallableView;
 import bluej.views.ConstructorView;
@@ -225,8 +223,6 @@ public class PkgMgrFrame extends JFrame
     private JMenuItem javaMEnewProjMenuItem;
     private JMenuItem javaMEdeployMenuItem;
   
-    // these should probably be transferred to having static getInstance methods
-    //like PkgMgrActions
     private TeamActionGroup teamActions;
     
     private JMenuItem showTestResultsItem;
@@ -764,14 +760,11 @@ public class PkgMgrFrame extends JFrame
             // In Java-ME packages, we display Java-ME controls in the
             // test panel. We are just using the real estate of the test panel.
             // The rest of the testing tools (menus, etc) are always hidden.
-            String javaMEflag = p.getProperty( "package.isJavaMEproject", "false" );
-            if ( javaMEflag.equals( "true" ) ) {
-                getProject().setJavaMEproject( true );
+            if (getProject().isJavaMEProject()) {
                 showJavaMEcontrols(true);
                 showTestingTools(false);
-            } 
+            }
             else {
-                getProject().setJavaMEproject( false );
                 showTestingTools(wantToSeeTestingTools());
             }                
         };
@@ -1123,7 +1116,7 @@ public class PkgMgrFrame extends JFrame
     /**
      * Create a new project and display it in a frame.
      * @param dirName           The directory to create the project in
-     * @param isJavaMEproject   Whether this is a Java Micro Edition project
+     * @param isJavaMEproject   Whether to create a Java Micro Edition project
      * @return     true if successful, false otherwise
      */
     public boolean newProject(String dirName, boolean isJavaMEproject )
@@ -1133,14 +1126,6 @@ public class PkgMgrFrame extends JFrame
             
             Package unNamedPkg = proj.getPackage("");
             
-            //Store in bluej.pkg file the flag signalling a Java ME project.
-            //This property will be used by openPackage().
-            if ( isJavaMEproject ) {
-                SortedProperties props = new SortedProperties();
-                props.setProperty( "package.isJavaMEproject", "true" );
-                unNamedPkg.save( props );
-            } 
-
             if (isEmptyFrame()) {
                 openPackage( unNamedPkg );
             }
@@ -1567,11 +1552,20 @@ public class PkgMgrFrame extends JFrame
      */
     protected void doSave()
     {
-        if (isEmptyFrame())
+        if (isEmptyFrame()) {
             return;
+        }
         
         // store the current editor size in the bluej.pkg file
-        Properties p = new Properties();
+        Properties p;
+        if (pkg.isUnnamedPackage()) {
+            // The unnamed package also contains project properties
+            p = getProject().getProjectProperties();
+        }
+        else {
+            p = new Properties();
+        }
+        
         if(!Config.isGreenfoot()) {
             Dimension d = classScroller.getSize(null);
     
@@ -1585,9 +1579,6 @@ public class PkgMgrFrame extends JFrame
     
             p.put("package.showUses", new Boolean(isShowUses()).toString());
             p.put("package.showExtends", new Boolean(isShowExtends()).toString());
-
-            if ( isJavaMEpackage( ) )
-                p.put( "package.isJavaMEproject", "true");
         }
         pkg.save(p);
     }
@@ -1679,8 +1670,9 @@ public class PkgMgrFrame extends JFrame
      */
     public void doExport()
     {
-    	if (exporter == null)
-    		exporter = new ExportManager(this);
+        if (exporter == null) {
+            exporter = new ExportManager(this);
+        }
         exporter.export();
     }
 
@@ -1790,7 +1782,7 @@ public class PkgMgrFrame extends JFrame
     public void showCopyright()
     {
         JOptionPane.showMessageDialog(this, new String[]{
-                "BlueJ \u00a9 2000-2010 Michael K\u00F6lling, John Rosenberg.", " ",
+                "BlueJ \u00a9 2000-2011 Michael K\u00F6lling, John Rosenberg.", " ",
                 Config.getString("menu.help.copyright.line1"), Config.getString("menu.help.copyright.line2"),
                 Config.getString("menu.help.copyright.line3"), Config.getString("menu.help.copyright.line4"),}, Config
                 .getString("menu.help.copyright.title"), JOptionPane.INFORMATION_MESSAGE);
@@ -1816,7 +1808,7 @@ public class PkgMgrFrame extends JFrame
                 
                 public void beginExecution(InvokerRecord ir)
                 {
-                    BlueJEvent.raiseEvent(BlueJEvent.METHOD_CALL, ir.toExpression());
+                    BlueJEvent.raiseEvent(BlueJEvent.METHOD_CALL, ir);
                     setWaitCursor(false);
                 }
                 
@@ -1899,7 +1891,7 @@ public class PkgMgrFrame extends JFrame
                 
                 public void beginExecution(InvokerRecord ir)
                 {
-                    BlueJEvent.raiseEvent(BlueJEvent.METHOD_CALL, ir.toExpression());
+                    BlueJEvent.raiseEvent(BlueJEvent.METHOD_CALL, ir);
                     setWaitCursor(false);
                 }
                 
@@ -1925,9 +1917,8 @@ public class PkgMgrFrame extends JFrame
                     if (result == null)
                         return;
 
-                    ResultInspector viewer = getProject().getResultInspectorInstance(result, name, getPackage(), ir,
+                    getProject().getResultInspectorInstance(result, name, getPackage(), ir,
                             expressionInformation, PkgMgrFrame.this);
-                    BlueJEvent.raiseEvent(BlueJEvent.METHOD_CALL, viewer.getResult());
                 }
 
                 public void putError(String msg, InvokerRecord ir)
@@ -2039,7 +2030,7 @@ public class PkgMgrFrame extends JFrame
             getPackage().getDebugger().addObject(pkg.getId(), newInstanceName, object);
 
             if (ir != null) {
-                ir.setBenchName(newInstanceName, wrapper.getObject().getGenClassName());
+                ir.setBenchName(newInstanceName, wrapper.getTypeName());
             }
         }
     }
@@ -2049,7 +2040,7 @@ public class PkgMgrFrame extends JFrame
      */
     public void doCreateNewClass()
     {
-        NewClassDialog dlg = new NewClassDialog(this);
+        NewClassDialog dlg = new NewClassDialog(this, isJavaMEpackage());
         boolean okay = dlg.display();
 
         if (okay) {
@@ -2097,10 +2088,12 @@ public class PkgMgrFrame extends JFrame
         // if the name is fully qualified then we leave it as is but
         // if it is not we assume they want to create a package in the
         // current package
-        if (name.indexOf('.') > -1)
+        if (name.indexOf('.') > -1) {
             fullName = name;
-        else
+        }
+        else {
             fullName = getPackage().getQualifiedName(name);
+        }
 
         // check whether name is already used for a class or package
         // in the parent package
@@ -2124,21 +2117,16 @@ public class PkgMgrFrame extends JFrame
 
         if (newPackage == null) {
             Debug.reportError("creation of new package failed unexpectedly");
+            // TODO propagate a more informative exception
             return false;
         }
         
-        // If we have a Java Micro Edition project, store the 
-        // isJavaMEproject flag in the bluej.pkg file
-        if ( isJavaMEpackage( ) ) {
-            Properties props = newPackage.getLastSavedProperties();
-            props.setProperty( "package.isJavaMEproject", "true" );
-            newPackage.save( props );
-        }
-
+        newPackage = newPackage.getParent();
         while (newPackage != null) {
             newPackage.reload();
             newPackage = newPackage.getParent();
         }
+        
         return true;
     }
 
@@ -2411,8 +2399,9 @@ public class PkgMgrFrame extends JFrame
     public void generateProjectDocumentation()
     {
         String message = pkg.generateDocumentation();
-        if (message != "")
+        if (message.length() != 0) {
             DialogManager.showText(this, message);
+        }
     }
 
     /**
@@ -3316,20 +3305,11 @@ public class PkgMgrFrame extends JFrame
 
     /**
      * Return true if this frame is editing a Java Micro Edition package.
-     * Note that the property has the suffix 'project' because all packages
-     * in a Java ME project have to be Java ME packages. That is, this is 
-     * a property of the project. Nevertheless, we store the property in 
-     * the bluej.pkg file of each package in a Java ME project to simplify
-     * the code.
      */
     public boolean isJavaMEpackage( )
     {
         if (pkg == null) return false;
-        
-        String javaMEflag = 
-               pkg.getLastSavedProperties().getProperty( "package.isJavaMEproject", "false" );
-        
-        return javaMEflag.equals( "true" );
+        return pkg.getProject().isJavaMEProject();
     }        
     
     class URLDisplayer

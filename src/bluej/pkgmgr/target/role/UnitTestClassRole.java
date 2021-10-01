@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2011  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -26,12 +26,14 @@ import java.awt.EventQueue;
 import java.awt.GradientPaint;
 import java.awt.Paint;
 import java.awt.event.ActionEvent;
+import java.io.FileInputStream;
 import java.io.FileNotFoundException;
-import java.io.FileReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.io.Reader;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
+import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
@@ -42,6 +44,8 @@ import javax.swing.AbstractAction;
 import javax.swing.Action;
 import javax.swing.JMenuItem;
 import javax.swing.JPopupMenu;
+
+import org.junit.Test;
 
 import bluej.Config;
 import bluej.debugger.DebuggerObject;
@@ -57,38 +61,51 @@ import bluej.pkgmgr.target.Target;
 import bluej.prefmgr.PrefMgr;
 import bluej.testmgr.TestDisplayFrame;
 import bluej.testmgr.record.ExistingFixtureInvokerRecord;
+import bluej.utility.Debug;
 import bluej.utility.DialogManager;
 import bluej.utility.JavaNames;
+import bluej.utility.JavaUtils;
 
 /**
  * A role object for Junit unit tests.
  *
- * @author  Andrew Patterson based on AppletClassRole
+ * @author  Andrew Patterson
  */
 public class UnitTestClassRole extends ClassRole
 {
     public static final String UNITTEST_ROLE_NAME = "UnitTestTarget";
+    public static final String UNITTEST_ROLE_NAME_JUNIT4 = "UnitTestTargetJunit4";
 
     private final Color unittestbg = Config.getOptionalItemColour("colour.class.bg.unittest");
 
-    private static final String popupPrefix = Config.getString("pkgmgr.test.popup.testPrefix");
-	private static final String testAll = Config.getString("pkgmgr.test.popup.testAll");
-	private static final String createTest = Config.getString("pkgmgr.test.popup.createTest");
-	private static final String benchToFixture = Config.getString("pkgmgr.test.popup.benchToFixture");
-	private static final String fixtureToBench = Config.getString("pkgmgr.test.popup.fixtureToBench");
+    private static final String testAll = Config.getString("pkgmgr.test.popup.testAll");
+    private static final String createTest = Config.getString("pkgmgr.test.popup.createTest");
+    private static final String benchToFixture = Config.getString("pkgmgr.test.popup.benchToFixture");
+    private static final String fixtureToBench = Config.getString("pkgmgr.test.popup.fixtureToBench");
+    
+    /** Whether this is a Junit 4 test class. If false, it's a Junit 3 test class. */
+    private boolean isJunit4;
     
     /**
      * Create the unit test class role.
      */
-    public UnitTestClassRole()
+    public UnitTestClassRole(boolean isJunit4)
     {
+        this.isJunit4 = isJunit4;
     }
 
+    @Override
     public String getRoleName()
     {
-        return UNITTEST_ROLE_NAME;
+        if (isJunit4) {
+            return UNITTEST_ROLE_NAME_JUNIT4;
+        }
+        else {
+            return UNITTEST_ROLE_NAME;
+        }
     }
 
+    @Override
     public String getStereotypeLabel()
     {
         return "unit test";
@@ -97,6 +114,7 @@ public class UnitTestClassRole extends ClassRole
     /**
      * Return the intended background colour for this type of target.
      */
+    @Override
     public Paint getBackgroundPaint(int width, int height)
     {
         if (unittestbg != null) {
@@ -108,27 +126,50 @@ public class UnitTestClassRole extends ClassRole
         }
     }
 
+    @SuppressWarnings("unchecked")
     private boolean isJUnitTestMethod(Method m)
     {
-        // look for reasons to not include this method as a test case
-        if (!m.getName().startsWith("test"))
+        if (isJunit4) {
+            Class<?> cl = m.getDeclaringClass();
+            ClassLoader classLoader = cl.getClassLoader();
+            try {
+                Class<Test> testClass;
+                if (classLoader == null) {
+                    testClass = org.junit.Test.class;
+                }
+                else {
+                    testClass = (Class<Test>) classLoader.loadClass("org.junit.Test");
+                }
+
+                if (m.getAnnotation(testClass) != null) {
+                    if (!Modifier.isPublic(m.getModifiers())) return false;
+                    if (m.getParameterTypes().length != 0) return false;
+                    return true;
+                }
+            }
+            catch (ClassNotFoundException cnfe) {}
+            catch (LinkageError le) {}
+
+            // No suitable annotations found, so not a test class
             return false;
-        if (!Modifier.isPublic(m.getModifiers()))
-            return false;
-        if (m.getParameterTypes().length != 0)
-            return false;
-        if (!m.getReturnType().equals(Void.TYPE))
-            return false;
-        
-        return true;
+        }
+        else {
+            // look for reasons to not include this method as a test case
+            if (!m.getName().startsWith("test")) return false;
+            if (!Modifier.isPublic(m.getModifiers())) return false;
+            if (m.getParameterTypes().length != 0) return false;
+            if (!m.getReturnType().equals(Void.TYPE)) return false;
+            return true;
+        }
     }
-	
+    
     /**
      * Generate a popup menu for this TestClassRole.
      * @param cl the class object that is represented by this target
      * @param editorFrame the frame in which this targets package is displayed
      * @return the generated JPopupMenu
      */
+    @Override
     public boolean createRoleMenu(JPopupMenu menu, ClassTarget ct, Class<?> cl, int state)
     {
         boolean enableTestAll = false;
@@ -147,8 +188,7 @@ public class UnitTestClassRole extends ClassRole
         }
 
         // add run all tests option
-        addMenuItem(menu, new TestAction(testAll, ct.getPackage().getEditor(),ct),
-        			enableTestAll);
+        addMenuItem(menu, new TestAction(testAll, ct.getPackage().getEditor(),ct), enableTestAll);
         menu.addSeparator();
 
         return false;
@@ -160,20 +200,29 @@ public class UnitTestClassRole extends ClassRole
      * @param menu the popup menu to add the class menu items to
      * @param cl Class object associated with this class target
      */
+    @Override
     public boolean createClassConstructorMenu(JPopupMenu menu, ClassTarget ct, Class<?> cl)
     {
         boolean hasEntries = false;
 
         Method[] allMethods = cl.getMethods();
-		
+        
         if (! ct.isAbstract()) {
             for (int i=0; i < allMethods.length; i++) {
                 Method m = allMethods[i];
                 
-                if (!isJUnitTestMethod(m))
+                if (!isJUnitTestMethod(m)) {
                     continue;
+                }
                 
-                Action testAction = new TestAction(popupPrefix + " " + m.getName().substring(4),
+                String rtype;
+                try {
+                    rtype = JavaUtils.getJavaUtils().getReturnType(m).toString(true);
+                }
+                catch (ClassNotFoundException cnfe) {
+                    rtype = m.getReturnType().getName();
+                }
+                Action testAction = new TestAction(rtype + " " + m.getName() + "()",
                         ct.getPackage().getEditor(), ct, m.getName());
                 
                 JMenuItem item = new JMenuItem();
@@ -198,12 +247,7 @@ public class UnitTestClassRole extends ClassRole
         return true;
     }
 
-    /**
-     * creates a class menu containing any constructors and static methods etc.
-     *
-     * @param menu the popup menu to add the class menu items to
-     * @param cl Class object associated with this class target
-     */
+    @Override
     public boolean createClassStaticMenu(JPopupMenu menu, ClassTarget ct, Class<?> cl)
     {
         boolean enable = !ct.getPackage().getProject().inTestMode() && ct.hasSourceCode() && ! ct.isAbstract();
@@ -218,6 +262,7 @@ public class UnitTestClassRole extends ClassRole
         return true;
     }
 
+    @Override
     public void run(final PkgMgrFrame pmf, final ClassTarget ct, final String param)
     {
         if (param != null) {
@@ -283,8 +328,9 @@ public class UnitTestClassRole extends ClassRole
         int testCount = 0;
 
         for (int i=0; i < allMethods.length; i++) {
-            if (isJUnitTestMethod(allMethods[i]))
+            if (isJUnitTestMethod(allMethods[i])) {
                 testCount++;
+            }
         }
         
         return testCount;
@@ -304,16 +350,17 @@ public class UnitTestClassRole extends ClassRole
         // prompt for a new test name
         String newTestName = DialogManager.askString(pmf, "unittest-new-test-method");
 
-        if (newTestName == null)
+        if (newTestName == null) {
             return;
+        }
 
         if (newTestName.length() == 0) {
             pmf.setStatus(Config.getString("pkgmgr.test.noTestName"));
             return;
         }
 
-        // test methods must start with the word "test"
-        if(!newTestName.startsWith("test")) {
+        // Junit 3 test methods must start with the word "test"
+        if(!isJunit4 && !newTestName.startsWith("test")) {
             newTestName = "test" + Character.toTitleCase(newTestName.charAt(0)) + newTestName.substring(1);
         }
 
@@ -325,20 +372,24 @@ public class UnitTestClassRole extends ClassRole
 
         // find out if the method already exists in the unit test src
         try {
-            UnitTestAnalyzer uta = analyzeUnitTest(ct);
+            Charset charset = pmf.getProject().getProjectCharset();
+            UnitTestAnalyzer uta = analyzeUnitTest(ct, charset);
 
             SourceSpan existingSpan = uta.getMethodBlockSpan(newTestName);
 
             if (existingSpan != null) {
-                if (DialogManager.askQuestion(null, "unittest-method-present") == 1)
+                if (DialogManager.askQuestion(null, "unittest-method-present") == 1) {
                     return;
+                }
             }
         }
-        catch (IOException ioe) { ioe.printStackTrace(); }
-        // TODO better handling of above exception
+        catch (IOException ioe) { 
+            DialogManager.showErrorWithText(null, "unittest-io-error", ioe.getLocalizedMessage());
+            Debug.reportError("Error reading unit test source", ioe);
+        }
 
         pmf.testRecordingStarted(Config.getString("pkgmgr.test.recording") + " "
-        						 + ct.getBaseName() + "." + newTestName + "()");
+                + ct.getBaseName() + "." + newTestName + "()");
 
         pmf.getProject().removeClassLoader();
 
@@ -354,27 +405,28 @@ public class UnitTestClassRole extends ClassRole
      * @return  A UnitTestAnalyzer object with information about the unit test class
      * @throws IOException  if the source file can't be saved or read
      */
-    private UnitTestAnalyzer analyzeUnitTest(ClassTarget ct) throws IOException
+    private UnitTestAnalyzer analyzeUnitTest(ClassTarget ct, Charset fileEncoding) throws IOException
     {
         ct.ensureSaved();
         
         UnitTestAnalyzer uta = null;
-        Reader reader = null;
+        FileInputStream fis = null;
         try {
-            reader = new FileReader(ct.getSourceFile());
+            fis = new FileInputStream(ct.getSourceFile());
+            Reader reader = new InputStreamReader(fis, fileEncoding);
             uta = new UnitTestAnalyzer(reader);
         }
         catch (FileNotFoundException fnfe) {
             throw fnfe;
         }
         finally {
-            if (reader != null) {
+            if (fis != null) {
                 try {
-                    reader.close();
+                    fis.close();
                 }
                 catch (IOException ioe) {
                     // shouldn't happen
-                    ioe.printStackTrace();
+                    Debug.reportError(ioe);
                 }
             }
         }
@@ -414,11 +466,22 @@ public class UnitTestClassRole extends ClassRole
         }.start();
     }
 
+    private static final String spaces = "                                 ";
+    
+    /**
+     * Get a string of whitespace corresponding to an indentation.
+     */
+    private String getIndentString()
+    {
+        int ts = Math.min(Config.getPropInteger("bluej.editor.tabsize", 4), spaces.length());
+        return spaces.substring(0, ts);
+    }
+    
     /**
      * End the construction of a test method.
-     * 
+     * <p>
      * This method is responsible for actually created the source code for a
-     * just recorded test method.
+     * just-recorded test method.
      * 
      * @param pmf   the PkgMgrFrame this is all occurring in
      * @param ct    the ClassTarget of the unit test class
@@ -427,8 +490,10 @@ public class UnitTestClassRole extends ClassRole
     public void doEndMakeTestCase(PkgMgrFrame pmf, ClassTarget ct, String name)
     {
         Editor ed = ct.getEditor();
+        String ts = getIndentString();
         try {
-            UnitTestAnalyzer uta = analyzeUnitTest(ct);
+            Charset charset = pmf.getProject().getProjectCharset();
+            UnitTestAnalyzer uta = analyzeUnitTest(ct, charset);
 
             SourceSpan existingSpan = uta.getMethodBlockSpan(name);
 
@@ -436,7 +501,7 @@ public class UnitTestClassRole extends ClassRole
                 // replace this method (don't replace the method header!)
                 ed.setSelection(existingSpan.getStartLine(), existingSpan.getStartColumn(),
                                   existingSpan.getEndLine(), existingSpan.getEndColumn());
-                ed.insertText("{\n" + pmf.getObjectBench().getTestMethod() + "\t}", false);
+                ed.insertText("{\n" + pmf.getObjectBench().getTestMethod(ts + ts) + ts + "}", false);
             }
             else {
                 // insert a complete method
@@ -444,15 +509,21 @@ public class UnitTestClassRole extends ClassRole
 
                 if (methodInsert != null) {
                     ed.setSelection(methodInsert.getLine(), methodInsert.getColumn(), 1);
-                    ed.insertText("\n\tpublic void " + name + "()\n\t{\n" + pmf.getObjectBench().getTestMethod() + "\t}\n}\n", false);
+                    if (isJunit4) {
+                        ed.insertText("\n" + ts + "@Test\n" + ts + "public void " + name + "()\n" + ts + "{\n"
+                                + pmf.getObjectBench().getTestMethod(ts + ts) + ts + "}\n}\n", false);
+                    }
+                    else {
+                        ed.insertText("\n" + ts + "public void " + name + "()\n" + ts + "{\n"
+                                + pmf.getObjectBench().getTestMethod(ts + ts) + ts + "}\n}\n", false);
+                    }
                 }
             }
             
             ed.save();
         }
         catch (IOException ioe) {
-            PkgMgrFrame.showMessageWithText(pmf.getPackage(),
-                    "generic-file-save-error", ioe.getLocalizedMessage());
+            PkgMgrFrame.showMessageWithText(pmf.getPackage(), "generic-file-save-error", ioe.getLocalizedMessage());
         }
     }
     
@@ -474,7 +545,8 @@ public class UnitTestClassRole extends ClassRole
         ExistingFixtureInvokerRecord existing = new ExistingFixtureInvokerRecord();
         
         try {
-            UnitTestAnalyzer uta = analyzeUnitTest(ct);
+            Charset charset = pmf.getProject().getProjectCharset();
+            UnitTestAnalyzer uta = analyzeUnitTest(ct, charset);
 
             // iterate through all the declarations of fields (fixture items) in the class
             List<SourceSpan> fixtureSpans = uta.getFieldSpans();
@@ -494,7 +566,7 @@ public class UnitTestClassRole extends ClassRole
                 // copy everything between the opening { and the final }
                 String setUpWithoutBrackets = 
                         setUpWithBrackets.substring(setUpWithBrackets.indexOf('{') + 1,
-                                                    setUpWithBrackets.indexOf('}')).trim();
+                                                    setUpWithBrackets.lastIndexOf('}')).trim();
                 existing.setSetupMethod(setUpWithoutBrackets);
             }
             
@@ -513,12 +585,14 @@ public class UnitTestClassRole extends ClassRole
      */
     public void doBenchToFixture(PkgMgrFrame pmf, ClassTarget ct)
     {
-        if(pmf.getObjectBench().getObjectCount() == 0)
+        if(pmf.getObjectBench().getObjectCount() == 0) {
             return;
+        }
                 
         Editor ed = ct.getEditor();
         try {
-            UnitTestAnalyzer uta = analyzeUnitTest(ct);
+            Charset charset = pmf.getProject().getProjectCharset();
+            UnitTestAnalyzer uta = analyzeUnitTest(ct, charset);
 
             // find all the fields declared in this unit test class
             List<SourceSpan> variables = uta.getFieldSpans();
@@ -547,9 +621,7 @@ public class UnitTestClassRole extends ClassRole
                 }
                 
                 // to get correct locations for rewriting setUp(), we need to reparse
-                // (TODO: intelligently keep track of changes to the editor and modify
-                //        line numbers accordingly - avoid this reparse)
-                uta = analyzeUnitTest(ct);
+                uta = analyzeUnitTest(ct, charset);
             }
 
             // find a location to insert new methods
@@ -557,11 +629,14 @@ public class UnitTestClassRole extends ClassRole
             
             // sanity check.. this shouldn't ever be null but if it is, lets not
             // make it worse by trying to edit the source
-            if (fixtureInsertLocation == null)
+            if (fixtureInsertLocation == null) {
                 return;
+            }
             
             // find the curly brackets for the setUp() method
             SourceSpan setupSpan = uta.getMethodBlockSpan("setUp");
+
+            String ts = getIndentString();
             
             // rewrite the setUp() method of the unit test (if it exists)
             if (setupSpan != null) {
@@ -571,18 +646,23 @@ public class UnitTestClassRole extends ClassRole
                 // otherwise, we will be inserting a brand new setUp() method
                 ed.setSelection(fixtureInsertLocation.getLine(),
                                 fixtureInsertLocation.getColumn(), 1);
-                ed.insertText("{\n\tpublic void setUp()\n\t", false);
+                if (isJunit4) {
+                    ed.insertText("{\n" + ts + "@Before\n" + ts + "public void setUp()\n" + ts, false);
+                }
+                else {
+                    ed.insertText("{\n" + ts + "public void setUp()\n" + ts, false);
+                }
             }
             
             // insert the code for our setUp() method
-            ed.insertText("{\n" + pmf.getObjectBench().getFixtureSetup()
-                                + "\t}", false);
+            ed.insertText("{\n" + pmf.getObjectBench().getFixtureSetup(ts + ts)
+                                + ts + "}", false);
 
             // insert our new fixture declarations
             ed.setSelection(fixtureInsertLocation.getLine(),
                              fixtureInsertLocation.getColumn(), 1);
                 
-            ed.insertText("{\n" + pmf.getObjectBench().getFixtureDeclaration(), false);
+            ed.insertText("{\n" + pmf.getObjectBench().getFixtureDeclaration(ts), false);
             ed.save();
         }
         catch (IOException ioe) {
@@ -615,7 +695,7 @@ public class UnitTestClassRole extends ClassRole
     /**
      * A TestAction is an action that causes a JUnit test to be run on a class.
      * If testName is not provided, it is set to null which means that the whole
-     * test class is run. Else it refers to a test method that should be run
+     * test class is run; otherwise it refers to a test method that should be run
      * individually.
      */
     private class TestAction extends TargetAbstractAction
@@ -640,8 +720,6 @@ public class UnitTestClassRole extends ClassRole
         }
     }
 
-	/**
-	 */
     private class MakeTestCaseAction extends TargetAbstractAction
     {
         public MakeTestCaseAction(String name, PackageEditor ped, Target t)

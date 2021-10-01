@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2010  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2010,2011  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -23,9 +23,11 @@ package bluej.compiler;
 
 
 import java.io.File;
+import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.StringTokenizer;
+
 import bluej.utility.Utility;
 
 /**
@@ -176,14 +178,16 @@ abstract class Compiler
      * @param observer
      *            The compilation observer
      * @param internal
-     *            True if compiling BlueJ-generated code (shell files) False if
+     *            True if compiling BlueJ-generated code (shell files); false if
      *            compiling user code
      * @param options
      *            Option strings to pass to the compiler
+     * @param fileCharset
+     *            The character set in which source files are encoded 
      * 
      * @return  true if the compilation was successful
      */
     public abstract boolean compile(File[] sources, CompileObserver observer,
-            boolean internal, List<String> options);
+            boolean internal, List<String> options, Charset fileCharset);
 
 }

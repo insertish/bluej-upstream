@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2011  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -25,6 +25,7 @@ import java.awt.EventQueue;
 import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileWriter;
+import java.io.FilenameFilter;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -34,6 +35,7 @@ import javax.swing.JFrame;
 
 import bluej.Config;
 import bluej.compiler.CompileObserver;
+import bluej.compiler.Diagnostic;
 import bluej.compiler.EventqueueCompileObserver;
 import bluej.compiler.JobQueue;
 import bluej.debugger.Debugger;
@@ -47,6 +49,7 @@ import bluej.debugmgr.objectbench.ObjectBenchInterface;
 import bluej.debugmgr.objectbench.ObjectWrapper;
 import bluej.pkgmgr.Package;
 import bluej.pkgmgr.PkgMgrFrame;
+import bluej.pkgmgr.Project;
 import bluej.testmgr.record.ConstructionInvokerRecord;
 import bluej.testmgr.record.ExpressionInvokerRecord;
 import bluej.testmgr.record.InvokerRecord;
@@ -115,6 +118,9 @@ public class Invoker
 
     private String commandString;
     private InvokerRecord ir;
+    
+    /** Whether we've already seen an error from the compiler */
+    private boolean gotError;
 
     /**
      * Construct an invoker, specifying most attributes manually.
@@ -257,8 +263,9 @@ public class Invoker
         compiler = new InvokerCompiler() {
             public void compile(File[] files, CompileObserver observer)
             {
-                JobQueue.getJobQueue().addJob(files, observer, pkg.getProject().getClassLoader(),
-                        pkg.getProject().getProjectDir(),true);
+                Project project = pkg.getProject();
+                JobQueue.getJobQueue().addJob(files, observer, project.getClassLoader(),
+                        project.getProjectDir(), true, project.getProjectCharset());
             }
         };
     }
@@ -284,6 +291,7 @@ public class Invoker
      */
     public void invokeInteractive()
     {
+        gotError = false;
         // check for a method call with no parameter
         // if so, just do it
         if ((!constructing || Config.isGreenfoot()) && !member.hasParameters()) {
@@ -341,6 +349,7 @@ public class Invoker
             dlg.setVisible(false);
         }
         else if (event == CallDialog.OK) {
+            gotError = false;
             dialog.setEnabled(false);
             objName = dialog.getNewInstanceName();                
             String[] actualTypeParams = dialog.getTypeParams();
@@ -360,6 +369,7 @@ public class Invoker
      */
     public void invokeDirect(String[] params)
     {
+        gotError = false;
         final JavaType[] argTypes = member.getParamTypes(false);
         for (int i = 0; i < argTypes.length; i++) {
             argTypes[i] = argTypes[i].mapTparsToTypes(typeMap).getUpperBound();
@@ -386,6 +396,7 @@ public class Invoker
      */
     protected void doInvocation(String[] args, JavaType[] argTypes, String[] typeParams)
     {
+        gotError = false;
         int numArgs = (args == null ? 0 : args.length);
 
         // prepare variables (assigned with actual values) for each parameter
@@ -497,12 +508,12 @@ public class Invoker
             // goes into an infinite loop can hang BlueJ.
             new Thread() {
                 public void run() {
-                	EventQueue.invokeLater(new Runnable() {
-                	    public void run() {
-                	        closeCallDialog();
-                	    }
-                	});
-                	
+                    EventQueue.invokeLater(new Runnable() {
+                        public void run() {
+                            closeCallDialog();
+                        }
+                    });
+                    
                     final DebuggerResult result = debugger.instantiateClass(className);
                     
                     EventQueue.invokeLater(new Runnable() {
@@ -578,6 +589,7 @@ public class Invoker
      */
     public boolean doFreeFormInvocation(String resultType)
     {
+        gotError = false;
         boolean hasResult = resultType != null;
         if (hasResult) {
             if (resultType.equals(""))
@@ -997,13 +1009,28 @@ public class Invoker
     // -- CompileObserver interface --
 
     // not interested in these events:
-    public void startCompile(File[] sources)
-    {}
+    @Override
+    public void startCompile(File[] sources) { }
 
+    /*
+     * @see bluej.compiler.CompileObserver#compilerMessage(bluej.compiler.Diagnostic)
+     */
+    @Override
+    public void compilerMessage(Diagnostic diagnostic)
+    {
+        if (diagnostic.getType() == Diagnostic.ERROR) {
+            if (! gotError) {
+                gotError = true;
+                errorMessage(diagnostic.getFileName(), diagnostic.getStartLine(), diagnostic.getMessage());
+            }
+        }
+        // We ignore warnings for shell classes
+    }
+    
     /**
      * An error was detected during compilation of the shell class.
      */
-    public void errorMessage(String filename, int lineNo, String message)
+    private void errorMessage(String filename, long lineNo, String message)
     {
         if (dialog != null) {
             dialog.setErrorMessage("Error: " + message);
@@ -1012,17 +1039,10 @@ public class Invoker
     }
     
     /**
-     * A warning was detected during compilation of the shell class.
-     * For the shell class, we just ignore warnings.
-     */
-    public void warningMessage(String filename, int lineNo, String message) 
-    {
-    }
-
-    /**
      * The compilation of the shell class has ended. If all went well, execute
      * now. Then clean up.
      */
+    @Override
     public synchronized void endCompile(File[] sources, boolean successful)
     {
         if (dialog != null) {
@@ -1083,6 +1103,19 @@ public class Invoker
 
         File classFile = new File(pkgPath, shellName + ".class");
         classFile.delete();
+        
+        // Remove any inner class files
+        String [] innerClassFiles = pkgPath.list(new FilenameFilter() {
+            @Override
+            public boolean accept(File dir, String name)
+            {
+                return (name.startsWith(shellName + "$"));
+            }
+        });
+        
+        for (String innerClassFile : innerClassFiles) {
+            new File(pkgPath, innerClassFile).delete();
+        }
     }
 
     // -- end of CompileObserver interface --
@@ -1139,7 +1172,7 @@ public class Invoker
                     DebuggerObject resultObj = result.getResultObject();
                     if (unwrap) {
                         // For constructor calls, the result is expected to be the created object.
-                        resultObj = resultObj.getFieldObject(0);
+                        resultObj = resultObj.getInstanceField(0).getValueObject(null);
                     }
                     ir.setResultObject(resultObj);   
                     watcher.putResult(resultObj, objName, ir);

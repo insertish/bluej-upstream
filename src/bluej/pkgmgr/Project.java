@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2011  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -28,6 +28,9 @@ import java.io.File;
 import java.io.IOException;
 import java.net.MalformedURLException;
 import java.net.URL;
+import java.nio.charset.Charset;
+import java.nio.charset.IllegalCharsetNameException;
+import java.nio.charset.UnsupportedCharsetException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -38,6 +41,7 @@ import java.util.LinkedHashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Properties;
 import java.util.Set;
 import java.util.StringTokenizer;
 import java.util.TreeMap;
@@ -83,9 +87,9 @@ import bluej.testmgr.record.InvokerRecord;
 import bluej.utility.Debug;
 import bluej.utility.DialogManager;
 import bluej.utility.FileUtility;
+import bluej.utility.FileUtility.WriteCapabilities;
 import bluej.utility.JavaNames;
 import bluej.utility.Utility;
-import bluej.utility.FileUtility.WriteCapabilities;
 import bluej.views.View;
 
 
@@ -113,6 +117,9 @@ public class Project implements DebuggerListener, InspectorManager
     
     /** Property specifying location of JDK source */
     private static final String JDK_SOURCE_PATH_PROPERTY = "bluej.jdk.source";
+    
+    private static final String PROJECT_CHARSET_PROP = "project.charset";
+    private static final String PROJECT_IS_JAVA_ME_PROP = "package.isJavaMEproject";
     
     /* ------------------- end of static declarations ------------------ */
 
@@ -157,6 +164,7 @@ public class Project implements DebuggerListener, InspectorManager
     
     private boolean inTestMode = false;
     private BPClassLoader currentClassLoader;
+    private List<URL> libraryUrls;
     
     // the TeamSettingsController for this project
     private TeamSettingsController teamSettingsController = null;
@@ -164,7 +172,8 @@ public class Project implements DebuggerListener, InspectorManager
     private CommitCommentsFrame commitCommentsFrame = null;
     private UpdateFilesFrame updateFilesFrame = null;
     private StatusFrame statusFrame = null;
-        
+    
+    /** If true, this project is connected with a source repository */
     private boolean isSharedProject;
 
     // team actions
@@ -178,6 +187,9 @@ public class Project implements DebuggerListener, InspectorManager
     
     /** Where to find JDK and other library sources (for extracting javadoc) */
     private List<DocPathEntry> sourcePath;
+    
+    /** Project character set for source files etc */
+    private Charset characterSet;
 
     /* ------------------- end of field declarations ------------------- */
 
@@ -223,12 +235,15 @@ public class Project implements DebuggerListener, InspectorManager
         }
         
         this.projectDir = projectDir;
+        libraryUrls = getLibrariesClasspath();
         inspectors = new HashMap<Object,Inspector>();
         packages = new TreeMap<String, Package>();
         docuGenerator = new DocuGenerator(this);
 
         try {
             Package unnamed = new Package(this);
+            Properties props = unnamed.getLastSavedProperties();
+            setProjectProperties(props);
             packages.put("", unnamed);
             unnamed.refreshPackage();
         } catch (IOException exc) {
@@ -236,7 +251,7 @@ public class Project implements DebuggerListener, InspectorManager
         }
 
         debugger = Debugger.getDebuggerImpl(getProjectDir(), getTerminal());
-        // The debugger should have a new classLoader, may it go into the getDebuggerImpl ?
+        debugger.setUserLibraries(libraryUrls.toArray(new URL[libraryUrls.size()]));
         debugger.newClassLoader(getClassLoader());
         debugger.addDebuggerListener(this);
         debugger.launch();
@@ -324,8 +339,7 @@ public class Project implements DebuggerListener, InspectorManager
                         break;
                     }
 
-                    startingPackageName = "." + lastdirName +
-                        startingPackageName;
+                    startingPackageName = "." + lastdirName + startingPackageName;
                 }
 
                 lastDir = curDir;
@@ -372,7 +386,8 @@ public class Project implements DebuggerListener, InspectorManager
             }
 
             proj.initialPackageName = startingPackage.getQualifiedName();
-        } else {
+        }
+        else {
             proj.initialPackageName = startingPackageName;
         }
 
@@ -468,13 +483,19 @@ public class Project implements DebuggerListener, InspectorManager
                 PackageFile pkgFile = PackageFileFactory.getPackageFile(dir);
                 try {
                     if (pkgFile.create()) {
+                        Properties props = new Properties();
+                        props.put(PROJECT_CHARSET_PROP, "UTF-8");
+                        if (isJavaMEproj) {
+                            props.put(PROJECT_IS_JAVA_ME_PROP, "true");
+                        }
                         try {
+                            pkgFile.save(props);
                             FileUtility.copyFile(Config.getTemplateFile(
                                     "readme"), newreadmeFile);
                             return true;
                         }
                         catch (IOException ioe) {
-                            Debug.message("could not copy readme template");
+                            Debug.message("I/O error while creating project.");
                         }
                     }
                 } catch (IOException ioe) {
@@ -512,12 +533,59 @@ public class Project implements DebuggerListener, InspectorManager
     }
    
     /**
-     * Set this project as a Java Micro Edition project. This method has package
-     * access because it is only called in PkgMgrFrame.openPackage( Package ).
-    */
-    void setJavaMEproject( boolean isMicroEdition )
+     * Check whether the project is a Java Micro Edition project.
+     */
+    public boolean isJavaMEProject()
     {
-        isJavaMEproject = isMicroEdition;
+        return isJavaMEproject;
+    }
+    
+    /**
+     * Get the character set that should be used for reading and writing source files
+     * in this project. 
+     */
+    public Charset getProjectCharset()
+    {
+        return characterSet;
+    }
+    
+    /**
+     * Get the project properties to be written to storage when the project is saved.
+     */
+    public Properties getProjectProperties()
+    {
+        Properties p = new Properties();
+        p.put(PROJECT_CHARSET_PROP, characterSet.name());
+        if (isJavaMEproject) {
+            p.put(PROJECT_IS_JAVA_ME_PROP, "true");
+        }
+        return p;
+    }
+    
+    /**
+     * Restore project properties (called just after project is opened). 
+     */
+    private void setProjectProperties(Properties props)
+    {
+        String charsetName = props.getProperty(PROJECT_CHARSET_PROP);
+        if (charsetName != null) {
+            try {
+                characterSet = Charset.forName(charsetName);
+            }
+            catch (IllegalCharsetNameException icne) {
+                Debug.log("Illegal project character set name: " + charsetName);
+            }
+            catch (UnsupportedCharsetException ucse) {
+                Debug.log("Unsupported project character set: " + charsetName);
+            }
+        }
+        if (characterSet == null) {
+            characterSet = Charset.defaultCharset();
+            props.put(PROJECT_CHARSET_PROP, characterSet.name());
+        }
+        
+        String isJavaMe = props.getProperty(PROJECT_IS_JAVA_ME_PROP, "false");
+        isJavaMEproject = isJavaMe.equals("true");
     }
     
     /**
@@ -558,14 +626,9 @@ public class Project implements DebuggerListener, InspectorManager
      */
     private void updateInspector(final Inspector inspector)
     {
-        EventQueue.invokeLater(new Runnable() {
-            public void run() {
-                inspector.update();
-                inspector.updateLayout();
-                inspector.setVisible(true);
-                inspector.bringToFront();
-            }
-        });
+        inspector.update();
+        inspector.setVisible(true);
+        inspector.bringToFront();
     }
     
     /**
@@ -592,9 +655,11 @@ public class Project implements DebuggerListener, InspectorManager
         if (inspector == null) {
             inspector = new ObjectInspector(obj, this, name, pkg, ir, parent);
             inspectors.put(obj, inspector);
+            inspector.setVisible(true);
         }
-
-        updateInspector(inspector);
+        else {
+            updateInspector(inspector);
+        }
 
         return inspector;
     }
@@ -685,9 +750,11 @@ public class Project implements DebuggerListener, InspectorManager
             ClassInspectInvokerRecord ir = new ClassInspectInvokerRecord(clss.getName());
             inspector = new ClassInspector(clss, this, pkg, ir, parent);
             inspectors.put(clss.getName(), inspector);
+            inspector.setVisible(true);
         }
-
-        updateInspector(inspector);
+        else {
+            updateInspector(inspector);
+        }
 
         return inspector;
     }
@@ -714,11 +781,12 @@ public class Project implements DebuggerListener, InspectorManager
         String name, Package pkg, InvokerRecord ir, ExpressionInformation info,
         JFrame parent) 
     {
-        final ResultInspector inspector = new ResultInspector(obj, this, name, pkg, ir, info,
-                    parent);
+        final ResultInspector inspector = new ResultInspector(obj, this, name, pkg, ir, info);
         inspectors.put(obj, inspector);
 
-        updateInspector(inspector);
+        DialogManager.centreWindow(inspector, parent);
+        inspector.setVisible(true);
+        inspector.bringToFront();
 
         return inspector;
     }
@@ -1031,7 +1099,6 @@ public class Project implements DebuggerListener, InspectorManager
     {
         PkgMgrFrame[] frames = PkgMgrFrame.getAllProjectFrames(this);
 
-        // Surely we do not want to stack trace if nothing exists. Damiano
         if (frames == null) {
             return;
         }
@@ -1071,7 +1138,7 @@ public class Project implements DebuggerListener, InspectorManager
     /**
      * Reload all constructed packages of this project.
      *
-     * This function is used after a major change to the contents
+     * <p>This function is used after a major change to the contents
      * of the project directory ie an import.
      */
     public void reloadAll()
@@ -1086,8 +1153,7 @@ public class Project implements DebuggerListener, InspectorManager
     }
 
     /**
-     * make all open package editors clear their selection
-     *
+     * Make all open package editors clear their selection
      */
     public void clearAllSelections()
     {
@@ -1124,7 +1190,7 @@ public class Project implements DebuggerListener, InspectorManager
      * Given a fully-qualified target name, return the target or null if the target
      * doesn't exist.
      * 
-     * Use ReadmeTarget.README_ID ("@README") as the target base name to get the
+     * <p>Use ReadmeTarget.README_ID ("@README") as the target base name to get the
      * readme target for a package.
      * 
      * Given the path and name of a target in the project, return the target or
@@ -1229,6 +1295,9 @@ public class Project implements DebuggerListener, InspectorManager
         // will be installed as soon as the VM has restarted).
         newRemoteClassLoader();
         
+        libraryUrls = getLibrariesClasspath();
+        debugger.setUserLibraries(libraryUrls.toArray(new URL[libraryUrls.size()]));
+        
         // Breakpoints will be re-initialized once the new VM has
         // actually started.
     }
@@ -1256,7 +1325,7 @@ public class Project implements DebuggerListener, InspectorManager
 
         if (! Config.isGreenfoot()) {
             // dispose windows for local classes. Should not run user code
-            // on the event queue, so run it in a seperate thread.
+            // on the event queue, so run it in a separate thread.
             new Thread() {
                 public void run() {
                     getDebugger().disposeWindows();
@@ -1507,23 +1576,11 @@ public class Project implements DebuggerListener, InspectorManager
         List<URL> optLibs  = new ArrayList<URL>(); //java ME optional libraries
 
         try {
-            // Junit is always part of the project libraries, only Junit, not the core Bluej.
-                        //   pathList.add( Boot.getInstance().getJunitLib().toURI().toURL());
-            
-            // Until the rest of BlueJ is clean we also need to add bluejcore
-            // It should be possible to run BlueJ only with Junit
             Collections.addAll(pathList, Boot.getInstance().getRuntimeUserClassPath());
     
-            // Next part is the libraries that are added trough the config panel.
-            pathList.addAll(PrefMgrDialog.getInstance().getUserConfigLibPanel().getUserConfigContent());
-    
-            // Then the libraries that are in the userlib directory
-            pathList.addAll(getUserlibContent());
+            pathList.addAll(libraryUrls);
             
-            // The libraries that are in the project +libs directory
-            pathList.addAll(getPlusLibsContent());
-          
-            // The current paroject dir must be added to the project class path too.
+            // The current project dir must be added to the project class path too.
             pathList.add(getProjectDir().toURI().toURL());
             
             //Add Java ME jars if this is a Java ME project. 
@@ -1552,6 +1609,29 @@ public class Project implements DebuggerListener, InspectorManager
         currentClassLoader.setJavaMEoptLibs (optLibs);
         
         return currentClassLoader;
+    }
+    
+    /**
+     * Get the classpath for libraries - those specified in preferences, in the project's +libs,
+     * in the BlueJ userlib folder, etc. This doesn't include the BlueJ runtime.
+     * 
+     * <p>Most of the time, the list in {@code libraryUrls} should be used instead of calling this
+     * method, as it represents the libraries known to the currently executing VM.
+     */
+    private List<URL> getLibrariesClasspath()
+    {
+        ArrayList<URL> pathList = new ArrayList<URL>();
+        
+        // Next part is the libraries that are added trough the config panel.
+        pathList.addAll(PrefMgrDialog.getInstance().getUserConfigLibPanel().getUserConfigContent());
+        
+        // Then the libraries that are in the userlib directory
+        pathList.addAll(getUserlibContent());
+        
+        // The libraries that are in the project +libs directory
+        pathList.addAll(getPlusLibsContent());
+        
+        return pathList;
     }
 
     /**
@@ -1932,6 +2012,7 @@ public class Project implements DebuggerListener, InspectorManager
     /*
      * @see bluej.debugger.DebuggerListener#examineDebuggerEvent(bluej.debugger.DebuggerEvent)
      */
+    @Override
     public boolean examineDebuggerEvent(DebuggerEvent e)
     {
         return false;

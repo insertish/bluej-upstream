@@ -1,15 +1,20 @@
 $PKGLINE
 
+import static org.junit.Assert.*;
+import org.junit.After;
+import org.junit.Before;
+import org.junit.Test;
+
 /**
- * Test klassen $CLASSNAME.
+ * Testklassen $CLASSNAME.
  *
  * @author (dit navn her)
- * @version (versions nummer eller dato her)
+ * @version (versionsnummer eller dato her)
  */
-public class $CLASSNAME extends junit.framework.TestCase
+public class $CLASSNAME
 {
     /**
-     * Standard konstruktør for test-klassen $CLASSNAME
+     * Standardkonstruktør for testklassen $CLASSNAME
      */
     public $CLASSNAME()
     {
@@ -18,18 +23,20 @@ public class $CLASSNAME extends junit.framework.TestCase
     /**
      * Opsæt test-fixtures.
      *
-     * Kaldt før hver test-case metode.
+     * Kaldt før hver testmetode.
      */
-    protected void setUp()
+    @Before
+    public void setUp()
     {
     }
 
     /**
      * River test-fixture ned.
      *
-     * Kaldt efter hver test-case metode.
+     * Kaldt efter hver testmetode.
      */
-    protected void tearDown()
+    @After
+    public void tearDown()
     {
     }
 }

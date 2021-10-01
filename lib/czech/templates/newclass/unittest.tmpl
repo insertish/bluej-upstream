@@ -1,7 +1,13 @@
 /* Soubor je ulozen v kodovani UTF-8.
  * Kontrola kódování: Příliš žluťoučký kůň úpěl ďábelské ódy. */
-
 $PKGLINE
+
+import org.junit.After;
+import org.junit.Before;
+import org.junit.Test;
+
+
+import static org.junit.Assert.*;
 
 
 
@@ -12,39 +18,27 @@ $PKGLINE
  * @author    jméno autora
  * @version   0.00.000
  */
-public class $CLASSNAME extends junit.framework.TestCase
+public class $CLASSNAME
 {
-//== KONSTANTNÍ ATRIBUTY TŘÍDY =================================================
-//== PROMĚNNÉ ATRIBUTY TŘÍDY ===================================================
-//== STATICKÝ INICIALIZAČNÍ BLOK - STATICKÝ KONSTRUKTOR ========================
-//== KONSTANTNÍ ATRIBUTY INSTANCÍ ==============================================
-//== PROMĚNNÉ ATRIBUTY INSTANCÍ ================================================
-//== PŘÍSTUPOVÉ METODY VLASTNOSTÍ TŘÍDY ========================================
-//== OSTATNÍ NESOUKROMÉ METODY TŘÍDY ===========================================
+    //== KONSTANTNÍ ATRIBUTY TŘÍDY =============================================
+    //== PROMĚNNÉ ATRIBUTY TŘÍDY ===============================================
+    //== STATICKÝ INICIALIZAČNÍ BLOK - STATICKÝ KONSTRUKTOR ====================
+    //== KONSTANTNÍ ATRIBUTY INSTANCÍ ==========================================
+    //== PROMĚNNÉ ATRIBUTY INSTANCÍ ============================================
+    //== PŘÍSTUPOVÉ METODY VLASTNOSTÍ TŘÍDY ====================================
+    //== OSTATNÍ NESOUKROMÉ METODY TŘÍDY =======================================
 
-//##############################################################################
-//== KONSTRUKTORY A TOVÁRNÍ METODY =============================================
-
-    /***************************************************************************
-     * Vytvoří test se zadaným názvem.
-     *
-     * @param název  Název konstruovaného testu
-     */
-    public $CLASSNAME(String název)
-    {
-        super( název );
-    }
-
-
-
-//== PŘÍPRAVA A ÚKLID PŘÍPRAVKU ================================================
+    //##########################################################################
+    //== KONSTRUKTORY A TOVÁRNÍ METODY =========================================
+    //-- Testovací třída vystačí s prázdným implicitním konstruktorem ----------
+    //== PŘÍPRAVA A ÚKLID PŘÍPRAVKU ============================================
 
     /***************************************************************************
      * Inicializace předcházející spuštění každého testu a připravující tzv.
      * přípravek (fixture), což je sada objektů, s nimiž budou testy pracovat.
      */
-    @Override
-    protected void setUp()
+    @Before
+    public void setUp()
     {
     }
 
@@ -52,24 +46,25 @@ public class $CLASSNAME extends junit.framework.TestCase
     /***************************************************************************
      * Úklid po testu - tato metoda se spustí po vykonání každého testu.
      */
-    @Override
-    protected void tearDown()
+    @After
+    public void tearDown()
     {
     }
 
 
 
-//== PŘÍSTUPOVÉ METODY VLASTNOSTÍ INSTANCÍ =====================================
-//== OSTATNÍ NESOUKROMÉ METODY INSTANCÍ ========================================
-//== SOUKROMÉ A POMOCNÉ METODY TŘÍDY ===========================================
-//== SOUKROMÉ A POMOCNÉ METODY INSTANCÍ ========================================
-//== INTERNÍ DATOVÉ TYPY =======================================================
-//== VLASTNÍ TESTY =============================================================
-//
-//     /***************************************************************************
-//      *
-//      */
-//     public void testXXX()
-//     {
-//     }
+    //== PŘÍSTUPOVÉ METODY VLASTNOSTÍ INSTANCÍ =================================
+    //== OSTATNÍ NESOUKROMÉ METODY INSTANCÍ ====================================
+    //== SOUKROMÉ A POMOCNÉ METODY TŘÍDY =======================================
+    //== SOUKROMÉ A POMOCNÉ METODY INSTANCÍ ====================================
+    //== INTERNÍ DATOVÉ TYPY ===================================================
+    //== VLASTNÍ TESTY =========================================================
+    //
+    //     /********************************************************************
+    //      *
+    //      */
+    //     @Test
+    //     public void testXxx()
+    //     {
+    //     }
 }

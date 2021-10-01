@@ -59,7 +59,7 @@ import bluej.Config;
  * 
  * @author Michael Cahill
  * @author Michael Kolling
- * @version $Id: Utility.java 8510 2010-10-21 04:12:29Z davmac $
+ * @version $Id: Utility.java 8563 2010-12-07 01:02:46Z davmac $
  */
 public class Utility
 {
@@ -474,7 +474,7 @@ public class Utility
     public static void bringToFront(final Window window)
     {
         // If not showing at all we return now.
-        if (!window.isShowing()) {
+        if (!window.isShowing() || !window.getFocusableWindowState()) {
             return;
         }
 
@@ -503,10 +503,18 @@ public class Utility
             try {
                 Process p = Runtime.getRuntime().exec(command);
                 new ExternalProcessLogger(command[0], commandAsStr.toString(), p).start();
+                if (isWindows) {
+                    // An apparent JDK bug causes us to lose the ability to receive
+                    // input if the script is executed while a popup window is showing.
+                    // In an attempt to avoid that we'll wait for the script to execute
+                    // now:
+                    new ProcessWaiter(p).waitForProcess(500);
+                }
             }
             catch (IOException e) {
                 Debug.reportError("While trying to launch \"" + command + "\", got this IOException:", e);
             }
+            catch (InterruptedException ie) {}
         }
         if (Config.isLinux()) {
             // http://ubuntuforums.org/archive/index.php/t-197207.html
@@ -569,6 +577,45 @@ public class Utility
                     br.close();
                 }
                 catch (IOException ioe) {}
+            }
+        }
+    }
+    
+    /**
+     * A utility class to wait for an external process to complete.
+     * This allows waiting with a timeout, unlike the Process.waitFor()
+     * method. Simply create a ProcessWaiter, and then call {@code wait()}
+     * or {@code wait(long)} on the ProcessWaiter.
+     */
+    private static class ProcessWaiter
+    {
+        boolean complete = false;
+        
+        public ProcessWaiter(final Process p)
+        {
+            new Thread() {
+                public void run() {
+                    try {
+                        p.waitFor();
+                    }
+                    catch (InterruptedException ie) {}
+                    synchronized (ProcessWaiter.this) {
+                        complete = true;
+                        ProcessWaiter.this.notify();
+                    }
+                };
+            }.start();
+        }
+        
+        /**
+         * Wait for the process to complete, with the given timeout.
+         * If the timeout is 0, wait indefinitely.
+         */
+        public synchronized void waitForProcess(long timeout)
+            throws InterruptedException
+        {
+            while (! complete) {
+                wait(timeout);
             }
         }
     }

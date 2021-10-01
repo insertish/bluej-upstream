@@ -31,7 +31,9 @@ import bluej.debugmgr.texteval.DeclaredVar;
 import bluej.editor.moe.MoeSyntaxDocument;
 import bluej.parser.entity.ClassLoaderResolver;
 import bluej.parser.entity.EntityResolver;
+import bluej.parser.entity.JavaEntity;
 import bluej.parser.entity.PackageResolver;
+import bluej.parser.entity.ValueEntity;
 import bluej.parser.nodes.ParsedCUNode;
 
 /**
@@ -125,6 +127,28 @@ public class TextParserTest extends TestCase
         TextAnalyzer tp = new TextAnalyzer(resolver, "", objectBench);
         String r = tp.parseCommand("(java.util.LinkedList<? extends javax.swing.JComponent>[])null");
         assertEquals("java.util.LinkedList<? extends javax.swing.JComponent>[]", r);
+    }
+    
+    /**
+     * Test casting a numeric value to a numeric primitive type.
+     */
+    public void testCasting4()
+    {
+        TextAnalyzer tp = new TextAnalyzer(resolver, "", objectBench);
+        String r = tp.parseCommand("(char) 4");
+        assertEquals("char", r);
+        r = tp.parseCommand("(byte) 4");
+        assertEquals("byte", r);        
+        r = tp.parseCommand("(short) 4");
+        assertEquals("short", r);
+        r = tp.parseCommand("(int) 4");
+        assertEquals("int", r);
+        r = tp.parseCommand("(long) 4");
+        assertEquals("long", r);
+        r = tp.parseCommand("(float) 4");
+        assertEquals("float", r);
+        r = tp.parseCommand("(double) 4");
+        assertEquals("double", r);
     }
     
     public void testStaticMethodCall()
@@ -278,8 +302,8 @@ public class TextParserTest extends TestCase
     {
         TextAnalyzer tp = new TextAnalyzer(resolver, "", objectBench);
         String r = tp.parseCommand("new Runnable() {" +
-        		"public void run() {}" +
-        		"}");
+                "public void run() {}" +
+                "}");
         assertEquals("java.lang.Runnable", r);
     }
     
@@ -504,6 +528,219 @@ public class TextParserTest extends TestCase
         assertEquals("long", r);
     }
     
+    public void testOperators4()
+    {
+        TextAnalyzer tp = new TextAnalyzer(resolver, "", objectBench);
+        
+        String r = tp.parseCommand("true | false");
+        assertEquals("boolean", r);
+        
+        r = tp.parseCommand("true & false");
+        assertEquals("boolean", r);
+        
+        r = tp.parseCommand("true ^ false");
+        assertEquals("boolean", r);
+        
+        r = tp.parseCommand("!true");
+        assertEquals("boolean", r);
+    }
+    
+    /**
+     * Check that an entity represents a constant with a particular integer (byte,short,char,int,long) value
+     */
+    private void checkConstInt(JavaEntity ent, long val)
+    {
+        assertNotNull(ent);
+        ValueEntity vent = ent.resolveAsValue();
+        assertNotNull(vent);
+        assertTrue(vent.hasConstantIntValue());
+        assertEquals(val, vent.getConstantIntValue());
+    }
+    
+    /**
+     * Check that an entity represents a constant with a particular boolean value
+     */
+    private void checkConstBool(JavaEntity ent, boolean val)
+    {
+        assertNotNull(ent);
+        ValueEntity vent = ent.resolveAsValue();
+        assertNotNull(vent);
+        assertTrue(vent.hasConstantBooleanValue());
+        assertEquals(val, vent.getConstantBooleanValue());
+    }
+    
+    public void testConstantExpressions()
+    {
+        // From JLS 15.28
+        
+        // literals
+        TextParser parser = new TextParser(resolver, "3", null, true);
+        parser.parseExpression();
+        assertTrue(parser.atEnd());
+        JavaEntity exprType = parser.getExpressionType();
+        checkConstInt(exprType, 3);
+        
+        // casts to primitive types
+        parser = new TextParser(resolver, "(byte)3", null, true);
+        parser.parseExpression();
+        assertTrue(parser.atEnd());
+        exprType = parser.getExpressionType();
+        checkConstInt(exprType, 3);
+        
+        // Various operators
+        parser = new TextParser(resolver, "3+5", null, true);
+        parser.parseExpression();
+        assertTrue(parser.atEnd());
+        exprType = parser.getExpressionType();
+        checkConstInt(exprType, 8);
+        
+        parser = new TextParser(resolver, "3-5", null, true);
+        parser.parseExpression();
+        assertTrue(parser.atEnd());
+        exprType = parser.getExpressionType();
+        checkConstInt(exprType, -2);
+        
+        parser = new TextParser(resolver, "3*5", null, true);
+        parser.parseExpression();
+        assertTrue(parser.atEnd());
+        exprType = parser.getExpressionType();
+        checkConstInt(exprType, 15);
+
+        parser = new TextParser(resolver, "3/5", null, true);
+        parser.parseExpression();
+        assertTrue(parser.atEnd());
+        exprType = parser.getExpressionType();
+        checkConstInt(exprType, 0);
+
+        parser = new TextParser(resolver, "3%5", null, true);
+        parser.parseExpression();
+        assertTrue(parser.atEnd());
+        exprType = parser.getExpressionType();
+        checkConstInt(exprType, 3);
+        
+        parser = new TextParser(resolver, "3<<2", null, true);
+        parser.parseExpression();
+        assertTrue(parser.atEnd());
+        exprType = parser.getExpressionType();
+        checkConstInt(exprType, 12);
+        
+        parser = new TextParser(resolver, "3>>1", null, true);
+        parser.parseExpression();
+        assertTrue(parser.atEnd());
+        exprType = parser.getExpressionType();
+        checkConstInt(exprType, 1);
+
+        parser = new TextParser(resolver, "3>>>1", null, true);
+        parser.parseExpression();
+        assertTrue(parser.atEnd());
+        exprType = parser.getExpressionType();
+        checkConstInt(exprType, 1);
+        
+        parser = new TextParser(resolver, "3<5", null, true);
+        parser.parseExpression();
+        assertTrue(parser.atEnd());
+        exprType = parser.getExpressionType();
+        checkConstBool(exprType, true);
+
+        parser = new TextParser(resolver, "3>5", null, true);
+        parser.parseExpression();
+        assertTrue(parser.atEnd());
+        exprType = parser.getExpressionType();
+        checkConstBool(exprType, false);
+
+        parser = new TextParser(resolver, "3>=5", null, true);
+        parser.parseExpression();
+        assertTrue(parser.atEnd());
+        exprType = parser.getExpressionType();
+        checkConstBool(exprType, false);
+
+        parser = new TextParser(resolver, "3<=5", null, true);
+        parser.parseExpression();
+        assertTrue(parser.atEnd());
+        exprType = parser.getExpressionType();
+        checkConstBool(exprType, true);
+        
+        parser = new TextParser(resolver, "-3", null, true);
+        parser.parseExpression();
+        assertTrue(parser.atEnd());
+        exprType = parser.getExpressionType();
+        checkConstInt(exprType, -3);
+
+        parser = new TextParser(resolver, "~3", null, true);
+        parser.parseExpression();
+        assertTrue(parser.atEnd());
+        exprType = parser.getExpressionType();
+        checkConstInt(exprType, -4);
+        
+        parser = new TextParser(resolver, "+3", null, true);
+        parser.parseExpression();
+        assertTrue(parser.atEnd());
+        exprType = parser.getExpressionType();
+        checkConstInt(exprType, 3);
+        
+        parser = new TextParser(resolver, "!true", null, true);
+        parser.parseExpression();
+        assertTrue(parser.atEnd());
+        exprType = parser.getExpressionType();
+        checkConstBool(exprType, false);
+                
+        parser = new TextParser(resolver, "3 != 5", null, true);
+        parser.parseExpression();
+        assertTrue(parser.atEnd());
+        exprType = parser.getExpressionType();
+        checkConstBool(exprType, true);
+    }
+    
+    public void testConstantExpressions2()
+    {
+        TextParser parser = new TextParser(resolver, "3l", null, true);
+        parser.parseExpression();
+        assertTrue(parser.atEnd());
+        JavaEntity exprType = parser.getExpressionType();
+        checkConstInt(exprType, 3);
+        
+        parser = new TextParser(resolver, "(int)4f", null, true);
+        parser.parseExpression();
+        assertTrue(parser.atEnd());
+        exprType = parser.getExpressionType();
+        checkConstInt(exprType, 4);
+        
+        parser = new TextParser(resolver, "(int)5.0", null, true);
+        parser.parseExpression();
+        assertTrue(parser.atEnd());
+        exprType = parser.getExpressionType();
+        checkConstInt(exprType, 5);
+        
+        parser = new TextParser(resolver, "\'a\'", null, true);
+        parser.parseExpression();
+        assertTrue(parser.atEnd());
+        exprType = parser.getExpressionType();
+        checkConstInt(exprType, 'a');
+    }
+    
+    public void testConstantStrings()
+    {
+        // From JLS 15.28
+        TextParser parser = new TextParser(resolver, "\"hello\" == \"hello\"", null, true);
+        parser.parseExpression();
+        assertTrue(parser.atEnd());
+        JavaEntity exprType = parser.getExpressionType();
+        checkConstBool(exprType, true);
+
+        // casts to String do not remove constness
+        parser = new TextParser(resolver, "\"hello\" == (java.lang.String)\"hello\"", null, true);
+        parser.parseExpression();
+        assertTrue(parser.atEnd());
+        exprType = parser.getExpressionType();
+        checkConstBool(exprType, true);
+
+        parser = new TextParser(resolver, "\"hello\" == \"goodbye\"", null, true);
+        parser.parseExpression();
+        assertTrue(parser.atEnd());
+        exprType = parser.getExpressionType();
+        checkConstBool(exprType, false);
+    }
+    
     public void testUnboxingNumericComparison()
     {
         TextAnalyzer tp = new TextAnalyzer(resolver, "", objectBench);
@@ -720,6 +957,9 @@ public class TextParserTest extends TestCase
         
         String r = tp.parseCommand("new Lala().method(\"a string\")");
         assertEquals("java.lang.String", r);
+        
+        r = tp.parseCommand("new Lala().<Thread>method(null)");
+        assertEquals("java.lang.Thread", r);
     }
     
     public void testMethodResolution6()
