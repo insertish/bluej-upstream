@@ -1,6 +1,6 @@
 /*
  This file is part of the Greenfoot program. 
- Copyright (C) 2014,2015,2016,2017,2018,2019,2020  Michael Kolling and John Rosenberg
+ Copyright (C) 2014,2015,2016,2017,2018,2019,2020,2021  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -88,6 +88,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.stream.Collectors;
 
 
 /**
@@ -430,21 +431,23 @@ public @OnThread(Tag.FX) class FXTabbedEditor
      * @param panel The FXTab to add
      * @param visible Whether to make the FXTabbedEditor window visible 
      * @param toFront Whether to bring the tab to the front (i.e. select the tab)
+     * @return True if the tab was added, false if it was already present
      */
     @OnThread(Tag.FXPlatform)
-    public void addTab(final FXTab panel, boolean visible, boolean toFront)
+    public boolean addTab(final FXTab panel, boolean visible, boolean toFront)
     {
-        addTab(panel, visible, toFront, false);
+        return addTab(panel, visible, toFront, false);
     }
 
     @OnThread(Tag.FXPlatform)
-    public void addTab(final FXTab panel, boolean visible, boolean toFront, boolean partOfMove)
+    private boolean addTab(final FXTab panel, boolean visible, boolean toFront, boolean partOfMove)
     {
         panel.setParent(this, partOfMove);
         // This is ok to call multiple times:
         panel.initialiseFX();
         //Debug.time("initialisedFX");
-        if (!tabPane.getTabs().contains(panel)) {
+        if (!tabPane.getTabs().contains(panel))
+        {
             tabPane.getTabs().add(panel);
             if (toFront)
             {
@@ -452,6 +455,11 @@ public @OnThread(Tag.FX) class FXTabbedEditor
                 bringToFront(panel);
                 Platform.runLater(panel::focusWhenShown);
             }
+            return true;
+        }
+        else
+        {
+            return false;
         }
     }
 
@@ -544,6 +552,20 @@ public @OnThread(Tag.FX) class FXTabbedEditor
                 }
                 //Debug.time("Showing");
                 stage.show();
+                if (startSize == null)
+                {
+                    List<Point2D> otherWindowPositions = project.getAllFXTabbedEditorWindows().stream().filter(w -> w != this).map(w -> new Point2D(w.getX(), w.getY())).collect(Collectors.toList());
+                    // Check we're not exactly at the same place as another window:
+                    Point2D us = new Point2D(stage.getX(), stage.getY());
+                    // Avoid an infinite loop, e.g. if we're near the screen edge and aren't allowed to move off it by the OS:
+                    int attempts = 0;
+                    while (otherWindowPositions.contains(us) && attempts++ < 5)
+                    {
+                        stage.setX(32 + stage.getX());
+                        stage.setY(32 + stage.getY());
+                        us = new Point2D(stage.getX(), stage.getY());
+                    }
+                }
                 //Debug.time("Shown");
                 //org.scenicview.ScenicView.show(stage.getScene());
             }

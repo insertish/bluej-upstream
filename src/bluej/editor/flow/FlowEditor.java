@@ -40,7 +40,6 @@ import bluej.editor.flow.FlowEditorPane.SelectionListener;
 import bluej.editor.flow.FlowEditorPane.StyledLines;
 import bluej.editor.flow.FlowErrorManager.ErrorDetails;
 import bluej.editor.flow.JavaSyntaxView.Display;
-import bluej.editor.flow.JavaSyntaxView.ParagraphAttribute;
 import bluej.editor.flow.LineDisplay.LineDisplayListener;
 import bluej.editor.flow.MarginAndTextLine.MarginDisplay;
 import bluej.editor.flow.StatusLabel.Status;
@@ -58,6 +57,8 @@ import bluej.parser.ParseUtils;
 import bluej.parser.SourceLocation;
 import bluej.parser.entity.EntityResolver;
 import bluej.parser.entity.JavaEntity;
+import bluej.parser.lexer.JavaLexer;
+import bluej.parser.lexer.JavaTokenTypes;
 import bluej.parser.lexer.LocatableToken;
 import bluej.parser.nodes.MethodNode;
 import bluej.parser.nodes.NodeTree.NodeAndPosition;
@@ -118,6 +119,7 @@ import javafx.scene.control.*;
 import javafx.scene.image.Image;
 import javafx.scene.input.KeyCodeCombination;
 import javafx.scene.input.KeyEvent;
+import javafx.scene.input.ScrollEvent;
 import javafx.scene.layout.Background;
 import javafx.scene.layout.BackgroundFill;
 import javafx.scene.layout.BorderPane;
@@ -127,7 +129,6 @@ import javafx.scene.layout.TilePane;
 import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Rectangle;
-import javafx.scene.text.Text;
 import javafx.scene.text.TextFlow;
 import javafx.scene.web.WebView;
 import javafx.stage.PopupWindow.AnchorLocation;
@@ -140,17 +141,7 @@ import threadchecker.OnThread;
 import threadchecker.Tag;
 
 import javax.swing.text.DefaultEditorKit;
-import java.io.BufferedOutputStream;
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.OutputStream;
-import java.io.OutputStreamWriter;
-import java.io.Reader;
-import java.io.Writer;
+import java.io.*;
 import java.net.URL;
 import java.nio.charset.Charset;
 import java.nio.file.Files;
@@ -224,7 +215,6 @@ public class FlowEditor extends ScopeColorsBorderPane implements TextEditor, Flo
 
     /** Used to obtain javadoc for arbitrary methods */
     private final JavadocResolver javadocResolver;
-    private boolean matchBrackets;
     // Each element is size 2: beginning (incl) and end (excl)
     private final ArrayList<int[]> bracketMatches = new ArrayList<>();
     /**
@@ -267,22 +257,19 @@ public class FlowEditor extends ScopeColorsBorderPane implements TextEditor, Flo
         return editorContextMenu;
     }
 
-    // Returns true if successfully flipped, false if not.
+    // Returns state of breakpoint afterwards: true if present, false if not
     private boolean toggleBreakpointForLine(int lineIndex)
     {
-        if (watcher.breakpointToggleEvent(lineIndex + 1, !breakpoints.get(lineIndex)) == null)
+        boolean hasBreakpoint = watcher.breakpointToggleEvent(lineIndex + 1, !breakpoints.get(lineIndex));
+        breakpoints.set(lineIndex, hasBreakpoint);
+        if (hasBreakpoint)
         {
-            breakpoints.flip(lineIndex);
-            if(breakpoints.get(lineIndex))
-            {
-                mayHaveBreakpoints = true;
-            }
-            flowEditorPane.setLineMarginGraphics(lineIndex, calculateMarginDisplay(lineIndex));
-            // We also reapply scopes:
-            flowEditorPane.applyScopeBackgrounds(javaSyntaxView.getScopeBackgrounds());
-            return true;
+            mayHaveBreakpoints = true;
         }
-        return false;
+        flowEditorPane.setLineMarginGraphics(lineIndex, calculateMarginDisplay(lineIndex));
+        // We also reapply scopes:
+        flowEditorPane.applyScopeBackgrounds(javaSyntaxView.getScopeBackgrounds());
+        return hasBreakpoint;
     }
 
     public void toggleBreakpoint()
@@ -357,6 +344,11 @@ public class FlowEditor extends ScopeColorsBorderPane implements TextEditor, Flo
         public ContextMenu getContextMenuToShow()
         {
             return null;
+        }
+
+        @Override
+        public void scrollEventOnTextLine(ScrollEvent e)
+        {
         }
     }
 
@@ -721,7 +713,7 @@ public class FlowEditor extends ScopeColorsBorderPane implements TextEditor, Flo
 
         actions.userAction();
 
-        if (matchBrackets)
+        if (PrefMgr.getFlag(PrefMgr.MATCH_BRACKETS))
         {
             doBracketMatch();
         }
@@ -752,7 +744,6 @@ public class FlowEditor extends ScopeColorsBorderPane implements TextEditor, Flo
      */
     private void doBracketMatch()
     {
-        int originalPos = getSourcePane().getCaretPosition();
         bracketMatches.clear();
         for (Integer position : getBracketMatchPositions())
         {
@@ -993,7 +984,13 @@ public class FlowEditor extends ScopeColorsBorderPane implements TextEditor, Flo
             }
             else
             {
-                userSave();
+                try
+                {
+                    save();
+                }
+                catch (IOException ioe) {}
+                // Note we can safely ignore the exception here: a message has
+                // already been displayed in the editor status bar by the save() method
             }
         }
     }
@@ -1390,18 +1387,37 @@ public class FlowEditor extends ScopeColorsBorderPane implements TextEditor, Flo
     @Override
     public void setEditorVisible(boolean vis, boolean openInNewWindow)
     {
-        FXTabbedEditor fxTabbedEditor = fetchTabbedEditor.getFXTabbedEditor(openInNewWindow);
-
-        if (vis)
+        final FXTabbedEditor fxTabbedEditor;
+        boolean becameVisible = false;
+        FXTabbedEditor tabParent = fxTab.getParent();
+        if (!vis && tabParent == null)
         {
-            fxTabbedEditor.addTab(fxTab, vis, true);
+            // If we already aren't in a window and are being told to hide, nothing to do:
+            return;
         }
-        boolean hadEffect = fxTabbedEditor.setWindowVisible(vis, fxTab);
+        // We only need a new window to be in if we're being told to show in a new window,
+        // or we're being told to show and we don't have a window:
+        else if (vis && (openInNewWindow || tabParent == null))
+        {
+            // If there is an existing parent, we need to leave it:
+            if (tabParent != null)
+                tabParent.close(fxTab);
+            fxTabbedEditor = fetchTabbedEditor.getFXTabbedEditor(openInNewWindow);
+            becameVisible = fxTabbedEditor.addTab(fxTab, vis, true);
+        }
+        else
+        {
+            fxTabbedEditor = tabParent;
+        }
+        
+        // Expression order very important here; we want to always call setWindowVisible,
+        // even if becameVisible is already true, and then OR the result with becameVisible
+        becameVisible = fxTabbedEditor.setWindowVisible(vis, fxTab) || becameVisible;
 
         if (vis)
         {
             fxTabbedEditor.bringToFront(fxTab);
-            if (hadEffect)
+            if (becameVisible)
             {
                 if (callbackOnOpen != null)
                 {
@@ -1420,6 +1436,13 @@ public class FlowEditor extends ScopeColorsBorderPane implements TextEditor, Flo
             getSourcePane().ensureCaretShowing();
             requestLayout();
         }
+        else
+        {
+            // Need to remove ourselves from our parent so that we get allocated to the
+            // default window if we are opened again:
+            if (tabParent != null)
+                tabParent.close(fxTab);
+        }
     }
 
     /**
@@ -1429,7 +1452,7 @@ public class FlowEditor extends ScopeColorsBorderPane implements TextEditor, Flo
      */
     private void checkBracketStatus()
     {
-        matchBrackets = PrefMgr.getFlag(PrefMgr.MATCH_BRACKETS);
+        boolean matchBrackets = PrefMgr.getFlag(PrefMgr.MATCH_BRACKETS);
         // tidies up leftover highlight if matching is switched off
         // while highlighting a valid bracket or refreshes bracket in open
         // editor
@@ -1821,14 +1844,12 @@ public class FlowEditor extends ScopeColorsBorderPane implements TextEditor, Flo
     {
         switchToSourceView();
 
-        if (isBreak)
-        {
-            removeStepMark();
-            currentStepLineIndex = lineNumber - 1;
-            flowEditorPane.setLineMarginGraphics(currentStepLineIndex, calculateMarginDisplay(currentStepLineIndex));
-            // We also reapply scopes:
-            flowEditorPane.applyScopeBackgrounds(javaSyntaxView.getScopeBackgrounds());
-        }
+        
+        removeStepMark();
+        currentStepLineIndex = lineNumber - 1;
+        flowEditorPane.setLineMarginGraphics(currentStepLineIndex, calculateMarginDisplay(currentStepLineIndex));
+        // We also reapply scopes:
+        flowEditorPane.applyScopeBackgrounds(javaSyntaxView.getScopeBackgrounds());
 
         // Scroll to the line:
         flowEditorPane.positionCaret(getOffsetFromLineColumn(new SourceLocation(lineNumber, 1)));
@@ -2020,6 +2041,8 @@ public class FlowEditor extends ScopeColorsBorderPane implements TextEditor, Flo
             {
                 flowEditorPane.setLineMarginGraphics(lineIndex, calculateMarginDisplay(lineIndex));
             }
+            // We also reapply scopes:
+            flowEditorPane.applyScopeBackgrounds(javaSyntaxView.getScopeBackgrounds());
             mayHaveBreakpoints = false;
         }
     }
@@ -2027,35 +2050,27 @@ public class FlowEditor extends ScopeColorsBorderPane implements TextEditor, Flo
     @Override
     public void reInitBreakpoints()
     {
-        if (mayHaveBreakpoints) {
+        if (mayHaveBreakpoints)
+        {
             mayHaveBreakpoints = false;
             for (int i = 1; i <= numberOfLines(); i++)
             {
                 if (breakpoints.get(i))
                 {
                     if (watcher != null)
-                        watcher.breakpointToggleEvent(i + 1, true);
-                    mayHaveBreakpoints = true;
+                    {
+                        boolean wasSet = watcher.breakpointToggleEvent(i + 1, true);
+                        breakpoints.set(i, wasSet);
+                        if (wasSet)
+                        {
+                            mayHaveBreakpoints = true;
+                        }
+                    }
                 }
             }
         }
-    }
-
-     /**
-     * User requests "save"
-     */
-    public void userSave()
-    {
-        if (saveState.isSaved())
-            info.message(Config.getString("editor.info.noChanges"));
-        else {
-            try {
-                save();
-            }
-            catch (IOException ioe) {}
-            // Note we can safely ignore the exception here: a message has
-            // already been displayed in the editor status bar
-        }
+        // Reapply scopes:
+        flowEditorPane.applyScopeBackgrounds(javaSyntaxView.getScopeBackgrounds());
     }
 
     /**
@@ -2600,38 +2615,57 @@ public class FlowEditor extends ScopeColorsBorderPane implements TextEditor, Flo
         int currentCaretPos = flowEditorPane.getSelectionStart();
         List<CharSequence> docLines = document.getLines();
         boolean isLineAfterImportBlank = docLines.get(0).toString().isBlank();
+        // We look if the cursor (the error) is at an import statement. We could just look on the line but because we cannot be sure
+        // the users have writting the import statement on a single line, we need to look up from the beginning of the code text.
+        SourceLocation errorSourceLocation = getLineColumnFromOffset(currentCaretPos);
+        String beforeErrorLineContent = getText(new SourceLocation(1,1), errorSourceLocation);
+        boolean isErrorInImportStatement = checkCodeIsOnImportStatement(beforeErrorLineContent);
 
         // Look for existing imports and package statement to find where the new import needs to be inserted.
         // We suppose package and import statements may be placed anywhere if the class contains comments...
-        boolean hasImports = docLines.stream().filter(charSequence -> charSequence.toString().startsWith("import ")).count() > 0;
-        boolean hasPackage = docLines.stream().filter(charSequence -> charSequence.toString().startsWith("package ")).count() > 0;
-        if (hasImports || hasPackage)
+        // However, if the error is on an import statement itself, that's the entire statement that we correct.
+        if(isErrorInImportStatement)
         {
-            boolean passedImport = false, passedPackage = false;
-            for (CharSequence charseq : docLines)
-            {
-                boolean isLineImport = charseq.toString().startsWith("import ");
-                boolean isLinePackage = charseq.toString().startsWith("package ");
-                passedImport |= isLineImport;
-                passedPackage |= isLinePackage;
-
-                // We found the place to add the import when we've passed all imports or when we only search for the package and passed it
-                if ((hasImports && !isLineImport && passedImport) || (!hasImports && passedPackage && !isLinePackage))
-                {
-                    isLineAfterImportBlank = charseq.toString().isBlank();
-                    break;
-                }
-
-                // Update the offset when we continue in the loop
-                importOffset += charseq.length() + 1;
-            }
+            int errorImportStatementStartIndex = beforeErrorLineContent.lastIndexOf("import ");
+            // Look where is the end of the import we are in. As for the "before" part, we can't assume the statement is written on a single line
+            String afterErrorLineContent = getText(errorSourceLocation, getLineColumnFromOffset(getTextLength()));
+            int errorImportStatementEndIndex = afterErrorLineContent.indexOf(";");
+            String fullImportStr = "import " + importName;
+            flowEditorPane.select(currentCaretPos - (beforeErrorLineContent.length() - errorImportStatementStartIndex), currentCaretPos + errorImportStatementEndIndex);
+            insertText(fullImportStr, false);
         }
+        else 
+        {
+            boolean hasImports = docLines.stream().filter(charSequence -> charSequence.toString().startsWith("import ")).count() > 0;
+            boolean hasPackage = docLines.stream().filter(charSequence -> charSequence.toString().startsWith("package ")).count() > 0;
+            if (hasImports || hasPackage)
+            {
+                boolean passedImport = false, passedPackage = false;
+                for (CharSequence charseq : docLines)
+                {
+                    boolean isLineImport = charseq.toString().startsWith("import ");
+                    boolean isLinePackage = charseq.toString().startsWith("package ");
+                    passedImport |= isLineImport;
+                    passedPackage |= isLinePackage;
 
-        String fullImportStr = "import " + importName + ((isLineAfterImportBlank) ? ";\n" : ";\n\n");
-        flowEditorPane.select(importOffset, importOffset);
-        insertText(fullImportStr, false);
-        int newCaretPos = (currentCaretPos >= importOffset) ? (currentCaretPos + fullImportStr.length()) : currentCaretPos;
-        flowEditorPane.select(newCaretPos, newCaretPos);
+                    // We found the place to add the import when we've passed all imports or when we only search for the package and passed it
+                    if ((hasImports && !isLineImport && passedImport) || (!hasImports && passedPackage && !isLinePackage))
+                    {
+                        isLineAfterImportBlank = charseq.toString().isBlank();
+                        break;
+                    }
+
+                    // Update the offset when we continue in the loop
+                    importOffset += charseq.length() + 1;
+                }
+            }
+
+            String fullImportStr = "import " + importName + ((isLineAfterImportBlank) ? ";\n" : ";\n\n");
+            flowEditorPane.select(importOffset, importOffset);
+            insertText(fullImportStr, false);
+            int newCaretPos = (currentCaretPos >= importOffset) ? (currentCaretPos + fullImportStr.length()) : currentCaretPos;
+            flowEditorPane.select(newCaretPos, newCaretPos);   
+        }
 
         refresh();
     }
@@ -2662,6 +2696,107 @@ public class FlowEditor extends ScopeColorsBorderPane implements TextEditor, Flo
                 document.replaceText(locatableImport.getStart(), locatableImport.getStart() + locatableImport.getLength(), "");
             }
         }
+    }
+
+    /**
+     * Check if that portion of code is within an import statement
+     * (the caret being assumed to be at the end of the code portion)
+     * 
+     * @param code the portion of code to check
+     */
+    private boolean checkCodeIsOnImportStatement(String code)
+    {
+        JavaLexer l = new JavaLexer(new StringReader(code));
+        boolean isInImportStatement = false;
+        for (LocatableToken t = l.nextToken(); t.getType() != JavaTokenTypes.EOF && t.getType() != JavaTokenTypes.LITERAL_class
+            && t.getType() != JavaTokenTypes.LITERAL_interface && t.getType() != JavaTokenTypes.LITERAL_enum; t = l.nextToken())
+        {
+            switch (t.getType())
+            {
+                case JavaTokenTypes.LITERAL_import:
+                    isInImportStatement = true;
+                    break;
+                case JavaTokenTypes.SEMI:
+                    if (isInImportStatement)
+                    {
+                        isInImportStatement = false;
+                    }
+                    break;
+                default:
+                    break;
+            }
+        }
+        
+        return isInImportStatement;
+    }
+    
+    /**
+     * For a given type (an AssistContentThreadSafe object), checks if the imports
+     * of the current file contains the type or its package 
+     * (in other words, if the current class imports this type)
+     *
+     * Note: for types contained in the "java.lang" package,
+     * we don't check and return true since this package is natively
+     * included.
+     *
+     * @param type the AssistContentThreadSafe object representing the type to check
+     * @param checkStrictInnerTypeImport indicates whether, for inner types, the import is strictly targeting the inner class
+     *                                   ("import package.OuterType.InnerType" or "import package.OuterType.*") and NOT the outer class  
+     * @result a boolean value indicating if this type is imported in the user code
+     */
+    public boolean checkTypeIsImported(AssistContentThreadSafe type, boolean checkStrictInnerTypeImport)
+    {
+        if (type.getPackage().equals("java.lang"))
+            return true;
+
+        // In order to make sure we retrieve the imports from the user's code in the best fashion,
+        // we use the java lexer to get the imports listed in the code. When we find a class definition,
+        // we stop looking for imports: imports are to be declared beforehand so no point going further.
+        List<String> userCodeImportsList = new ArrayList<>();
+        boolean parsingUserCodeImport = false;
+        StringBuilder userCodeImportSB = new StringBuilder();
+        JavaLexer l = new JavaLexer(new StringReader(this.getText(new SourceLocation(1, 1), getLineColumnFromOffset(getTextLength()))));
+        for (LocatableToken t = l.nextToken(); t.getType() != JavaTokenTypes.EOF && t.getType() != JavaTokenTypes.LITERAL_class 
+            && t.getType() != JavaTokenTypes.LITERAL_interface && t.getType() != JavaTokenTypes.LITERAL_enum; t = l.nextToken())
+        {
+            switch (t.getType())
+            {
+                case JavaTokenTypes.LITERAL_import:
+                    parsingUserCodeImport = true;
+                    break;
+                case JavaTokenTypes.SEMI:
+                    if (parsingUserCodeImport)
+                    {
+                        // the end of a user code import has been found, we add it in the list
+                        userCodeImportsList.add(userCodeImportSB.toString());
+                        userCodeImportSB.setLength(0); //to clear the string builder for the next iteration
+                        parsingUserCodeImport = false;
+                    }
+                    break; 
+                case JavaTokenTypes.ML_COMMENT:
+                    // Multiline comments inside an import shouldn't be picked up when constructing the userCodeImportSB string,
+                    break;        
+                default:
+                    // when we've notified an import is being parsed, we just concatenate the token to the string buffer;
+                    // otherwise, nothing to do, we continue the iteration
+                    if (parsingUserCodeImport)
+                    {
+                        userCodeImportSB.append(t.getText());
+                    }
+                    break;
+            }
+        }
+
+        // At this point, we can check if the type is imported.
+        // That is, that either the type is solely imported or its package is imported.
+        // For nested types, we also need to check the declaring class.
+        // Note that the flag "parsingUserCodeImport" might be still true in the case of a wrongly written user
+        // code. But then, we don't use that current parsing as it is anyway faulty.
+        return ((type.getDeclaringClass() == null && userCodeImportsList.contains(type.getPackage() + "." + type.getName()))
+            || (type.getDeclaringClass() != null && !checkStrictInnerTypeImport && userCodeImportsList.contains(type.getPackage() + "." + type.getDeclaringClass()))
+            || (type.getDeclaringClass() != null && userCodeImportsList.contains(type.getPackage() + "." + type.getDeclaringClass() + ".*"))
+            || (type.getDeclaringClass() != null && userCodeImportsList.contains(type.getPackage() + "." + type.getDeclaringClass() + "." + type.getName()))
+            || (!checkStrictInnerTypeImport && userCodeImportsList.contains(type.getPackage() + ".*")));
     }
 
     @Override
@@ -2728,6 +2863,10 @@ public class FlowEditor extends ScopeColorsBorderPane implements TextEditor, Flo
     @OnThread(Tag.FXPlatform)
     public Window getWindow()
     {
+        if (fxTabbedEditor == null)
+        {
+            return null;
+        }
         return fxTabbedEditor.getWindow();
     }
 
@@ -3130,6 +3269,12 @@ public class FlowEditor extends ScopeColorsBorderPane implements TextEditor, Flo
         }
     }
 
+    @Override
+    public void scrollEventOnTextLine(ScrollEvent e)
+    {
+        flowEditorPane.scrollEventOnTextLine(e);
+    }
+
     /**
      * Prints source code from Editor
      *
@@ -3240,6 +3385,12 @@ public class FlowEditor extends ScopeColorsBorderPane implements TextEditor, Flo
             public void repaint()
             {
                 // Nothing to do?
+            }
+
+            @Override
+            public double getWidthOfText(String content)
+            {
+                return lineDisplay.calculateLineWidth(content);
             }
         }, flowEditorPaneListener, this.javaSyntaxView.getEntityResolver(), PrefMgr.flagProperty(PrefMgr.HIGHLIGHTING));
         javaSyntaxView.enableParser(true);
@@ -3508,15 +3659,18 @@ public class FlowEditor extends ScopeColorsBorderPane implements TextEditor, Flo
 
             String errorMessage = ParserMessageHandler.getMessageForCode(details.message);
             TextFlow tf = null;
-            if (details.italicMessageStartIndex == -1 || details.italicMessageEndIndex == -1)
+            if (details.getItalicMessageStartIndex() == -1 || details.getItalicMessageEndIndex() == -1)
             {
                 tf = new TextFlow(new Label(errorMessage));
-            } else
+            } 
+            else
             {
-                Label beforeItalicText = (details.italicMessageStartIndex > 0) ? new Label(errorMessage.substring(0, details.italicMessageStartIndex)) : new Label("");
-                Label italicText = new Label(errorMessage.substring(details.italicMessageStartIndex, details.italicMessageEndIndex));
+                int italicStartIndex = details.getItalicMessageStartIndex();
+                int italicEndIndex = details.getItalicMessageEndIndex();
+                Label beforeItalicText = (italicStartIndex > 0) ? new Label(errorMessage.substring(0, italicStartIndex)) : new Label("");
+                Label italicText = new Label(errorMessage.substring(italicStartIndex, italicEndIndex));
                 JavaFXUtil.withStyleClass(italicText, "error-fix-display-italic");
-                Label afterItalicText = (details.italicMessageEndIndex < errorMessage.length() - 1) ? new Label(errorMessage.substring(details.italicMessageEndIndex)) : new Label("");
+                Label afterItalicText = (italicEndIndex < errorMessage.length() - 1) ? new Label(errorMessage.substring(italicEndIndex)) : new Label("");
                 tf = new TextFlow(beforeItalicText, italicText, afterItalicText);
             }
 
