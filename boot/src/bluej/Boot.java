@@ -56,7 +56,7 @@ public class Boot
     // and then the update-version target should be executed.
     public static final int BLUEJ_VERSION_MAJOR = 4;
     public static final int BLUEJ_VERSION_MINOR = 1;
-    public static final int BLUEJ_VERSION_RELEASE = 1;
+    public static final int BLUEJ_VERSION_RELEASE = 2;
     public static final String BLUEJ_VERSION_SUFFIX = "";
 
     // public static final int BLUEJ_VERSION_NUMBER = BLUEJ_VERSION_MAJOR * 1000 +
@@ -121,7 +121,7 @@ public class Boot
         "junit-4.11.jar",
         "lang-stride.jar",
         "nsmenufx-2.1.4.jar",
-        "org.eclipse.jgit-4.1.0.jar",
+        "org.eclipse.jgit-4.9.0.jar",
         "richtextfx-fat-0.7-M5n.jar",
         "sequence-library-1.0.3.jar",
         "slf4j-api-1.7.2.jar",

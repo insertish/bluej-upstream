@@ -22,6 +22,31 @@
 package bluej.pkgmgr.target;
 
 
+import java.io.File;
+import java.io.FileFilter;
+import java.io.IOException;
+import java.lang.annotation.Annotation;
+import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
+import java.lang.reflect.TypeVariable;
+import java.nio.charset.Charset;
+import java.nio.file.Files;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Properties;
+import java.util.concurrent.CompletableFuture;
+import java.util.function.Consumer;
+import java.util.stream.Collectors;
+
+import javax.swing.SwingUtilities;
+
 import bluej.Config;
 import bluej.collect.DataCollector;
 import bluej.collect.DiagnosticWithShown;
@@ -41,7 +66,11 @@ import bluej.editor.EditorManager;
 import bluej.editor.TextEditor;
 import bluej.editor.stride.FrameCatalogue;
 import bluej.editor.stride.FrameEditor;
-import bluej.extensions.*;
+import bluej.extensions.BClass;
+import bluej.extensions.BClassTarget;
+import bluej.extensions.BDependency;
+import bluej.extensions.ExtensionBridge;
+import bluej.extensions.SourceType;
 import bluej.extensions.event.ClassEvent;
 import bluej.extensions.event.ClassTargetEvent;
 import bluej.extmgr.ClassExtensionMenu;
@@ -55,13 +84,22 @@ import bluej.parser.nodes.ParsedCUNode;
 import bluej.parser.nodes.ParsedTypeNode;
 import bluej.parser.symtab.ClassInfo;
 import bluej.parser.symtab.Selection;
-import bluej.pkgmgr.*;
+import bluej.pkgmgr.JavadocResolver;
 import bluej.pkgmgr.Package;
+import bluej.pkgmgr.PackageEditor;
+import bluej.pkgmgr.PkgMgrFrame;
+import bluej.pkgmgr.Project;
+import bluej.pkgmgr.SourceInfo;
 import bluej.pkgmgr.dependency.Dependency;
 import bluej.pkgmgr.dependency.ExtendsDependency;
 import bluej.pkgmgr.dependency.ImplementsDependency;
 import bluej.pkgmgr.dependency.UsesDependency;
-import bluej.pkgmgr.target.role.*;
+import bluej.pkgmgr.target.role.AbstractClassRole;
+import bluej.pkgmgr.target.role.ClassRole;
+import bluej.pkgmgr.target.role.EnumClassRole;
+import bluej.pkgmgr.target.role.InterfaceClassRole;
+import bluej.pkgmgr.target.role.StdClassRole;
+import bluej.pkgmgr.target.role.UnitTestClassRole;
 import bluej.stride.framedjava.ast.Loader;
 import bluej.stride.framedjava.ast.Parser;
 import bluej.stride.framedjava.convert.ConversionWarning;
@@ -69,7 +107,14 @@ import bluej.stride.framedjava.convert.ConvertResultDialog;
 import bluej.stride.framedjava.elements.CodeElement;
 import bluej.stride.framedjava.elements.TopLevelCodeElement;
 import bluej.stride.generic.Frame;
-import bluej.utility.*;
+import bluej.utility.Debug;
+import bluej.utility.DialogManager;
+import bluej.utility.FileEditor;
+import bluej.utility.FileUtility;
+import bluej.utility.JavaNames;
+import bluej.utility.JavaReflective;
+import bluej.utility.JavaUtils;
+import bluej.utility.Utility;
 import bluej.utility.javafx.FXPlatformConsumer;
 import bluej.utility.javafx.FXPlatformRunnable;
 import bluej.utility.javafx.FXPlatformSupplier;
@@ -77,22 +122,6 @@ import bluej.utility.javafx.JavaFXUtil;
 import bluej.utility.javafx.ResizableCanvas;
 import bluej.views.ConstructorView;
 import bluej.views.MethodView;
-
-import java.io.File;
-import java.io.FileFilter;
-import java.io.IOException;
-import java.lang.annotation.Annotation;
-import java.lang.reflect.Method;
-import java.lang.reflect.Modifier;
-import java.nio.charset.Charset;
-import java.nio.file.Files;
-import java.time.Instant;
-import java.util.*;
-import java.util.concurrent.CompletableFuture;
-import java.util.function.Consumer;
-import java.util.stream.Collectors;
-import java.lang.ClassNotFoundException;
-
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.event.ActionEvent;
@@ -108,11 +137,8 @@ import javafx.scene.paint.Color;
 import javafx.scene.paint.ImagePattern;
 import javafx.stage.Stage;
 import javafx.stage.Window;
-
 import threadchecker.OnThread;
 import threadchecker.Tag;
-
-import javax.swing.SwingUtilities;
 
 /**
  * A class target in a package, i.e. a target that is a class file built from
@@ -122,6 +148,7 @@ import javax.swing.SwingUtilities;
  * @author Michael Kolling
  * @author Bruce Quig
  */
+@OnThread(Tag.FXPlatform)
 public class ClassTarget extends DependentTarget
     implements InvokeListener
 {
@@ -150,12 +177,10 @@ public class ClassTarget extends DependentTarget
     // role should be accessed using getRole() and set using
     // setRole(). A role should not contain important state information
     // because role objects are thrown away at a whim.
-    @OnThread(value = Tag.FXPlatform)
     private ClassRole role = new StdClassRole();
 
     // a flag indicating whether an editor, when opened for the first
     // time, should display the interface of this class
-    @OnThread(value = Tag.FXPlatform)
     private boolean openWithInterface = false;
 
     // cached information obtained by parsing the source code
@@ -165,46 +190,36 @@ public class ClassTarget extends DependentTarget
     
     // caches whether the class is abstract. Only accurate when the
     // classtarget state is normal (ie. the class is compiled).
-    @OnThread(Tag.FXPlatform)
     private boolean isAbstract;
     
     // a flag indicating whether an editor should have the naviview expanded/collapsed
-    @OnThread(Tag.FXPlatform)
     private Optional<Boolean> isNaviviewExpanded = Optional.empty();
 
-    @OnThread(Tag.FXPlatform)
     private final List<Integer> cachedBreakpoints = new ArrayList<>();
     
     // flag to prevent recursive calls to analyseDependancies()
     private boolean analysing = false;
 
-    @OnThread(Tag.FXPlatform)
     private boolean isMoveable = true;
     private SourceType sourceAvailable;
     // Part of keeping track of number of editors opened, for Greenfoot phone home:
     private boolean hasBeenOpened = false;
 
-    @OnThread(Tag.FXPlatform)
     private String typeParameters = "";
     
     //properties map to store values used in the editor from the props (if necessary)
-    @OnThread(Tag.FXPlatform)
     private Map<String,String> properties = new HashMap<String,String>();
     // Keep track of whether the editor is open or not; we get a lot of
     // potential open events, and don't want to keep recording ourselves as re-opening
     private boolean recordedAsOpen = false;
-    @OnThread(Tag.FXPlatform)
     private boolean visible = true;
     public static final String MENU_STYLE_INBUILT = "class-action-inbuilt";
-    @OnThread(Tag.FXPlatform)
     private static String[] pseudos;
 
     // The body of the class target which goes hashed, etc:
     @OnThread(Tag.FX)
     private ResizableCanvas canvas;
-    @OnThread(Tag.FXPlatform)
     private Label stereotypeLabel;
-    @OnThread(Tag.FXPlatform)
     private boolean isFront = true;
     @OnThread(Tag.FX)
     private static Image greyStripeImage;
@@ -218,11 +233,8 @@ public class ClassTarget extends DependentTarget
     private static final Color RED_STRIPE = Color.rgb(170, 80, 60);
     @OnThread(Tag.FX)
     private static final Color GREY_STRIPE = Color.rgb(158, 139, 116);
-    @OnThread(Tag.FXPlatform)
     private boolean showingInterface;
-    @OnThread(Tag.FXPlatform)
     private boolean drawingExtends = false;
-    @OnThread(Tag.FXPlatform)
     private Label nameLabel;
 
     /**
@@ -253,6 +265,7 @@ public class ClassTarget extends DependentTarget
         }
 
         JavaFXUtil.addStyleClass(pane, "class-target");
+        JavaFXUtil.addStyleClass(pane, "class-target-id-" + baseName);
 
         nameLabel = new Label(baseName);
         JavaFXUtil.addStyleClass(nameLabel, "class-target-name");
@@ -300,8 +313,10 @@ public class ClassTarget extends DependentTarget
 
         }
         JavaFXUtil.addChangeListener(canvas.sceneProperty(), scene -> {
-            nameLabel.applyCss();
-            updateSize();
+            JavaFXUtil.runNowOrLater(() -> {
+                nameLabel.applyCss();
+                updateSize();
+            });
         });
     }
     
@@ -439,7 +454,7 @@ public class ClassTarget extends DependentTarget
     @Override
     public String getDisplayName()
     {
-        return super.getDisplayName() + getTypeParameters();
+        return getBaseName() + getTypeParameters();
     }
 
     /**
@@ -448,7 +463,6 @@ public class ClassTarget extends DependentTarget
      * 
      * @return The typeParameters value
      */
-    @OnThread(Tag.FXPlatform)
     private String getTypeParameters()
     {
         return typeParameters;
@@ -505,7 +519,6 @@ public class ClassTarget extends DependentTarget
      * 
      * @return The role value
      */
-    @OnThread(Tag.FXPlatform)
     public ClassRole getRole()
     {
         return role;
@@ -721,15 +734,8 @@ public class ClassTarget extends DependentTarget
             setProperty(NAVIVIEW_EXPANDED_PROPERTY, String.valueOf(value));
         }
         
-        String typeParams = props.getProperty(prefix + ".typeParameters");
-        //typeParams is null only if the properties file is saved by an older
-        //version of Bluej, thus the type parameters have to fetched from the code
-        if (typeParams == null) {
-            analyseSource();    
-        }
-        else {
-            typeParameters = typeParams;
-        }
+        typeParameters = "";
+        // parameters will be corrected when class is analysed
 
         cachedBreakpoints.clear();
         try
@@ -758,7 +764,6 @@ public class ClassTarget extends DependentTarget
      *            properties in a properties file used by multiple targets.
      */
     @Override
-    @OnThread(Tag.FXPlatform)
     public void save(Properties props, String prefix)
     {
         super.save(props, prefix);
@@ -777,14 +782,13 @@ public class ClassTarget extends DependentTarget
         if (getProperty(NAVIVIEW_EXPANDED_PROPERTY) != null)
         {
             props.put(prefix + ".naviview.expanded", String.valueOf(getProperty(NAVIVIEW_EXPANDED_PROPERTY)));
-        } else if (isNaviviewExpanded.isPresent())
+        }
+        else if (isNaviviewExpanded.isPresent())
         {
             props.put(prefix + ".naviview.expanded", String.valueOf(isNaviviewExpanded()));
         }
-        props.put(prefix + ".typeParameters", getTypeParameters());
         
         props.put(prefix + ".showInterface", Boolean.valueOf(intf).toString());
-
 
         List<Integer> breakpoints;
         if (editor != null && editor instanceof FrameEditor)
@@ -858,8 +862,8 @@ public class ClassTarget extends DependentTarget
 
         File src = getSourceFile();
 
-        // if the src file has last-modified date greater than the class file's one, then
-        // set the last-modified date of the class file equal to the src file last-modified date,
+        // if the src file has last-modified date in the future, then set the last-modified date of
+        // the source file to the current time.
         long now = Instant.now().toEpochMilli();
         // Tiny bit of leeway just in case of clock syncs, etc:
         if (src.exists() && (src.lastModified() > now + 1000))
@@ -885,6 +889,17 @@ public class ClassTarget extends DependentTarget
                 // Will avoid going into an infinite circular loop.
                 dependent.invalidate();
             }
+        }
+    }
+    
+    /**
+     * A direct dependency of this class was modified. Any compiler diagnostics
+     * from the previous compile may now be invalid.
+     */
+    private void dependencyChanged()
+    {
+        if (editor != null) {
+            editor.dependencyChanged();
         }
     }
 
@@ -924,7 +939,6 @@ public class ClassTarget extends DependentTarget
      * 
      * The return is only valid if isCompiled() is true.
      */
-    @OnThread(Tag.FXPlatform)
     public boolean isAbstract()
     {
         return isAbstract;
@@ -977,7 +991,6 @@ public class ClassTarget extends DependentTarget
         return null;
     }
 
-    @OnThread(Tag.FXPlatform)
     public boolean isVisible()
     {
         return visible;
@@ -985,12 +998,6 @@ public class ClassTarget extends DependentTarget
 
     public void markCompiled(boolean classesKept)
     {
-        // Must do this even if state hasn't changed, because if state was HAS_ERROR
-        // and has now become HAS_ERROR then we still need to mark compile as finished:
-        if (editor != null) {
-            editor.compileFinished(false, classesKept);
-        }
-
         setState(State.COMPILED);
     }
 
@@ -1059,7 +1066,7 @@ public class ClassTarget extends DependentTarget
     }
 
     /**
-     * Description of the Class
+     * A filter to find inner class files.
      */
     @OnThread(value = Tag.FXPlatform, ignoreParent = true)
     class InnerClassFileFilter
@@ -1084,7 +1091,6 @@ public class ClassTarget extends DependentTarget
      *         there was a problem opening this editor.
      */
     @Override
-    @OnThread(Tag.FXPlatform)
     public Editor getEditor()
     {
         boolean withInterface;
@@ -1100,8 +1106,7 @@ public class ClassTarget extends DependentTarget
      * @return the editor object associated with this target. May be null if
      *         there was a problem opening this editor.
      */
-    @OnThread(Tag.FXPlatform)
-    private Editor getEditor(boolean showInterface) // TODO remove the ignoreParent = true, and tag calls properly
+    private Editor getEditor(boolean showInterface)
     {
         // ClassTarget must have source code if it is to provide an editor
         if (editor == null) {
@@ -1223,6 +1228,11 @@ public class ClassTarget extends DependentTarget
     public void modificationEvent(Editor editor)
     {
         invalidate();
+        for (Dependency d : dependents()) {
+            ClassTarget dependent = (ClassTarget) d.getFrom();
+            dependent.dependencyChanged();
+        }
+        
         removeBreakpoints();
         if (getPackage().getProject().getDebugger() != null)
         {
@@ -1350,6 +1360,7 @@ public class ClassTarget extends DependentTarget
 
         determineRole(cl);
         analyseDependencies(cl);
+        analyseTypeParams(cl);
     }
 
     /**
@@ -1471,6 +1482,10 @@ public class ClassTarget extends DependentTarget
      * <p>
      * Also causes the class role (normal class, unit test, etc) to be
      * guessed based on the source.
+     * <p>
+     * Note: this should only be called once the containing package is loaded, not
+     * before. All classes must be present in the package or dependency information
+     * will be generated incorrectly during parsing.
      */
     public ClassInfo analyseSource()
     {
@@ -1522,7 +1537,7 @@ public class ClassTarget extends DependentTarget
      * 
      * @param info The new typeParameters value
      */
-    public void setTypeParameters(ClassInfo info)
+    private void setTypeParameters(ClassInfo info)
     {
         String newTypeParameters = "";
         if (info.hasTypeParameter()) {
@@ -1537,7 +1552,7 @@ public class ClassTarget extends DependentTarget
         if (!newTypeParameters.equals(typeParameters))
         {
             typeParameters = newTypeParameters;
-            updateSize();
+            updateDisplayName();
         }
     }
 
@@ -1564,7 +1579,7 @@ public class ClassTarget extends DependentTarget
      * Check whether the package name has been changed by comparing the package
      * name in the information from the parser with the current package name
      */
-    public boolean analysePackageName(ClassInfo info)
+    private boolean analysePackageName(ClassInfo info)
     {
         String newName = info.getPackage();
 
@@ -1575,7 +1590,7 @@ public class ClassTarget extends DependentTarget
      * Analyse the current dependencies in the source code and update the
      * dependencies in the graphical display accordingly.
      */
-    public void analyseDependencies(ClassInfo info)
+    private void analyseDependencies(ClassInfo info)
     {
         // Now that uses dependencies are calculated-only, we remove all of them
         // and add back those which remain:
@@ -1602,12 +1617,14 @@ public class ClassTarget extends DependentTarget
         for (Iterator<String> it = vect.iterator(); it.hasNext();) {
             String name = it.next();
             DependentTarget used = getPackage().getDependentTarget(name);
-            if (used != null) {
-                if (used.getAssociation() == this || this.getAssociation() == used) {
-                    continue;
+            if (used != null)
+            {
+                UsesDependency dependency = new UsesDependency(getPackage(), this, used);
+                if (used.getAssociation() == this || this.getAssociation() == used)
+                {
+                    dependency.setVisible(false);
                 }
-
-                getPackage().addDependency(new UsesDependency(getPackage(), this, used));
+                getPackage().addDependency(dependency);
             }
         }
     }
@@ -1633,6 +1650,36 @@ public class ClassTarget extends DependentTarget
         }
     }
     
+    /**
+     * Analyse the type parameters from the compiled class and update the display name.
+     */
+    public <T> void analyseTypeParams(Class<T> cl)
+    {
+        if (cl != null) {
+            String oldTypeParams = typeParameters;
+            TypeVariable<Class<T>> [] tvars = cl.getTypeParameters();
+            if (tvars.length == 0) {
+                typeParameters = "";
+            }
+            else
+            {
+                boolean isFirst = true;
+                typeParameters = "<";
+                for (TypeVariable<?> tvar : tvars) {
+                    if (! isFirst) {
+                        typeParameters += ",";
+                    }
+                    isFirst = false;
+                    typeParameters += tvar.getName();
+                }
+                typeParameters += ">";
+            }
+            
+            if (! typeParameters.equals(oldTypeParams)) {
+                updateDisplayName();
+            }
+        }
+    }
     
     /**
      * Set the superclass. This adds an extends dependency to the appropriate class.
@@ -1728,8 +1775,7 @@ public class ClassTarget extends DependentTarget
             // constructed and fix them up for new class name
             String oldName = getIdentifierName();
             setIdentifierName(newName);
-            setDisplayName(newName);
-            updateSize();
+            updateDisplayName();
             
             // Update the BClass object
             BClass bClass = getBClass();
@@ -1763,6 +1809,17 @@ public class ClassTarget extends DependentTarget
         }
     }
 
+    /**
+     * Update the displayed class name (which includes type parameters).
+     */
+    public void updateDisplayName()
+    {
+        String newDisplayName = getDisplayName();
+        updateSize();
+        nameLabel.setText(newDisplayName);
+        setDisplayName(newDisplayName);
+    }
+    
     /**
      * Delete all the source files (edited and generated) for this target.
      */
@@ -1839,15 +1896,12 @@ public class ClassTarget extends DependentTarget
      * Resizes the class so the entire classname + type parameter are visible
      *  
      */
-    @OnThread(Tag.Any)
     private void updateSize()
     {
-        Platform.runLater(() -> {
-            String displayName = getDisplayName();
-            int width = calculateWidth(nameLabel, displayName);
-            setSize(width, getHeight());
-            repaint();
-        });
+        String displayName = getDisplayName();
+        int width = calculateWidth(nameLabel, displayName);
+        setSize(width, getHeight());
+        repaint();
     }
 
     /**
@@ -1857,7 +1911,6 @@ public class ClassTarget extends DependentTarget
      * @param y  the y coordinate for the menu, relative to graph editor
      */
     @Override
-    @OnThread(Tag.FXPlatform)
     public void popupMenu(int x, int y, PackageEditor graphEditor)
     {
         Class<?> cl = null;
@@ -1912,7 +1965,6 @@ public class ClassTarget extends DependentTarget
      * @param cl class object associated with this class target
      * @return the created popup menu object
      */
-    @OnThread(Tag.FXPlatform)
     protected void withMenu(Class<?> cl, ClassRole roleRef, SourceType source, boolean docExists, FXPlatformConsumer<ContextMenu> withMenu, ExtensionsManager extMgr)
     {
         final ContextMenu menu = new ContextMenu();
@@ -2158,7 +2210,6 @@ public class ClassTarget extends DependentTarget
      * are warnings not errors.  Errors, which stop the process, mainly arise
      * from unparseable Java source code.
      */
-    @OnThread(Tag.FXPlatform)
     public void promptAndConvertJavaToStride()
     {
         File javaSourceFile = getJavaSourceFile();
@@ -2198,7 +2249,6 @@ public class ClassTarget extends DependentTarget
      * Process a double click on this target. That is: open its editor.
      */
     @Override
-    @OnThread(Tag.FXPlatform)
     public void doubleClick()
     {
         open();
@@ -2210,7 +2260,6 @@ public class ClassTarget extends DependentTarget
      * @param height The new size value
      */
     @Override
-    @OnThread(Tag.FXPlatform)
     public void setSize(int width, int height)
     {
         int w = Math.max(width, MIN_WIDTH);
@@ -2220,7 +2269,6 @@ public class ClassTarget extends DependentTarget
             assoc.setSize(w, h);
     }
     
-    @OnThread(Tag.FXPlatform)
     public void setVisible(boolean vis)
     {
         if (vis != this.visible) {
@@ -2423,7 +2471,6 @@ public class ClassTarget extends DependentTarget
         sourceAvailable = SourceType.Stride;
     }
 
-    @OnThread(Tag.FXPlatform)
     public boolean isMoveable()
     {
         return isMoveable;
@@ -2435,7 +2482,6 @@ public class ClassTarget extends DependentTarget
      * 
      * @see bluej.graph.Moveable#setIsMoveable(boolean)
      */
-    @OnThread(Tag.FXPlatform)
     public void setIsMoveable(boolean isMoveable)
     {
         this.isMoveable = isMoveable;
@@ -2475,7 +2521,6 @@ public class ClassTarget extends DependentTarget
      * Returns the naviview expanded value from the properties file
      * @return 
      */
-    @OnThread(Tag.FXPlatform)
     public boolean isNaviviewExpanded()
     {
         return isNaviviewExpanded.orElse(false);
@@ -2494,7 +2539,6 @@ public class ClassTarget extends DependentTarget
      * Retrieves a property from the editor
      */
     @Override
-    @OnThread(Tag.FXPlatform)
     public String getProperty(String key)
     {
         return properties.get(key);
@@ -2521,36 +2565,20 @@ public class ClassTarget extends DependentTarget
         DataCollector.editStride(getPackage(), getJavaSourceFile(), latestJava, getFrameSourceFile(), latestStride, reason);
     }
 
-    /**
-     * Gets the File which the given source type parameter is generated from,
-     * or null if non-applicable.  Here's a table of the possible outcomes:
-     *
-     * This target | Parameter | Return
-     * --------------------------------
-     * Stride      | Stride    | null (Stride is not generated from anything else)
-     * Stride      | Java      | non-null (The path to the Stride file)
-     * Java        | Stride    | null (This call shouldn't happen anyway)
-     * Java        | Java      | null (Java source is not generated in this case)
-     */
-    private File getGeneratedFrom(SourceType recordForSourceType)
-    {
-        if (recordForSourceType == SourceType.Java && this.sourceAvailable == SourceType.Stride)
-            return getFrameSourceFile();
-        else
-            return null;
-    }
-
     @Override
     public void recordClose()
     {
-        DataCollector.closeClass(getPackage(), getSourceFile());
+        if (hasSourceCode())
+        {
+            DataCollector.closeClass(getPackage(), getSourceFile());
+        }
         recordedAsOpen = false;
     }
 
     @Override
     public void recordOpen()
     {
-        if (recordedAsOpen == false)
+        if (recordedAsOpen == false && hasSourceCode())
         {
             DataCollector.openClass(getPackage(), getSourceFile());
             recordedAsOpen = true;
@@ -2560,7 +2588,10 @@ public class ClassTarget extends DependentTarget
     @Override
     public void recordSelected()
     {
-        DataCollector.selectClass(getPackage(), getSourceFile());
+        if (hasSourceCode())
+        {
+            DataCollector.selectClass(getPackage(), getSourceFile());
+        }
     }
 
     public CompileInputFile getCompileInputFile()
@@ -2574,12 +2605,6 @@ public class ClassTarget extends DependentTarget
      */
     public void markKnownError(boolean classesKept)
     {
-        // Must do this even if state hasn't changed, because if state was HAS_ERROR
-        // and has now become HAS_ERROR then we still need to mark compile as finished:
-        if (editor != null) {
-            editor.compileFinished(false, classesKept);
-        }
-
         // Errors are marked as part of compilation, so we expect that a suitable ClassEvent
         // is generated when compilation finishes; no need for it here.
         setState(State.HAS_ERROR);
@@ -2664,7 +2689,7 @@ public class ClassTarget extends DependentTarget
     }
 
     @Override
-    public @OnThread(Tag.FXPlatform) boolean isFront()
+    public boolean isFront()
     {
         return isFront;
     }
@@ -2676,25 +2701,16 @@ public class ClassTarget extends DependentTarget
     }
 
     @Override
-    public @OnThread(Tag.FXPlatform) void setCreatingExtends(boolean drawingExtends)
+    public void setCreatingExtends(boolean drawingExtends)
     {
         // Don't call super; we don't want to darken ourselves
         this.drawingExtends = drawingExtends;
     }
 
     @Override
-    public @OnThread(Tag.FXPlatform) boolean cursorAtResizeCorner(MouseEvent e)
+    public boolean cursorAtResizeCorner(MouseEvent e)
     {
         // Don't allow resize if we are picking an extends arrow:
         return super.cursorAtResizeCorner(e) && !drawingExtends;
-    }
-
-    @Override
-    public void setDisplayName(String name)
-    {
-        super.setDisplayName(name);
-        // Don't just use name; getDisplayName adds template params info
-        String newDisplayName = getDisplayName();
-        nameLabel.setText(newDisplayName);
     }
 }

@@ -41,16 +41,19 @@ import javafx.beans.value.ChangeListener;
 import javafx.beans.value.ObservableValue;
 import javafx.geometry.Bounds;
 import javafx.scene.Node;
+import javafx.scene.Scene;
 import javafx.scene.control.CheckMenuItem;
 import javafx.scene.control.ContentDisplay;
 import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
 import javafx.scene.control.OverrunStyle;
+import javafx.scene.control.TextField;
 import javafx.scene.image.Image;
 import javafx.scene.image.PixelWriter;
 import javafx.scene.image.WritableImage;
 import javafx.scene.input.MouseButton;
 import javafx.scene.layout.AnchorPane;
+import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.StackPane;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Shape;
@@ -198,13 +201,18 @@ public class BlueJSyntaxView
         });
         // We use class color as a proxy for listening to all colors:
         JavaFXUtil.addChangeListenerPlatform(scopeColors.scopeClassColorProperty(), str -> {
-            // runLater to make sure all colours have been set:
-            JavaFXUtil.runAfterCurrent(() ->
+            // If printing, don't run later as we're not on the main thread.
+            // Instead, the printing code will trigger the necessary recalculation.
+            if (!document.isPrinting())
             {
-                resetColors();
-                imageCache.clear();
-                document.recalculateAllScopes();
-            });
+                // runLater to make sure all colours have been set:
+                JavaFXUtil.runAfterCurrent(() ->
+                {
+                    resetColors();
+                    imageCache.clear();
+                    document.recalculateAllScopes();
+                });
+            }
         });
     }
 
@@ -254,7 +262,8 @@ public class BlueJSyntaxView
     List<ScopeInfo> recalculateScopes(int firstLineIncl, int lastLineIncl)
     {
         List<ScopeInfo> scopes = new ArrayList<>();
-        paintScopeMarkers(scopes, widthProperty == null  || widthProperty.get() == 0 ? 200 : (int)widthProperty.get(), firstLineIncl, lastLineIncl, false);
+        // Subtract 24 which is width of paragraph graphic:
+        paintScopeMarkers(scopes, widthProperty == null  || widthProperty.get() == 0 ? 200 : ((int)widthProperty.get() - 24), firstLineIncl, lastLineIncl, false);
         return scopes;
     }
 
@@ -610,7 +619,7 @@ public class BlueJSyntaxView
             boolean onlyMethods, int nodeDepth)
     throws BadLocationException
     {
-        int rightMargin = small ? 0 : 20;
+        int rightMargin = small ? 0 : 10;
 
         ListIterator<NodeAndPosition<ParsedNode>> li = prevScopeStack.listIterator();
 
@@ -743,7 +752,28 @@ public class BlueJSyntaxView
         boolean allSpaces = document.getDocument().getParagraph(position.getMajor()).getText().substring(0, position.getMinor()).chars().allMatch(c -> c == ' ');
 
         if (!editorPane.visibleLines.get(position.getMajor()) && (!allSpaces || cachedSpaceSizes.size() <= 4))
-            return OptionalInt.empty();
+        {
+            // If we are printing, we'll never be able to get the on-screen position
+            // for our off-screen editor.  So we must make our best guess at positions
+            // using measureString
+            if (document.isPrinting())
+            {
+                TextField field = new TextField();
+                field.styleProperty().bind(editorPane.styleProperty());
+                // Have to put TextField into a Scene for CSS to take effect:
+                Scene s = new Scene(new BorderPane(field));
+                field.applyCss();
+                double singleSpaceWidth = JavaFXUtil.measureString(field, "          ", false, false) / 10.0;
+                // I admit, I don't understand why we need the 1.05 fudge factor here,
+                // but after an hour or two of fiddling, it's the only thing I've found
+                // that makes the measureString backgrounds line-up with the editor pane text:
+                return OptionalInt.of((int) (singleSpaceWidth * position.getMinor() * 1.05));
+            }
+            else
+            {
+                return OptionalInt.empty();
+            }
+        }
 
         /*
          * So, if a character is on screen, it's trivial to calculate the indent in pixels, we just ask the
@@ -1072,7 +1102,7 @@ public class BlueJSyntaxView
         // hope that the editor is now visible:
         if (indent == null || indent <= 0) {
             // No point trying to re-calculate the indent if the line isn't on screen:
-            if (editorPane != null && editorPane.visibleLines.get(doc.offsetToPosition(lineEl.getStartOffset()).getMajor()))
+            if (editorPane != null && (editorPane.visibleLines.get(doc.offsetToPosition(lineEl.getStartOffset()).getMajor()) || doc.isPrinting()))
             {
                 indent = getNodeIndent(doc, nap);
                 nodeIndents.put(nap.getNode(), indent);
@@ -1891,7 +1921,7 @@ public class BlueJSyntaxView
      * Sets up the colors based on the strength value 
      * (from strongest (20) to white (0)
      */
-    private void resetColors()
+    void resetColors()
     {
         BK = scopeColors.scopeBackgroundColorProperty().get();
         C1 = getReducedColor(scopeColors.scopeClassOuterColorProperty());
@@ -1995,6 +2025,7 @@ public class BlueJSyntaxView
         {
             ScopeInfo scopeInfo = new ScopeInfo(attributes);
             scopeInfo.nestedScopes.addAll(nestedScopes);
+            scopeInfo.incomplete = incomplete;
             return scopeInfo;
         }
 

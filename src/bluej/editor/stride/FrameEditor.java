@@ -37,6 +37,7 @@ import bluej.editor.Editor;
 import bluej.editor.EditorWatcher;
 import bluej.editor.TextEditor;
 import bluej.editor.moe.MoeSyntaxDocument;
+import bluej.editor.moe.PrintDialog.PrintSize;
 import bluej.parser.AssistContent;
 import bluej.parser.AssistContent.CompletionKind;
 import bluej.parser.CodeSuggestions;
@@ -464,6 +465,10 @@ public class FrameEditor implements Editor
 
             @Override
             @OnThread(Tag.FXPlatform)
+            public void dependencyChanged() { FrameEditor.this.dependencyChanged(); }
+            
+            @Override
+            @OnThread(Tag.FXPlatform)
             public void setCompiled(boolean compiled) { FrameEditor.this.setCompiled(compiled); }
 
             @Override
@@ -492,7 +497,7 @@ public class FrameEditor implements Editor
 
             @Override
             @OnThread(Tag.FXPlatform)
-            public FXRunnable printTo(PrinterJob printerJob, boolean printLineNumbers, boolean printBackground) { return FrameEditor.this.printTo(printerJob, printLineNumbers, printBackground); }
+            public FXRunnable printTo(PrinterJob printerJob, PrintSize printSize, boolean printLineNumbers, boolean printBackground) { return FrameEditor.this.printTo(printerJob, printSize, printLineNumbers, printBackground); }
 
             @Override
             @OnThread(Tag.FXPlatform)
@@ -898,6 +903,12 @@ public class FrameEditor implements Editor
         this.frameFilename = new File(filename);
         this.javaFilename = new File(javaFilename);
     }
+    
+    @Override
+    public void dependencyChanged()
+    {
+        // TODO not handled yet
+    }
 
     @Override
     public void setCompiled(boolean compiled)
@@ -941,7 +952,7 @@ public class FrameEditor implements Editor
 
     @Override
     @OnThread(Tag.FXPlatform)
-    public FXRunnable printTo(PrinterJob job, boolean printLineNumbers, boolean printBackground)
+    public FXRunnable printTo(PrinterJob job, PrintSize printSize, boolean printLineNumbers, boolean printBackground)
     {
         CompletableFuture<Boolean> inited = new CompletableFuture<>();
         if (panel == null)

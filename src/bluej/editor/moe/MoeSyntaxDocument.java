@@ -259,6 +259,11 @@ public class MoeSyntaxDocument
         thisDocIsForPrinting = true;
     }
 
+    public boolean isPrinting()
+    {
+        return thisDocIsForPrinting;
+    }
+
     @OnThread(Tag.Any)
     private static class EditEvent
     {
@@ -442,13 +447,7 @@ public class MoeSyntaxDocument
      */
     public boolean pollReparseQueue()
     {
-        boolean wasParsed = pollReparseQueue(MAX_PARSE_PIECE);
-        // If queue is empty, apply backgrounds:
-        if (!wasParsed)
-        {
-            applyPendingScopeBackgrounds();
-        }
-        return wasParsed;
+        return pollReparseQueue(MAX_PARSE_PIECE);
     }
     
     /**
@@ -555,6 +554,7 @@ public class MoeSyntaxDocument
         if (notYetShown)
             return;
 
+        syntaxView.resetColors();
         recalculateScopesForLinesInRange(0, document.getParagraphs().size() - 1);
         applyPendingScopeBackgrounds();
     }
@@ -574,7 +574,7 @@ public class MoeSyntaxDocument
     }
 
     // Called if the reparse queue is empty:
-    private void applyPendingScopeBackgrounds()
+    public void applyPendingScopeBackgrounds()
     {
         // Prevent re-entry, which can it seems can occur when applying
         // token highlight styles:

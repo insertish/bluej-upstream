@@ -335,7 +335,6 @@ public class PkgMgrFrame
             makeFrame();
             setStatus(bluej.Boot.BLUEJ_VERSION_TITLE);
 
-
             Stage stage = new Stage();
             BlueJTheme.setWindowIconFX(stage);
 
@@ -366,6 +365,7 @@ public class PkgMgrFrame
             //topPane.setMinHeight(minSize.getHeight());
             topPane.setLeft(toolPanel);
             TriangleArrow triangleLabel = new TriangleArrow(Orientation.HORIZONTAL);
+            JavaFXUtil.addStyleClass(triangleLabel, "codepad-fold-arrow");
             StackPane.setAlignment(triangleLabel, Pos.CENTER_RIGHT);
             StackPane.setMargin(triangleLabel, new Insets(0, 5, 0, 0));
             triangleLabel.setOnMouseClicked(e -> {
@@ -476,12 +476,18 @@ public class PkgMgrFrame
                     if (e.getEventType() == MouseEvent.MOUSE_MOVED)
                     {
                         // Are we on top of the divider of the bottom pane?
-                        double sceneX = bottomPane.getItems().get(0).localToScene(bottomPane.getItems().get(0).getBoundsInLocal()).getMaxX();
-                        if (e.getSceneX() >= sceneX - 1 && e.getSceneX() <= sceneX + 8)
+                        Bounds bounds = bottomPane.getItems().get(0).localToScene(bottomPane.getItems().get(0).getBoundsInLocal());
+                        // Notice that we need the top-right corner, so max X and min Y.
+                        double sceneX = bounds.getMaxX();
+                        double sceneY = bounds.getMinY();
+                        if (e.getSceneX() >= sceneX - 1 && e.getSceneX() <= sceneX + 8
+                                &&
+                            e.getSceneY() >= sceneY - 5 && e.getSceneY() <= sceneY + 5)
                         {
                             isResizingBoth = true;
-                            // Show four pointed arrow:
-                            cursorProperty.set(Cursor.MOVE);
+                            // Show four pointed arrow.
+                            // To solve a bug on Mac where the MOVE cursor is not appearing, use the CROSSHAIR one
+                            cursorProperty.set(!Config.isMacOS() ? Cursor.MOVE : Cursor.CROSSHAIR);
                         }
                         else
                         {
@@ -560,11 +566,13 @@ public class PkgMgrFrame
             {
                 JavaFXUtil.runNowOrLater(() ->
                 {
+                    // Remove the bidirectional binding from the old project, if there was one:
                     if (oldPkg != null)
                     {
-                        showingDebugger.bindBidirectional(oldPkg.getProject().debuggerShowing());
-                        showingTerminal.bindBidirectional(oldPkg.getProject().terminalShowing());
+                        showingDebugger.unbindBidirectional(oldPkg.getProject().debuggerShowing());
+                        showingTerminal.unbindBidirectional(oldPkg.getProject().terminalShowing());
                     }
+                    // Bind instead to new project, if there is one:
                     if (newPkg != null)
                     {
                         showingDebugger.bindBidirectional(newPkg.getProject().debuggerShowing());
@@ -1173,14 +1181,20 @@ public class PkgMgrFrame
             String uniqueId = getProject().getUniqueId();
             bench.removeAllObjects(uniqueId);
             clearTextEval();
-            if (codePad != null)
+            if (codePad != null) {
                 codePad.setDisable(true);
+            }
 
             // Take a copy because we're about to null it:
             PackageEditor oldEd = editor;
             oldEd.removeEventFilter(javafx.scene.input.MouseEvent.MOUSE_PRESSED, editorMousePressed);
             oldEd.graphClosed();
             pkgEditorScrollPane.setContent(null);
+
+            // Disassociate from the project team actions, so that we don't inadvertently disable the
+            // actions in other package frames:
+            teamActions = new TeamActionGroup(false);
+            
             enableFunctions(false);
         }
 
@@ -1772,8 +1786,8 @@ public class PkgMgrFrame
         if (frameCount() == 1) {
             if (keepLastFrame && !Config.isGreenfoot()) { // close package, leave frame, but not for greenfoot
                 closePackage();
-                testRecordingEnded(); // disable test controls
-                // Must do it after package has been closed:
+
+                // Must update window after package has been closed:
                 updateWindow();
 
                 // clear the codePad
@@ -2395,6 +2409,10 @@ public class PkgMgrFrame
         }
         Target target = new CSSTarget(getPackage(), cssFile);
         target.setPos((int)x, (int)y);
+        if (editor != null && x == -1)
+        {
+            editor.findSpaceForVertex(target);
+        }
         
         getPackage().addTarget(target);
     }
@@ -2871,7 +2889,9 @@ public class PkgMgrFrame
         arrow.setStroke(Color.BLACK);
         imgExtendsButton.setGraphic(arrow);
         topButtons.getChildren().add(imgExtendsButton);
-        topButtons.getChildren().add(compileAction.makeButton());
+        Button compileButton = compileAction.makeButton();
+        JavaFXUtil.addStyleClass(compileButton, "compile-button");
+        topButtons.getChildren().add(compileButton);
         toolPanel.getChildren().add(topButtons);
 
         dummySwingNode = new SwingNode();
@@ -3102,9 +3122,8 @@ public class PkgMgrFrame
             }
             mixedMenu.addFX(() -> testingMenu);
 
-            //team menu setup
+            // team menu setup
             teamMenu = new Menu(Config.getString("menu.tools.teamwork"));
-//            teamMenu.setMnemonic(Config.getMnemonicKey("menu.tools"));
             {
                 TeamAction checkoutAction = new CheckoutAction();
                 MenuItem checkoutMenuItem = new MenuItem();
@@ -3215,7 +3234,8 @@ public class PkgMgrFrame
             menu.getItems().add(new SeparatorMenuItem());
 
             menu.getItems().add(new WebsiteAction(this).makeMenuItem());
-            menu.getItems().add(new TutorialAction(this).makeMenuItem());
+            menu.getItems().add(new OnlineDocAction(this).makeMenuItem());
+            menu.getItems().add(new InteractiveTutorialAction(this).makeMenuItem());
             menu.getItems().add(new StandardAPIHelpAction(this).makeMenuItem());
             addUserHelpItems(menu);
             menubar.add(new FXOnlyMenu(menu));
@@ -3333,17 +3353,18 @@ public class PkgMgrFrame
     protected void enableFunctions(boolean enable)
     {
         if (! enable) {
+            testRecordingEnded();
             teamActions.setAllDisabled();
         }
-
-        for (Node component : itemsToDisable)
+        for (Node component : itemsToDisable) {
             component.setDisable(!enable);
-        for (MenuItem component : menuItemsToDisable)
+        }
+        for (MenuItem component : menuItemsToDisable) {
             component.setDisable(!enable);
-    
-        actionsToDisable.stream().forEach((action) -> {
+        }
+        for (PkgMgrAction action : actionsToDisable) {
             action.setEnabled(enable);
-        });
+        };
     }
     
     /**

@@ -31,6 +31,7 @@ import bluej.debugger.DebuggerThread;
 import bluej.editor.EditorWatcher;
 import bluej.editor.moe.BlueJSyntaxView.ParagraphAttribute;
 import bluej.editor.moe.MoeActions.MoeAbstractAction;
+import bluej.editor.moe.PrintDialog.PrintSize;
 import bluej.editor.moe.MoeErrorManager.ErrorDetails;
 import bluej.editor.moe.MoeSyntaxDocument.Element;
 import bluej.editor.moe.PrintDialog.PrintChoices;
@@ -71,11 +72,11 @@ import bluej.utility.Debug;
 import bluej.utility.DialogManager;
 import bluej.utility.FileUtility;
 import bluej.utility.Utility;
+import bluej.utility.javafx.FXConsumer;
 import bluej.utility.javafx.FXPlatformRunnable;
 import bluej.utility.javafx.FXRunnable;
 import bluej.utility.javafx.FXSupplier;
 import bluej.utility.javafx.JavaFXUtil;
-import javafx.application.Platform;
 import javafx.beans.binding.BooleanExpression;
 import javafx.beans.binding.DoubleExpression;
 import javafx.beans.binding.StringExpression;
@@ -86,6 +87,7 @@ import javafx.beans.property.SimpleObjectProperty;
 import javafx.collections.FXCollections;
 import javafx.geometry.BoundingBox;
 import javafx.geometry.Bounds;
+import javafx.geometry.Insets;
 import javafx.geometry.Orientation;
 import javafx.geometry.Pos;
 import javafx.print.PrinterJob;
@@ -95,12 +97,15 @@ import javafx.scene.control.*;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyCodeCombination;
 import javafx.scene.input.KeyEvent;
+import javafx.scene.layout.Background;
+import javafx.scene.layout.BackgroundFill;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Pane;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.TilePane;
+import javafx.scene.paint.Color;
 import javafx.scene.text.Text;
 import javafx.scene.text.TextFlow;
 import javafx.scene.web.WebView;
@@ -119,22 +124,21 @@ import org.w3c.dom.events.EventTarget;
 import threadchecker.OnThread;
 import threadchecker.Tag;
 
-import javax.swing.*;
 import javax.swing.text.BadLocationException;
 import java.io.*;
 import java.net.URL;
 import java.nio.charset.Charset;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Properties;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.function.UnaryOperator;
@@ -171,15 +175,10 @@ public final class MoeEditor extends ScopeColorsBorderPane
     // file suffixes
     private final static String CRASHFILE_SUFFIX = "#";
     private final static String BACKUP_SUFFIX = "~";
-    private final static int NAVIVIEW_WIDTH = 90;       // width of the "naviview" (min-source) box
 
     // -------- CLASS VARIABLES --------
     private static boolean matchBrackets = false;
-    /**
-     * list of actions that are dis/enabled depending on the selected view
-     * (source/documentation)
-     */
-    private static ArrayList<String> editActions;
+
     /**
      * list of actions that are disabled in the readme text file
      */
@@ -203,7 +202,6 @@ public final class MoeEditor extends ScopeColorsBorderPane
     /** Watcher - provides interface to BlueJ core. May be null (eg for README.txt file). */
     private final EditorWatcher watcher;
     
-    private boolean isShowingSrc = true;
     private final Properties resources;
     private MoeSyntaxDocument sourceDocument;
     private MoeActions actions;
@@ -215,6 +213,10 @@ public final class MoeEditor extends ScopeColorsBorderPane
 
     // find functionality
     private FindPanel finder;
+    // The most recent active FindNavigator.  Returns null if there has been no search,
+    // or if the document has been modified since the last search.
+    private final ObjectProperty<FindNavigator> currentSearchResult = new SimpleObjectProperty<>(null);
+    
     private MenuBar menubar;
     private String filename;                // name of file or null
     private long lastModified;              // time of last modification of file
@@ -227,15 +229,11 @@ public final class MoeEditor extends ScopeColorsBorderPane
     private boolean mayHaveBreakpoints;     // true if there were BP here
     private boolean ignoreChanges = false;
     private boolean tabsAreExpanded = false;
+    
     /** Used to obtain javadoc for arbitrary methods */
     private final JavadocResolver javadocResolver;
     private ReparseRunner reparseRunner;
-    /** Search highlight tags for both text panes */
-    private final List<Object> sourceSearchHighlightTags = new ArrayList<>();
-    private final List<Object> htmlSearchHighlightTags = new ArrayList<>();
-    // The most recent active FindNavigator.  Returns null if there has been no search,
-    // or if the document has been modified since the last search.
-    private final ObjectProperty<FindNavigator> currentSearchResult = new SimpleObjectProperty<>(null);
+    
     /**
      * Property map, allows BlueJ extensions to associate property values with
      * this editor instance; otherwise unused.
@@ -244,10 +242,17 @@ public final class MoeEditor extends ScopeColorsBorderPane
     // Blackbox data recording:
     private int oldCaretLineNumber = -1;
     private ErrorDisplay errorDisplay;
-    private boolean madeChangeOnCurrentLine = false;
+
+    // These variables track the validity of our compiled state.
+    private boolean compilationQueued = false;    // queued for compilation?
+    private boolean compilationQueuedExplicit = false;  // explicit compilation?
+    private boolean compilationStarted = false;
+    private boolean requeueForCompilation = false; // re-queue after current compile?
+    private CompileReason requeueReason;
+    private CompileType requeueType;
+    
     /** Manages display of compiler and parse errors */
     private final MoeErrorManager errorManager = new MoeErrorManager(this, enable -> {});
-    private Timer mouseHover;
     private int mouseCaretPos = -1;
 
 
@@ -285,7 +290,7 @@ public final class MoeEditor extends ScopeColorsBorderPane
 
         initWindow(parameters.getProjectResolver());
         if (watcher != null && parameters.isCode() && !parameters.isCompiled()) {
-            watcher.scheduleCompilation(false, CompileReason.LOADED, CompileType.ERROR_CHECK_ONLY);
+            scheduleCompilation(CompileReason.LOADED, CompileType.ERROR_CHECK_ONLY);
         }
         callbackOnOpen = parameters.getCallbackOnOpen();
 
@@ -332,18 +337,6 @@ public final class MoeEditor extends ScopeColorsBorderPane
     }
 
     /**
-     * Check if an item is in the reserved list for disabled interface options
-     *  
-     * @return boolean reflects if it is enabled ie false=disabled
-     * @param text  String with button text name
-     */
-    private static boolean isEditAction(String text)
-    {       
-        ArrayList<String> actions = getEditActions();
-        return actions.contains(text);
-    }
-
-    /**
      * Check whether an action is not valid for the project "readme" (i.e. if it is only
      * valid for source files).
      * 
@@ -374,121 +367,35 @@ public final class MoeEditor extends ScopeColorsBorderPane
     }
 
     /**
-     * Returns a list of names for the actions which are only valid in an editing
-     * context, that is, when the display shows the source and not the documentation.
-     *  
-     * @return list of editing action names
+     * Check whether the source file has changed on disk. If it has, reload.
      */
-    private static ArrayList<String> getEditActions()
+    private void checkForChangeOnDisk()
     {
-        if (editActions == null) {
-            editActions = new ArrayList<>();
-            editActions.add("save");
-            editActions.add("reload");
-            editActions.add("print");
-            editActions.add("compile");
-            editActions.add("cut-to-clipboard");
-            editActions.add("indent-block");
-            editActions.add("deindent-block");
-            editActions.add("comment-block");
-            editActions.add("uncomment-block");
-            editActions.add("insert-method");
-            editActions.add("add-javadoc");
-            editActions.add("replace");
-            editActions.add("go-to-line");
-            editActions.add("paste-from-clipboard");
-            editActions.add("toggle-breakpoint");
-            editActions.add("autoindent");
+        if (filename == null)
+        {
+            return;
         }
-
-        return editActions;
-    }
-
-    /**
-     * Tell whether we are currently matching brackets.
-     * 
-     * @return True, if we are matching brackets, otherwise false.
-     */
-    public static boolean matchBrackets()
-    {
-        return matchBrackets;
-    }
-
-
-    /**
-     * Removes the selection in the textpane specified
-     */
-    private void removeSelection()
-    {
-        if (sourcePane != null) {
-            int caretPos = sourcePane.getCaretPosition();
-            sourcePane.select(caretPos, caretPos);
-        }
-    }
-
-    /**
-     * Does some clever formatting to ensure that the replacement matches
-     * the original on the formatting eg upper/lower case
-     */
-    private static String smartFormat(String original, String replacement)
-    {
-        if(original == null || replacement == null) {
-            return replacement;
-        }
-
-        // only do smart stuff if search and replace strings were entered in lowercase.
-        // check here. if not lowercase, just return.
-
-        if( !isLowerCase(replacement) || !isLowerCase(original)) {
-            return replacement;
-        }
-        if(isUpperCase(original)) {
-            return replacement.toUpperCase();
-        }
-        if(isTitleCase(original)) {
-            return Character.toTitleCase(replacement.charAt(0)) + 
-                replacement.substring(1);
-        }
-        
-        return replacement;
-    }
-
-    /**
-     * True if the string is in lower case.
-     */
-    public static boolean isLowerCase(String s)
-    {
-        for(int i=0; i<s.length(); i++) {
-            if(! Character.isLowerCase(s.charAt(i))) {
-                return false;
+        File file = new File(filename);
+        long modified = file.lastModified();
+        if(modified != lastModified)
+        {
+            if (saveState.isChanged())
+            {
+                int answer = DialogManager.askQuestionFX(getWindow(), "changed-on-disk");
+                if (answer == 0)
+                {
+                    doReload();
+                }
+                else
+                {
+                    lastModified = modified; // don't ask again for this change
+                }
+            }
+            else
+            {
+                doReload();
             }
         }
-        return true;
-    }
-
-    /**
-     * True if the string is in Upper case.
-     */
-    public static boolean isUpperCase(String s)
-    {
-        for(int i=0; i<s.length(); i++) {
-            if(! Character.isUpperCase(s.charAt(i))) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    /**
-     * True if the string is in title case.
-     */
-    public static boolean isTitleCase(String s)
-    {
-        if(s.length() < 2) {
-            return false;
-        }
-        return Character.isUpperCase(s.charAt(0)) &&
-                Character.isLowerCase(s.charAt(1));
     }
 
     /*
@@ -545,6 +452,7 @@ public final class MoeEditor extends ScopeColorsBorderPane
                 clear();
             }
             catch (IOException ex) {
+                // TODO display user-visible error
                 Debug.reportError("Couldn't open file", ex);
             }
         }
@@ -744,8 +652,10 @@ public final class MoeEditor extends ScopeColorsBorderPane
         try {
             save();
         }
-        catch (IOException ioe) {}
-        // TODO should really be done by watcher from outside
+        catch (IOException ioe) {
+            // TODO we should definitely show dialog here.
+        }
+        
         doClose();
     }
 
@@ -824,8 +734,6 @@ public final class MoeEditor extends ScopeColorsBorderPane
     {
         switchToSourceView();
 
-        Element line = getSourceLine(lineNumber);
-
         if (isBreak) {
             setStepMark(lineNumber);
         }
@@ -853,35 +761,40 @@ public final class MoeEditor extends ScopeColorsBorderPane
         int spos = line.getStartOffset();
         int epos = line.getEndOffset();
         int testPos = Math.min(epos - spos - 1, column - 1);
-        if (testPos <= 0) {
+        if (testPos <= 0)
+        {
             return spos;
         }
 
-            int cpos = 0; // what the actual column is so far
-            int tpos = 0; // where we are in the string
-            String lineText = sourceDocument.getText(spos, testPos);
-            
-            while (cpos < column - 1) {
-                int tabPos = lineText.indexOf('\t', tpos);
-                if (tabPos == -1) {
-                    // No more tabs...
-                    tpos += column - cpos - 1;
-                    return Math.min(spos + tpos, epos - 1);
-                }
-                
-                int newcpos = cpos + (tabPos - tpos);
-                if (newcpos >= column) {
-                    tpos += column - cpos - 1;
-                    return spos + tpos;
-                }
+        int cpos = 0; // what the actual column is so far
+        int tpos = 0; // where we are in the string
+        String lineText = sourceDocument.getText(spos, testPos);
 
-                cpos = newcpos;
-                
-                cpos += 8; // hit tab
-                cpos -= cpos % 8;  // back to tab stop
-
-                tpos = tabPos + 1; // skip over the tab char
+        while (cpos < column - 1)
+        {
+            int tabPos = lineText.indexOf('\t', tpos);
+            if (tabPos == -1)
+            {
+                // No more tabs...
+                tpos += column - cpos - 1;
+                return Math.min(spos + tpos, epos - 1);
             }
+
+            int newcpos = cpos + (tabPos - tpos);
+            if (newcpos >= column)
+            {
+                tpos += column - cpos - 1;
+                return spos + tpos;
+            }
+
+            cpos = newcpos;
+
+            cpos += 8; // hit tab
+            cpos -= cpos % 8;  // back to tab stop
+
+            tpos = tabPos + 1; // skip over the tab char
+        }
+        
         return spos;
     }
 
@@ -958,6 +871,12 @@ public final class MoeEditor extends ScopeColorsBorderPane
         windowTitle = title;
         setWindowTitle();
     }
+    
+    @Override
+    public void dependencyChanged()
+    {
+        scheduleCompilation(CompileReason.MODIFIED, CompileType.ERROR_CHECK_ONLY);
+    }
 
     /**
      * Set the "compiled" status
@@ -972,10 +891,52 @@ public final class MoeEditor extends ScopeColorsBorderPane
             errorManager.removeAllErrorHighlights();
         }
     }
+    
+    /**
+     * Schedule an immediate compilation for the specified reason and of the specified type.
+     * @param reason  The reason for compilation
+     * @param ctype   The type of compilation
+     */
+    private void scheduleCompilation(CompileReason reason, CompileType ctype)
+    {
+        if (watcher != null)
+        {
+            // We can collapse multiple compiles, but we cannot collapse an explicit compilation
+            // (resulting class files kept) into a non-explicit compilation (result discarded).
+            if (! compilationQueued ||
+                    (ctype != CompileType.ERROR_CHECK_ONLY && ! compilationQueuedExplicit))
+            {
+                watcher.scheduleCompilation(true, reason, ctype);
+                compilationQueued = true;
+            }
+            else if (compilationStarted)
+            {
+                // since a previously queued compilation has already started, we need to queue a second
+                // compilation after it finishes. We override any currently queued ERROR_CHECK_ONLY
+                // since explicit compiles should take precedence:
+                if (! requeueForCompilation || ctype == CompileType.ERROR_CHECK_ONLY)
+                {
+                    requeueForCompilation = true;
+                    requeueReason = reason;
+                    requeueType = ctype;
+                }
+            }
+        }
+    }
 
     @Override
     public void compileFinished(boolean successful, boolean classesKept)
     {
+        compilationStarted = false;
+        if (requeueForCompilation) {
+            requeueForCompilation = false;
+            compilationQueuedExplicit = (requeueType != CompileType.ERROR_CHECK_ONLY);
+            watcher.scheduleCompilation(true, requeueReason, requeueType);
+        }
+        else {
+            compilationQueued = false;
+        }
+        
         compiledProperty.set(successful && classesKept);
         if (isVisible() && classesKept)
         {
@@ -1089,10 +1050,6 @@ public final class MoeEditor extends ScopeColorsBorderPane
         return viewingHTML.get();
     }
     
-    // --------------------------------------------------------------------
-    // ------------ end of interface inherited from Editor ----------------
-    // --------------------------------------------------------------------
-
     /**
      * Returns the current caret location within the edited text.
      * 
@@ -1361,8 +1318,6 @@ public final class MoeEditor extends ScopeColorsBorderPane
         return lineElement.getEndOffset() - startOffset;
     }
 
-    // ==================== USER ACTION IMPLEMENTATIONS ===================
-
     // --------------------------------------------------------------------
     
     /**
@@ -1469,34 +1424,34 @@ public final class MoeEditor extends ScopeColorsBorderPane
         // shouldn't modify the document in this function.  But it seems like sometimes
         // the styled changes we make cause RichTextFX to generate a plain text change event:
         if (respondingToChange)
+        {
             return;
+        }
         respondingToChange = true;
 
+        if (!saveState.isChanged()) {
+            saveState.setState(StatusLabel.Status.CHANGED);
+            setChanged();
+        }
+        
         if (!singleLineChange) // For a multi-line change, always compile:
         {
             saveState.setState(StatusLabel.Status.CHANGED);
             setChanged();
-            // If we aren't code, just save the change:
-            if (!sourceIsCode)
-            {
-                try
-                {
-                    save();
-                }
-                catch (IOException e)
-                {
-                    Debug.reportError(e);
-                }
-            }
-            else if (watcher != null) {
-                watcher.scheduleCompilation(true, CompileReason.MODIFIED, CompileType.ERROR_CHECK_ONLY);
-            }
 
-            madeChangeOnCurrentLine = false; // Not since last compilation
-        }
-        else
-        {
-            madeChangeOnCurrentLine = true; // We've changed this line, but don't recompile yet
+            try
+            {
+                save();
+
+                if (sourceIsCode && watcher != null) {
+                    scheduleCompilation(CompileReason.MODIFIED, CompileType.ERROR_CHECK_ONLY);
+                }
+            }
+            catch (IOException e)
+            {
+                // Note that status line displays error notice in save()
+                Debug.reportError(e);
+            }
         }
 
         clearMessage();
@@ -1504,10 +1459,6 @@ public final class MoeEditor extends ScopeColorsBorderPane
         currentSearchResult.setValue(null);
         errorManager.removeAllErrorHighlights();
         errorManager.documentContentChanged();
-        if (!saveState.isChanged()) {
-            saveState.setState(StatusLabel.Status.CHANGED);
-            setChanged();
-        }
         actions.userAction();
         
         // This may handle re-indentation; as this mutates the
@@ -1608,36 +1559,54 @@ public final class MoeEditor extends ScopeColorsBorderPane
      */
     @Override
     @OnThread(Tag.FXPlatform)
-    public FXRunnable printTo(PrinterJob printerJob, boolean printLineNumbers, boolean printBackground)
+    public FXRunnable printTo(PrinterJob printerJob, PrintSize printSize, boolean printLineNumbers, boolean printBackground)
     {
-        MoeSyntaxDocument doc = new MoeSyntaxDocument(new ScopeColorsBorderPane());
+        ScopeColorsBorderPane scopeColorsPane = new ScopeColorsBorderPane();
+        MoeSyntaxDocument doc = new MoeSyntaxDocument(scopeColorsPane);
         // Note: very important we make this call before copyFrom, as copyFrom is what triggers
         // the run-later that marking as printing suppresses:
         doc.markAsForPrinting();
         doc.copyFrom(sourceDocument);
         MoeEditorPane editorPane = doc.makeEditorPane(null, null);
-        Scene scene = new Scene(editorPane);
-        Config.addEditorStylesheets(scene);
+        Label pageNumberLabel = new Label("");
+        String timestamp = new SimpleDateFormat("yyyy-MMM-dd HH:mm").format(new Date());
+        BorderPane header = new BorderPane(new Label(timestamp), null, pageNumberLabel, null, new Label(getTitle()));
+        // If we let labels be default font, it can cause weird font corruption when printing.
+        // But setting labels to same font as editor seems to avoid the issue:
+        for (Node node : header.getChildren())
+        {
+            node.setStyle(PrefMgr.getEditorFontFamilyCSS());
+        }
+        header.setBackground(new Background(new BackgroundFill(Color.LIGHTGRAY, null, null)));
+        header.setPadding(new Insets(5));
+        BorderPane rootPane = new BorderPane(editorPane, header, null, scopeColorsPane, null);
+        // The scopeColorsPane needs to be in the scene to access the CSS colors.
+        // But we don't actually want it visible:
+        scopeColorsPane.setManaged(false);
+        scopeColorsPane.setVisible(false);
+        rootPane.setBackground(null);
         // JavaFX seems to always print at 72 DPI, regardless of printer DPI:
         // This means that that the point width (1/72 of an inch) is actually the pixel width, too:
         double pixelWidth = printerJob.getJobSettings().getPageLayout().getPrintableWidth();
         double pixelHeight = printerJob.getJobSettings().getPageLayout().getPrintableHeight();
-        editorPane.resize(pixelWidth, pixelHeight);
+        Scene scene = new Scene(rootPane, pixelWidth, pixelHeight);
+        Config.addEditorStylesheets(scene);
 
         // We could make page size match screen size by scaling font size by difference in DPIs:
         //editorPane.styleProperty().unbind();
         //editorPane.setStyle("-fx-font-size: " + PrefMgr.getEditorFontSize().getValue().doubleValue() * 0.75 + "pt;");
-        editorPane.setPrinting(true, printLineNumbers);
+        editorPane.setPrinting(true, printSize, printLineNumbers);
         editorPane.setWrapText(true);
-        editorPane.requestLayout();
-        editorPane.layout();
         editorPane.applyCss();
-        // TODO: recalculate scopes to match width, either by
-        //  - copying existing character indent levels, then redrawing
-        //  - adjusting existing scopes by difference in widths from window to paper
-        //doc.enableParser(true);
-        //doc.getParser();
-        //doc.recalculateAllScopes();
+        // Make sure the scroll bars in the editor are invisible when printing:
+        for (Node node : editorPane.lookupAll(".scroll-bar"))
+        {
+            node.setVisible(false);
+            node.setManaged(false);
+        }
+        rootPane.requestLayout();
+        rootPane.layout();
+        rootPane.applyCss();
         if (!printBackground)
         {
             // Remove styles:
@@ -1645,24 +1614,61 @@ public final class MoeEditor extends ScopeColorsBorderPane
             {
                 doc.getDocument().setParagraphStyle(i, null);
             }
+
+        }
+        else
+        {
+            // We have to reparse and recalculate scopes
+
+            // We must mark document as shown or else parsing terminates early:
+            doc.notYetShown = false;
+            doc.enableParser(true);
+            doc.getParser();
+            doc.recalculateAllScopes();
         }
         VirtualFlow<?, ?> virtualFlow = (VirtualFlow<?, ?>) editorPane.lookup(".virtual-flow");
+        FXConsumer<Integer> updatePageNumber = n -> {
+            pageNumberLabel.setText("Page " + n);
+            rootPane.requestLayout();
+            rootPane.layout();
+            rootPane.applyCss();
+        };
         // Run printing in another thread:
-        return () -> printPages(printerJob, editorPane, virtualFlow);
+        return () -> printPages(printerJob, rootPane, updatePageNumber, editorPane, virtualFlow);
     }
 
+    /**
+     * Prints the editor, using multiple pages if necessary
+     *
+     * @param printerJob The overall printer job
+     * @param printNode The node to print, each page.  This may just be the
+     *                  editor pane, or it may be a wrapper around the editor
+     *                  pane that also shows a header and/or footer.
+     * @param updatePageNumber A callback to update the header/footer each time
+     *                         the page number changes.  Cannot be null.
+     * @param editorPane The editor pane to print
+     * @param virtualFlow The virtual flow inside the editor pane.
+     * @param <T> Parameter type of the VirtualFlow.  Will be inferred.
+     * @param <C> Parameter type of the VirtualFlow.  Will be inferred.
+     */
     @OnThread(Tag.FX)
-    public static <T, C extends org.fxmisc.flowless.Cell<T, ?>> void printPages(PrinterJob printerJob, GenericStyledArea<?, ?, ?> editorPane, VirtualFlow<T, C> virtualFlow)
+    public static <T, C extends org.fxmisc.flowless.Cell<T, ?>> void printPages(PrinterJob printerJob,
+        Node printNode, FXConsumer<Integer> updatePageNumber,
+        GenericStyledArea<?, ?, ?> editorPane, VirtualFlow<T, C> virtualFlow)
     {
         virtualFlow.scrollXToPixel(0);
         // We must manually scroll down the editor, one page's worth at a time.  We keep track of the top line visible:
         int topLine = 0;
         boolean lastPage = false;
         int editorLines = editorPane.getParagraphs().size();
+        int pageNumber = 1;
         while (topLine < editorLines && !lastPage)
         {
             // Scroll to make topLine actually at the top:
             virtualFlow.showAsFirst(topLine);
+            virtualFlow.requestLayout();
+            virtualFlow.layout();
+            virtualFlow.applyCss();
 
             // Take a copy to avoid any update problems:
             List<C> visibleCells = new ArrayList<>(virtualFlow.visibleCells());
@@ -1696,10 +1702,28 @@ public final class MoeEditor extends ScopeColorsBorderPane
                 // up to the top.  (The editor pane won't show empty space beyond the bottom, so we cannot
                 // scroll as far as we would like.  Instead, we have the bottom of the content at the bottom
                 // of the window, and use translateY to do a fake scroll to move it up to the top of the page.)
-                editorPane.setClip(null);
+                editorPane.setClip(new javafx.scene.shape.Rectangle(editorPane.getWidth(), editorPane.getHeight()));
                 editorPane.setTranslateY(-virtualFlow.cellToViewport(virtualFlow.getCell(topLine), 0, 0).getY());
             }
-            printerJob.printPage(editorPane);
+            updatePageNumber.accept(pageNumber);
+            // NCCB: I have investigated the printing bug seen in 4.1.2rc2 for
+            // a long time, but my best guess is that the bug is not in our code.
+            // The way it now manifests, with the page cut off at an arbitrary
+            // point halfway through a line, just doesn't seem like it can be
+            // the fault of our code or RichTextFX (having seen it occur with the
+            // clip above disabled).  Putting a Thread.sleep here seems to avoid
+            // the problem, which I think suggests it may be a race hazard in the
+            // JDK which uses threading for JavaFX printing.  Not nice, but it
+            // does seem to fix the issue:
+            try
+            {
+                Thread.sleep(1000);
+            }
+            catch (InterruptedException e)
+            {
+            }
+            printerJob.printPage(printNode);
+            pageNumber += 1;
         }
     }
 
@@ -1720,7 +1744,7 @@ public final class MoeEditor extends ScopeColorsBorderPane
         }
         else if (job.showPrintDialog(getWindow()))
         {
-            FXRunnable printAction = printTo(job, choices.get().printLineNumbers, choices.get().printHighlighting);
+            FXRunnable printAction = printTo(job, choices.get().printSize, choices.get().printLineNumbers, choices.get().printHighlighting);
             new Thread()
             {
                 @Override
@@ -1747,7 +1771,6 @@ public final class MoeEditor extends ScopeColorsBorderPane
             watcher.closeEvent(this);
         }
     }
-    // --------------------------------------------------------------------
 
     // --------------------------------------------------------------------
     
@@ -2143,7 +2166,6 @@ public final class MoeEditor extends ScopeColorsBorderPane
      */
     private void refreshHtmlDisplay()
     {
-        FileInputStream fis = null;
         try {
             File urlFile = new File(getDocPath());
 
@@ -2184,12 +2206,6 @@ public final class MoeEditor extends ScopeColorsBorderPane
         catch (IOException exc) {
             info.message (Config.getString("editor.info.docDisappeared"), getDocPath());
             Debug.reportError("loading class interface failed: " + exc);
-            if (fis != null) {
-                try {
-                    fis.close();
-                }
-                catch (Exception e) {}
-            }
         }
     }
 
@@ -2297,8 +2313,6 @@ public final class MoeEditor extends ScopeColorsBorderPane
 
     // --------------------------------------------------------------------
 
-    // --------------------------------------------------------------------
-
     /**
      * Implementation of "toggle-breakpoint" user function.
      */
@@ -2310,8 +2324,6 @@ public final class MoeEditor extends ScopeColorsBorderPane
         }
         toggleBreakpoint(sourcePane.getCaretPosition());
     }
-
-    // ========================= SUPPORT ROUTINES ==========================
 
     // --------------------------------------------------------------------
 
@@ -2501,9 +2513,7 @@ public final class MoeEditor extends ScopeColorsBorderPane
             setSaved();  // notify watcher that we are saved
             
             scheduleReparseRunner();
-            if (watcher != null) {
-                watcher.scheduleCompilation(false, CompileReason.LOADED, CompileType.ERROR_CHECK_ONLY);
-            }
+            scheduleCompilation(CompileReason.LOADED, CompileType.ERROR_CHECK_ONLY);
         }
         catch (FileNotFoundException ex) {
             info.message (Config.getString("editor.info.fileDisappeared"));
@@ -2546,8 +2556,7 @@ public final class MoeEditor extends ScopeColorsBorderPane
     }
 
     /**
-     * Toggle the editor's 'compiled' status. If compiled, setEnabled the breakpoint
- function.
+     * Toggle the editor's 'compiled' status. If compiled, setEnabled the breakpoint function.
      */
     private void setCompileStatus(boolean compiled)
     {
@@ -2631,23 +2640,23 @@ public final class MoeEditor extends ScopeColorsBorderPane
     @OnThread(Tag.FXPlatform)
     public void cancelFreshState()
     {
-        if (madeChangeOnCurrentLine)
+        if (sourceIsCode && saveState.isChanged())
         {
-            if (!sourceIsCode)
+            scheduleCompilation(CompileReason.MODIFIED, CompileType.ERROR_CHECK_ONLY);
+        }
+        
+        if (! saveState.isSaved())
+        {
+            try
             {
-                try
-                {
-                    save();
-                }
-                catch (IOException e)
-                {
-                    Debug.reportError(e);
-                }
+                save();
             }
-            else if (watcher != null) {
-                watcher.scheduleCompilation(true, CompileReason.MODIFIED, CompileType.ERROR_CHECK_ONLY);
+            catch (IOException e)
+            {
+                // TODO this should issue a user-visible error, may need to
+                // propagate exception.
+                Debug.reportError(e);
             }
-            madeChangeOnCurrentLine = false;
         }
     }
 
@@ -2773,10 +2782,6 @@ public final class MoeEditor extends ScopeColorsBorderPane
         }
     }
 
-
-
-    // ======================= WINDOW INITIALISATION =======================
-
     /**
      * Returns the position of the matching bracket for the source pane's
      * current caret position. Returns -1 if not found or not valid/appropriate
@@ -2811,6 +2816,7 @@ public final class MoeEditor extends ScopeColorsBorderPane
      */
     private void doBracketMatch()
     {
+        int originalPos = getSourcePane().getCaretPosition();
         int matchBracket = getBracketMatch();
 
         // This is a kludge.  Changing the style causes the node to be swapped out, which causes issues with mouse dragging
@@ -2821,9 +2827,11 @@ public final class MoeEditor extends ScopeColorsBorderPane
         {
             // remove existing bracket if needed
             removeBracketHighlight();
-            if(matchBracket != -1)
+            // Only highlight if we found a match, and the cursor hasn't moved since
+            // we started the run later:
+            if (matchBracket != -1 && originalPos > 0 && originalPos == getSourcePane().getCaretPosition())
             {
-                sourceDocument.addStyle(getSourcePane().getCaretPosition() - 1, getSourcePane().getCaretPosition(), MoeSyntaxDocument.MOE_BRACKET_HIGHLIGHT);
+                sourceDocument.addStyle(originalPos - 1, originalPos, MoeSyntaxDocument.MOE_BRACKET_HIGHLIGHT);
                 sourceDocument.addStyle(matchBracket, matchBracket + 1, MoeSyntaxDocument.MOE_BRACKET_HIGHLIGHT);
             }
         });
@@ -2880,7 +2888,6 @@ public final class MoeEditor extends ScopeColorsBorderPane
      */
     private void initWindow(EntityResolver projectResolver)
     {
-        
         // prepare the content pane (us)
 
         // create and add info and status areas
@@ -2998,8 +3005,6 @@ public final class MoeEditor extends ScopeColorsBorderPane
         sourcePane.setContextMenu(createPopupMenu());
     }
 
-
-
     // --------------------------------------------------------------------
 
     /**
@@ -3014,8 +3019,6 @@ public final class MoeEditor extends ScopeColorsBorderPane
             createMenu("option", "increase-font decrease-font reset-font - key-bindings preferences")
         );
     }
-
-
 
     // --------------------------------------------------------------------
 
@@ -3156,6 +3159,8 @@ public final class MoeEditor extends ScopeColorsBorderPane
 
         button.prefHeightProperty().bind(buttonHeight);
         button.setMaxHeight(Double.MAX_VALUE);
+
+        button.getStyleClass().add("toolbar-" + key + "-button");
 
         return button;
     }
@@ -3360,7 +3365,17 @@ public final class MoeEditor extends ScopeColorsBorderPane
                             sourcePane.deleteNextChar();
                             break;
                     }
-                    return Response.CONTINUE;
+                    // If they delete to before the original position then
+                    // not only does it make sense to dismiss, but in fact
+                    // we must dismiss or we will encounter an exception:
+                    if (sourcePane.getCaretPosition() < originalPosition)
+                    {
+                        return Response.DISMISS;
+                    }
+                    else
+                    {
+                        return Response.CONTINUE;
+                    }
                 }
 
                 @Override
@@ -3646,7 +3661,7 @@ public final class MoeEditor extends ScopeColorsBorderPane
     @Override
     public boolean compileStarted(int compilationSequence)
     {
-        madeChangeOnCurrentLine = false;
+        compilationStarted = true;
         errorManager.removeAllErrorHighlights();
         return false;
     }
@@ -3666,9 +3681,9 @@ public final class MoeEditor extends ScopeColorsBorderPane
     public void compileOrShowNextError()
     {
         if (watcher != null) {
-            if (madeChangeOnCurrentLine || !errorManager.hasErrorHighlights())
+            if (saveState.isChanged() || !errorManager.hasErrorHighlights())
             {
-                if (!madeChangeOnCurrentLine)
+                if (! saveState.isChanged())
                 {
                     if (PrefMgr.getFlag(PrefMgr.ACCESSIBILITY_SUPPORT))
                     {
@@ -3676,8 +3691,7 @@ public final class MoeEditor extends ScopeColorsBorderPane
                         DialogManager.showTextWithCopyButtonFX(getWindow(), Config.getString("pkgmgr.accessibility.compileDone"), "BlueJ");
                     }
                 }
-                watcher.scheduleCompilation(true, CompileReason.USER, CompileType.EXPLICIT_USER_COMPILE);
-                madeChangeOnCurrentLine = false;
+                scheduleCompilation(CompileReason.USER, CompileType.EXPLICIT_USER_COMPILE);
             }
             else
             {
@@ -3697,16 +3711,25 @@ public final class MoeEditor extends ScopeColorsBorderPane
         }
     }
 
+    /**
+     * Notify this editor that it has gained focus, either because its tab was selected or it is the
+     * currently selected tab in a window that gained focus, or it has lost focus for the opposite
+     * reasons.
+     * 
+     * @param visible   true if the editor has focus, false otherwise
+     */
     public void notifyVisibleTab(boolean visible)
     {
-        if (!visible)
+        if (visible) {
+            if (watcher != null) {
+                watcher.recordSelected();
+            }
+            checkForChangeOnDisk();
+        }
+        else
         {
             // Hide any error tooltip:
             showErrorOverlay(null, 0);
-        }
-
-        if (visible && watcher != null) {
-            watcher.recordSelected();
         }
     }
 
@@ -3731,9 +3754,9 @@ public final class MoeEditor extends ScopeColorsBorderPane
             }
 
             // If we are closing, force a compilation in case there are pending changes:
-            if (parent == null && madeChangeOnCurrentLine)
+            if (parent == null && saveState.isChanged())
             {
-                watcher.scheduleCompilation(false, CompileReason.MODIFIED, CompileType.ERROR_CHECK_ONLY);
+                scheduleCompilation(CompileReason.MODIFIED, CompileType.ERROR_CHECK_ONLY);
             }
         }
         
@@ -3758,12 +3781,10 @@ public final class MoeEditor extends ScopeColorsBorderPane
         return watcher;
     }
 
-    @OnThread(Tag.Any)
+    @OnThread(Tag.FXPlatform)
     public void requestEditorFocus()
     {
-        Platform.runLater(() ->
-            sourcePane.requestFocus()
-        );
+        sourcePane.requestFocus();
     }
 
     @Override
@@ -3984,25 +4005,21 @@ public final class MoeEditor extends ScopeColorsBorderPane
         return fxTabbedEditor.getWindow();
     }
 
-    
     private static class ErrorDisplay
     {
         @OnThread(Tag.Swing)
         private final ErrorDetails details;
         private PopupControl popup;
 
-        
         public ErrorDisplay(ErrorDetails details)
         {
             this.details = details;
-
         }
 
         @OnThread(Tag.FXPlatform)
         public void createPopup()
         {
             this.popup = new PopupControl();
-
 
             Text text = new Text(ParserMessageHandler.getMessageForCode(details.message));
             TextFlow flow = new TextFlow(text);

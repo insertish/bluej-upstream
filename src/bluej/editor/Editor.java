@@ -28,6 +28,7 @@ import java.util.function.Consumer;
 import bluej.compiler.CompileType;
 import bluej.compiler.Diagnostic;
 import bluej.debugger.DebuggerThread;
+import bluej.editor.moe.PrintDialog.PrintSize;
 import bluej.editor.stride.FrameEditor;
 import bluej.parser.symtab.ClassInfo;
 import bluej.stride.framedjava.elements.CallElement;
@@ -156,6 +157,12 @@ public interface Editor
     void changeName(String title, String filename, String javaFilename, String docFileName);
 
     /**
+     * Notify that a dependency of this class has changed, and re-compilation
+     * is necessary for updated diagnostics.
+     */
+    void dependencyChanged();
+    
+    /**
      * Set the "compiled" status
      * 
      * @param compiled    true if the class has been compiled
@@ -204,7 +211,7 @@ public interface Editor
      * Returns an action which will print the contents of the editor
      */
     @OnThread(Tag.FXPlatform)
-    FXRunnable printTo(PrinterJob printerJob, boolean printLineNumbers, boolean printBackground);
+    FXRunnable printTo(PrinterJob printerJob, PrintSize printSize, boolean printLineNumbers, boolean printBackground);
 
     /**
      * Set the 'read-only' property of this editor.

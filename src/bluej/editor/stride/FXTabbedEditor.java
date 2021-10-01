@@ -34,7 +34,6 @@ import bluej.stride.generic.FrameCursor;
 import bluej.stride.generic.InteractionManager;
 import bluej.utility.Debug;
 import bluej.utility.Utility;
-import bluej.utility.javafx.FXConsumer;
 import bluej.utility.javafx.FXPlatformConsumer;
 import bluej.utility.javafx.FXPlatformRunnable;
 import bluej.utility.javafx.FXSupplier;
@@ -318,16 +317,6 @@ public @OnThread(Tag.FX) class FXTabbedEditor
                 ((FXTab)tabPane.getSelectionModel().getSelectedItem()).notifyUnselected();
         });
 
-        JavaFXUtil.addChangeListenerPlatform(tabPane.focusedProperty(), focused -> {
-            // Very specific work around for Moe editor inside JavaFX SwingNode on Linux:
-            // Must make sure focus doesn't remain in the tab header area.
-            if (focused)
-            {
-                FXTab tab = (FXTab)tabPane.getSelectionModel().getSelectedItem();
-                tab.focusWhenShown();
-            }
-        });
-        
         // Add shortcuts for Ctrl-1, Ctrl-2 etc and Ctrl-Tab and Ctrl-Shift-Tab to move between tabs
         // On Mac, it should still be Ctrl-Tab (not Cmd-Tab), but should it be Cmd-1?
         tabPane.addEventFilter(KeyEvent.KEY_PRESSED, e -> {
@@ -613,6 +602,20 @@ public @OnThread(Tag.FX) class FXTabbedEditor
     @OnThread(Tag.FXPlatform)
     public void openWebViewTab(String url)
     {
+        openWebViewTab(url, false);
+    }
+
+    /**
+     * Opens a web view tab to display the given URL.
+     *
+     * If a web view tab already exists which is displaying that URL (sans anchors),
+     * that tab is displayed and a new tab is not opened.
+     *
+     * @param isTutorial True if this is a special web tab containing the interactive tutorial
+     */
+    @OnThread(Tag.FXPlatform)
+    public void openWebViewTab(String url, boolean isTutorial)
+    {
         // First, check if any tab is already showing that URL:
         try
         {
@@ -637,7 +640,7 @@ public @OnThread(Tag.FX) class FXTabbedEditor
             Debug.reportError("Error in URI when opening web view tab: \"" + url + "\"");
         }
 
-        addTab(new WebTab(url), true, true);
+        addTab(new WebTab(url, isTutorial), true, true);
     }
 
     /**
@@ -947,6 +950,14 @@ public @OnThread(Tag.FX) class FXTabbedEditor
     public void cleanup()
     {
         shelf.cleanup();
+    }
+
+    /**
+     * Does one of the tabs in this window contain a tutorial web view tab?
+     */
+    public boolean hasTutorial()
+    {
+        return tabPane.getTabs().stream().anyMatch(t -> t instanceof FXTab && ((FXTab)t).isTutorial());
     }
 
     public static enum CodeCompletionState

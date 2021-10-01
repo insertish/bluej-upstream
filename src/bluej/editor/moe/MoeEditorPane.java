@@ -28,6 +28,7 @@ import java.io.Writer;
 import java.util.BitSet;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import bluej.editor.moe.PrintDialog.PrintSize;
 import org.fxmisc.flowless.Cell;
 import org.fxmisc.flowless.VirtualFlow;
 import org.fxmisc.richtext.StyledTextArea;
@@ -136,7 +137,7 @@ public final class MoeEditorPane extends StyledTextArea<ScopeInfo, ImmutableSet<
                     compiled -> JavaFXUtil.setPseudoclass("bj-uncompiled", !compiled, this));
         }
         syntaxView.setEditorPane(this);
-        setPrinting(false, true);
+        setPrinting(false, null, false);
 
         JavaFXUtil.addChangeListenerPlatform(PrefMgr.getEditorFontSize(), sz -> {
             JavaFXUtil.runPlatformLater(() -> requestLayout());
@@ -147,6 +148,12 @@ public final class MoeEditorPane extends StyledTextArea<ScopeInfo, ImmutableSet<
         setupRedrawListener(virtualFlow);
     }
 
+    /**
+     * Set up a listener to calculate scope backgrounds for newly visible lines,
+     * and schedule them to be painted if necessary.
+     * 
+     * @param virtualFlow  the virtual flow to listen to.
+     */
     private <T,C extends Cell<T,?>> void setupRedrawListener(VirtualFlow<T,C> virtualFlow)
     {
         virtualFlow.visibleCells().addListener((ListChangeListener<? super C>) c -> {
@@ -176,19 +183,43 @@ public final class MoeEditorPane extends StyledTextArea<ScopeInfo, ImmutableSet<
                     if (earliestIncomplete != -1)
                     {
                         editor.getSourceDocument().recalculateScopesForLinesInRange(earliestIncomplete, latestIncomplete);
-                        // Must call this to apply pending scope backgrounds:
-                        editor.getSourceDocument().flushReparseQueue();
+                        editor.getSourceDocument().applyPendingScopeBackgrounds();
                     }
                 });
             }
         });
     }
 
-    public void setPrinting(boolean printing, boolean showLineNumbers)
+    /**
+     * Sets the printing state on/off for this editor pane.  We adjust various style bits when
+     * printing, compared to when we are on-screen.
+     *
+     * @param printing Are we printing?  If false, the other parameters are ignored.
+     * @param printSize The size of font to print
+     * @param showLineNumbers Whether to print line numbers
+     */
+    public void setPrinting(boolean printing, PrintSize printSize, boolean showLineNumbers)
     {
         JavaFXUtil.selectPseudoClass(this, printing ? 1 : 0, "bj-screen", "bj-printing");
         if (printing)
         {
+            styleProperty().unbind();
+            // These sizes are picked by hand.  They are small because the Roboto Mono font
+            String fontSize = "9pt";
+            switch (printSize)
+            {
+                case SMALL:
+                    fontSize = "7pt";
+                    break;
+                case STANDARD:
+                    fontSize = "9pt";
+                    break;
+                case LARGE:
+                    fontSize = "12pt";
+                    break;
+            }
+            setStyle("-fx-font-size: " + fontSize + ";" + PrefMgr.getEditorFontFamilyCSS());
+
             this.showLineNumbers.unbind();
             this.showLineNumbers.set(showLineNumbers);
         }

@@ -49,7 +49,7 @@
         <include name="lib/moe.defs" />
         <include name="lib/userlib/README.TXT" />
         <include name="lib/jsch-0.1.53.jar"/>
-        <include name="lib/org.eclipse.jgit-4.1.0.jar"/>
+        <include name="lib/org.eclipse.jgit-4.9.0.jar"/>
         <include name="lib/slf4j-api-1.7.2.jar"/>
         <include name="lib/slf4j-jdk14-1.7.2.jar"/>
         <include name="lib/nsmenufx-2.1.4.jar"/>
@@ -90,6 +90,7 @@
         <include name="lib/swedish/" />
         <include name="lib/extensions/" />
         <include name="lib/stylesheets/" />
+        <include name="lib/tutorial/" />
     	<exclude name="lib/*/greenfoot-labels" />
     	<exclude name="lib/*/greenfootAPI" />
     </patternset>
@@ -159,10 +160,10 @@
         <!-- make sure the people .class files are dated in the future so they
              will appear to be compiled -->
          <tstamp>
-            <format property="touch.time" pattern="MM/dd/yyyy hh:mm aa" offset="5" unit="year"/>
+            <format property="touch.time" pattern="dd/MM/yyyy hh:mm aa" offset="5" unit="year"/>
         </tstamp>
 
-        <touch datetime="${touch.time}">
+        <touch datetime="${touch.time}" pattern="dd/MM/yyyy hh:mm aa">
             <fileset dir="install_tmp" >
                 <patternset refid="bluej.examples.classes"/>
             </fileset>
