@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2012,2013,2014,2016,2018  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2012,2013,2014,2016,2018,2019  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -21,7 +21,19 @@
  */
 package bluej.extmgr;
 
-import java.awt.Graphics2D;
+import bluej.Config;
+import bluej.extensions2.BlueJ;
+import bluej.extensions2.Extension;
+import bluej.extensions2.ExtensionBridge;
+import bluej.extensions2.PreferenceGenerator;
+import bluej.extensions2.event.ExtensionEvent;
+import bluej.pkgmgr.Project;
+import bluej.utility.Debug;
+import javafx.scene.control.MenuItem;
+import javafx.scene.layout.Pane;
+import threadchecker.OnThread;
+import threadchecker.Tag;
+
 import java.io.File;
 import java.io.InputStream;
 import java.net.URL;
@@ -30,23 +42,6 @@ import java.util.Properties;
 import java.util.jar.Attributes;
 import java.util.jar.JarFile;
 import java.util.jar.Manifest;
-
-import javax.swing.JMenuItem;
-import javax.swing.JPanel;
-
-import threadchecker.OnThread;
-import threadchecker.Tag;
-import bluej.Config;
-import bluej.extensions.BClassTarget;
-import bluej.extensions.BlueJ;
-import bluej.extensions.Extension;
-import bluej.extensions.ExtensionBridge;
-import bluej.extensions.PreferenceGenerator;
-import bluej.extensions.event.ExtensionEvent;
-import bluej.extensions.painter.ExtensionClassTargetPainter;
-import bluej.pkgmgr.Project;
-import bluej.pkgmgr.Layer;
-import bluej.utility.Debug;
 
 /**
  * This is the wrapper for an extension. Its duties are: 
@@ -192,7 +187,7 @@ public class ExtensionWrapper
      * ALREADY UP and running. I do not return a value, you may check
      * how this went by using the isValid() method...
      *
-     * @param  project  The project this extension is linked to, null if none
+     * @param  aProject  The project this extension is linked to, null if none
      */
     void newExtension(Project aProject)
     {
@@ -421,7 +416,7 @@ public class ExtensionWrapper
         try {
             ExtensionBridge.delegateEvent(extensionBluej,event);
         }
-        catch (Exception exc)  {
+        catch (Throwable exc)  {
             Debug.message("ExtensionWrapper.safeEventOccurred: Class="+getExtensionClassName()+" Exception="+exc.getMessage());
             exc.printStackTrace();
             return;
@@ -441,7 +436,7 @@ public class ExtensionWrapper
         try {
             return extensionInstance.getDescription();
         }
-        catch (Exception exc)  {
+        catch (Throwable exc)  {
             Debug.message("ExtensionWrapper.safeGetExtensionDescription: Class="+getExtensionClassName()+" Exception="+exc.getMessage());
             exc.printStackTrace();
             return null;
@@ -460,7 +455,7 @@ public class ExtensionWrapper
         try {
             return extensionInstance.getName();
         }
-        catch (Exception exc) {
+        catch (Throwable exc) {
             Debug.message("ExtensionWrapper.safeGetExtensionName: Class="+getExtensionClassName()+" Exception="+exc.getMessage());
             exc.printStackTrace();
             return "";
@@ -481,7 +476,7 @@ public class ExtensionWrapper
         try {
             return extensionInstance.getURL();
         }
-        catch (Exception exc) {
+        catch (Throwable exc) {
             Debug.message("ExtensionWrapper.safeGetURL: Class="+getExtensionClassName()+" Exception="+exc.getMessage());
             exc.printStackTrace();
             return null;
@@ -502,7 +497,7 @@ public class ExtensionWrapper
         try {
           return extensionInstance.getVersion();
         }
-        catch (Exception exc) {
+        catch (Throwable exc) {
             Debug.message("ExtensionWrapper.safeGetExtensionVersion: Class="+getExtensionClassName()+" Exception="+exc.getMessage());
             exc.printStackTrace();
             return null;
@@ -523,7 +518,7 @@ public class ExtensionWrapper
         try {
             return extensionInstance.isCompatible();
         }
-        catch (Exception exc) {
+        catch (Throwable exc) {
             Debug.message("ExtensionWrapper.safeIsCompatible: Class="+getExtensionClassName()+" Exception="+exc.getMessage());
             exc.printStackTrace();
             // If one bombs at me it shurely is not compatilbe 
@@ -544,7 +539,7 @@ public class ExtensionWrapper
         try {
             extensionInstance.startup(bluejProxy);
         }
-        catch (Exception exc)  {
+        catch (Throwable exc)  {
             Debug.message("ExtensionWrapper.safeStartup: Class="+getExtensionClassName()+" Exception="+exc.getMessage());
             exc.printStackTrace();
         }
@@ -564,7 +559,7 @@ public class ExtensionWrapper
             // Give a chance to extension to clear up after itself.
             extensionInstance.terminate();
         }
-        catch (Exception exc) {
+        catch (Throwable exc) {
             Debug.message("ExtensionWrapper.safeTerminate: Class="+getExtensionClassName()+" Exception="+exc.getMessage());
             exc.printStackTrace();
         }
@@ -589,7 +584,7 @@ public class ExtensionWrapper
         try {
             aPrefGen.loadValues();
         }
-        catch (Exception exc) {
+        catch (Throwable exc) {
             Debug.message("ExtensionWrapper.safePrefGenLoadValues: Class="+getExtensionClassName()+" Exception="+exc.getMessage());
             exc.printStackTrace();
         }
@@ -612,7 +607,7 @@ public class ExtensionWrapper
         try {
             aPrefGen.saveValues();
         }
-        catch (Exception exc) {
+        catch (Throwable exc) {
             Debug.message("ExtensionWrapper.safePrefGenSaveValues: Class="+getExtensionClassName()+" Exception="+exc.getMessage());
             exc.printStackTrace();
         }
@@ -620,9 +615,9 @@ public class ExtensionWrapper
 
     
     /**
-     *  Calls the EXTENSION preference panel getPanel in a sfe way
+     *  Calls the EXTENSION preference Pane getWindow in a safe way
      */
-    public JPanel safePrefGenGetPanel()
+    public Pane safePrefGenGetWindow()
     {
         if (extensionBluej == null) 
             return null;
@@ -633,10 +628,10 @@ public class ExtensionWrapper
             return null;
 
         try {
-            return aPrefGen.getPanel();
+            return aPrefGen.getWindow();
         }
-        catch (Exception exc) {
-            Debug.message("ExtensionWrapper.safePrefGenGetPanel: Class="+getExtensionClassName()+" Exception="+exc.getMessage());
+        catch (Throwable exc) {
+            Debug.message("ExtensionWrapper.safePrefGenGetWindow: Class="+getExtensionClassName()+" Exception="+exc.getMessage());
             exc.printStackTrace();
             return null;
         }
@@ -646,7 +641,7 @@ public class ExtensionWrapper
     /**
      *  Calls the EXTENSION getMenuItem in a safe way
      */
-    public JMenuItem safeGetMenuItem(ExtensionMenu attachedObject)
+    public MenuItem safeGetMenuItem(ExtensionMenu attachedObject)
     {
         if (extensionBluej == null) 
             return null;
@@ -654,7 +649,7 @@ public class ExtensionWrapper
         try {
             return ExtensionBridge.getMenuItem(extensionBluej, attachedObject);
         }
-        catch (Exception exc) {
+        catch (Throwable exc) {
             Debug.message("ExtensionWrapper.safeMenuGenGetMenuItem: Class="+getExtensionClassName()+" Exception="+exc.getMessage());
             exc.printStackTrace();
             return null;
@@ -664,7 +659,7 @@ public class ExtensionWrapper
     /**
      *  Calls the EXTENSION postMenuItem in a safe way
      */
-    public void safePostMenuItem(ExtensionMenu attachedObject, JMenuItem onThisItem)
+    public void safePostMenuItem(ExtensionMenu attachedObject, MenuItem onThisItem)
     {
         if (extensionBluej == null) 
             return;
@@ -672,39 +667,8 @@ public class ExtensionWrapper
         try {
             ExtensionBridge.postMenuItem(extensionBluej, attachedObject, onThisItem );
         }
-        catch (Exception exc) {
+        catch (Throwable exc) {
             Debug.message("ExtensionWrapper.safePostGenGetMenuItem: Class="+getExtensionClassName()+" Exception="+exc.getMessage());
-            exc.printStackTrace();
-        }
-    }
-
-    /**
-     * Calls the extension drawExtensionClassTarget in a safe way.
-     * 
-     * @param layer
-     *            The layer of the drawing which causes the different methods of
-     *            the {@link ExtensionClassTargetPainter} instance to be called.
-     * @param bClassTarget
-     *            The class target that will be painted.
-     * @param graphics
-     *            The {@link Graphics2D} instance to draw on.
-     * @param width
-     *            The width of the area to paint.
-     * @param height
-     *            The height of the area to paint.
-     */
-    public void safeDrawExtensionClassTarget(Layer layer, BClassTarget bClassTarget,
-            Graphics2D graphics, int width, int height)
-    {
-        if (extensionBluej == null) { 
-            return;
-        }
-        
-        try {
-            ExtensionBridge.drawExtensionClassTarget(extensionBluej, layer, bClassTarget, graphics,
-                width, height);
-        } catch (Exception exc) {
-            Debug.message("ExtensionWrapper.safeDrawExtensionClassTarget: Class="+getExtensionClassName()+" Exception="+exc.getMessage());
             exc.printStackTrace();
         }
     }

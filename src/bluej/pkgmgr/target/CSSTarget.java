@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 2017,2018  Michael Kolling and John Rosenberg
+ Copyright (C) 2017,2018,2019,2020  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -22,19 +22,22 @@
 package bluej.pkgmgr.target;
 
 import java.io.File;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Properties;
 
+import bluej.editor.flow.FlowEditor;
+import bluej.pkgmgr.target.actions.EditAction;
+import bluej.pkgmgr.target.actions.RemoveAction;
+import bluej.utility.javafx.AbstractOperation;
+import javafx.beans.property.ReadOnlyBooleanWrapper;
 import javafx.geometry.Pos;
-import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
-import javafx.scene.control.MenuItem;
 import javafx.scene.layout.BorderPane;
 
 import bluej.Config;
 import bluej.editor.Editor;
-import bluej.editor.EditorManager;
 import bluej.pkgmgr.Package;
-import bluej.pkgmgr.PackageEditor;
 import bluej.utility.javafx.JavaFXUtil;
 import threadchecker.OnThread;
 import threadchecker.Tag;
@@ -52,7 +55,7 @@ public class CSSTarget extends NonCodeEditableTarget
 
     public CSSTarget(Package aPackage, File file)
     {
-        super(aPackage, file.getName());
+        super(aPackage, file.getName(), "" /* CSS already in name */);
         this.file = file;
 
         JavaFXUtil.addStyleClass(pane, "css-target");
@@ -76,42 +79,10 @@ public class CSSTarget extends NonCodeEditableTarget
         }
     }
 
-    /**
-     * Disply the context menu.
-     */
     @Override
-    @OnThread(Tag.FXPlatform)
-    public void popupMenu(int x, int y, PackageEditor graphEditor)
+    public List<? extends AbstractOperation<Target>> getContextOperations()
     {
-        ContextMenu menu = createMenu();
-        if (menu != null) {
-            showingMenu(menu);
-            menu.show(pane, x, y);
-        }
-    }
-
-    /**
-     * Construct a popup menu which displays all our parent packages.
-     */
-    @OnThread(Tag.FXPlatform)
-    private ContextMenu createMenu()
-    {
-        MenuItem open = new MenuItem(openStr);
-        open.setOnAction(e -> {
-            open();
-        });
-        JavaFXUtil.addStyleClass(open, "class-action-inbuilt");
-        ContextMenu contextMenu = new ContextMenu(open);
-
-        MenuItem remove = new MenuItem(removeStr);
-        remove.setOnAction(e ->
-        {
-            remove();
-        });
-        JavaFXUtil.addStyleClass(remove, "class-action-inbuilt");
-        contextMenu.getItems().add(remove);
-
-        return contextMenu;
+        return List.of(new EditAction(), new RemoveAction());
     }
 
     @Override
@@ -131,10 +102,18 @@ public class CSSTarget extends NonCodeEditableTarget
     public Editor getEditor()
     {
         if(editor == null) {
-            editor = EditorManager.getEditorManager().openText(
-                    getSourceFile().getPath(),
-                    getPackage().getProject().getProjectCharset(),
-                    getSourceFile().getName(), getPackage().getProject()::getDefaultFXTabbedEditor);
+            FlowEditor flowEditor = new FlowEditor(newWindow -> {
+                if (newWindow)
+                {
+                    return getPackage().getProject().createNewFXTabbedEditor();
+                }
+                else
+                {
+                    return getPackage().getProject().getDefaultFXTabbedEditor();
+                }
+            }, getSourceFile().getName(), this, null, null, () -> {}, new ReadOnlyBooleanWrapper(false), false);
+            flowEditor.showFile(file.getAbsolutePath(), StandardCharsets.UTF_8, false, null);
+            this.editor = flowEditor;
         }
         return editor;
     }

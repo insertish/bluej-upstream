@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2016  Michael Kolling and John Rosenberg
+ Copyright (C) 1999-2009,2010,2016,2019,2020  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -21,30 +21,23 @@
  */
 package bluej.extmgr;
 
-import javax.swing.*;
-
-import bluej.*;
+import bluej.Config;
 import bluej.utility.Utility;
 import bluej.utility.javafx.FXPlatformSupplier;
 import bluej.utility.javafx.JavaFXUtil;
-import threadchecker.OnThread;
-import threadchecker.Tag;
-
-import java.net.URL;
-import java.util.List;
 import javafx.application.Platform;
-import javafx.scene.Node;
-import javafx.scene.control.ButtonType;
-import javafx.scene.control.Dialog;
-import javafx.scene.control.Hyperlink;
-import javafx.scene.control.Label;
-import javafx.scene.control.ScrollPane;
-import javafx.scene.control.TitledPane;
+import javafx.scene.control.*;
 import javafx.scene.layout.VBox;
 import javafx.scene.text.Text;
 import javafx.scene.text.TextFlow;
 import javafx.stage.Modality;
 import javafx.stage.Window;
+import threadchecker.OnThread;
+import threadchecker.Tag;
+
+import javax.swing.*;
+import java.net.URL;
+import java.util.List;
 
 /**
  * The Extensions Manager help panel allows the user to view current extensions.
@@ -68,44 +61,47 @@ public class ExtensionsDialog
      * Setup the UI for the dialog and event handlers for the dialog's buttons.
      * This new version is guarantee to have a valid extension manager.
      */
-    @OnThread(Tag.Swing)
     ExtensionsDialog(List<ExtensionWrapper> extensionsList, FXPlatformSupplier<Window> parent)
     {
-        Platform.runLater(() -> {
-            mainFrame = new Dialog();
-            mainFrame.initOwner(parent.get());
-            mainFrame.setTitle(Config.getString("extmgr.title"));
-            mainFrame.initModality(Modality.WINDOW_MODAL);
-            mainFrame.setResizable(true);
+        mainFrame = new Dialog();
+        mainFrame.initOwner(parent.get());
+        mainFrame.setTitle(Config.getString("extmgr.title"));
+        mainFrame.initModality(Modality.WINDOW_MODAL);
+        mainFrame.setResizable(true);
 
-            extensionsVBox = new VBox();
-            extensionsVBox.setFillWidth(true);
-            extensionsVBox.setMinWidth(200.0);
-            JavaFXUtil.addStyleClass(extensionsVBox, "extension-list");
-            ScrollPane extensionsPane = new ScrollPane(extensionsVBox);
-            extensionsPane.setPrefHeight(300.0);
-            extensionsPane.setPrefWidth(500.0);
-            extensionsPane.setFitToWidth(true);
+        extensionsVBox = new VBox();
+        extensionsVBox.setFillWidth(true);
+        extensionsVBox.setMinWidth(200.0);
+        JavaFXUtil.addStyleClass(extensionsVBox, "extension-list");
+        ScrollPane extensionsPane = new ScrollPane(extensionsVBox);
+        extensionsPane.setPrefHeight(300.0);
+        extensionsPane.setPrefWidth(500.0);
+        extensionsPane.setFitToWidth(true);
 
-            Config.addDialogStylesheets(mainFrame.getDialogPane());
-            mainFrame.getDialogPane().setContent(extensionsPane);
-            mainFrame.getDialogPane().getButtonTypes().setAll(ButtonType.CLOSE);
-        });
-        
-        extensionsList.forEach(wrapper -> {
-            // We must get details on the Swing thread...
-            String extensionName = wrapper.safeGetExtensionName();
-            String extensionStatus = wrapper.getExtensionStatus();
-            String extensionVersion = wrapper.safeGetExtensionVersion();
-            String extensionDescription = wrapper.safeGetExtensionDescription();
-            boolean isProject = wrapper.getProject() != null;
-            String extensionFileName = wrapper.getExtensionFileName();
-            URL url = wrapper.safeGetURL();
-            // But create the TitledPane on the FX thread:
-            Platform.runLater(() -> 
-                extensionsVBox.getChildren().add(makeDisplay(extensionName, extensionStatus, extensionVersion, extensionDescription, isProject, extensionFileName, url))
-            );
-        });
+        Config.addDialogStylesheets(mainFrame.getDialogPane());
+        mainFrame.getDialogPane().setContent(extensionsPane);
+        mainFrame.getDialogPane().getButtonTypes().setAll(ButtonType.CLOSE);
+
+        // If no extension is installed, we show a message in the dialog.
+        if (extensionsList.size() == 0)
+        {
+            extensionsVBox.getChildren().add(new Text(Config.getString("extmgr.noExtensionInstalled")));
+        }
+        else
+        {
+            extensionsList.forEach(wrapper -> {
+                // We must get details on the Swing thread...
+                String extensionName = wrapper.safeGetExtensionName();
+                String extensionStatus = wrapper.getExtensionStatus();
+                String extensionVersion = wrapper.safeGetExtensionVersion();
+                String extensionDescription = wrapper.safeGetExtensionDescription();
+                boolean isProject = wrapper.getProject() != null;
+                String extensionFileName = wrapper.getExtensionFileName();
+                URL url = wrapper.safeGetURL();
+                // But create the TitledPane on the FX thread:
+                extensionsVBox.getChildren().add(makeDisplay(extensionName, extensionStatus, extensionVersion, extensionDescription, isProject, extensionFileName, url));
+            });
+        }
     }
     
     public void showAndWait()
@@ -113,7 +109,6 @@ public class ExtensionsDialog
         mainFrame.showAndWait();
     }
 
-    @OnThread(Tag.FXPlatform)
     private TitledPane makeDisplay(String extensionName, String extensionStatus, String extensionVersion, String extensionDescription, boolean isProject, String extensionFileName, URL url)
     {
         String typeShort = isProject ? projectString : systemString;

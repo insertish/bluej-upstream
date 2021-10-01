@@ -22,27 +22,20 @@
         <include name="lib/bluej.jar" />
         <include name="lib/bluejcore.jar" />
         <include name="lib/bluejeditor.jar" />
-        <include name="lib/bluejext.jar" />
+        <include name="lib/bluejext2.jar" />
         <include name="lib/lang-stride.jar" />
-        <include name="lib/junit-4.11.jar" />
+        <include name="lib/junit-*.jar" />
         <include name="lib/hamcrest-core-1.3.jar" />
+        <include name="lib/hamcrest-library-1.3.jar" />
         <include name="lib/sshconnection.jar" />
         <include name="lib/org-netbeans-lib-cvsclient.jar" />
         <include name="lib/jsch.jar" />
-        <include name="lib/svnkit.jar" />
-        <include name="lib/svnkit-javahl.jar" />
-        <include name="lib/jbcrypt-1.0.0.jar" />
-        <include name="lib/eddsa-0.2.0.jar" />
-        <include name="lib/trilead-ssh2-build-217-jenkins-11.jar" />
-        <include name="lib/antlr-runtime-3.4.jar"/>
-        <include name="lib/sequence-library-1.0.3.jar"/>
-        <include name="lib/sqljet-1.1.10.jar"/>
         <include name="lib/httpclient-4.1.1.jar" />
         <include name="lib/httpcore-4.1.jar" />
         <include name="lib/httpmime-4.1.1.jar" />
         <include name="lib/commons-logging-api-1.1.2.jar" />
         <include name="lib/diffutils-1.2.1.jar" />
-        <include name="lib/classgraph-4.2.6.jar" />
+        <include name="lib/classgraph-4.8.90.jar" />
         <include name="lib/guava-17.0.jar" />
         <include name="lib/xom-1.2.9.jar" />
         <include name="lib/bluej.defs" />
@@ -52,7 +45,7 @@
         <include name="lib/org.eclipse.jgit-4.9.0.jar"/>
         <include name="lib/slf4j-api-1.7.2.jar"/>
         <include name="lib/slf4j-jdk14-1.7.2.jar"/>
-        <include name="lib/nsmenufx-2.1.4.jar"/>
+        <include name="lib/nsmenufx-2.1.8.jar"/>
         <include name="lib/richtextfx-fat-0.9.0.jar"/>
         <include name="lib/windowtofront.js" />
     </patternset>
@@ -84,7 +77,7 @@
         <include name="lib/slovak/" />
         <include name="lib/spanish/" />
         <include name="lib/swedish/" />
-        <include name="lib/extensions/" />
+        <include name="lib/extensions2/" />
         <include name="lib/stylesheets/" />
         <include name="lib/tutorial/" />
         <exclude name="lib/*/greenfoot-labels" />
@@ -351,6 +344,13 @@
             <arg value="${basedir}/${dist.mac}" />
         </exec>
         <echo message="${bundleoutput}"/>
+        <chmod perm="+x" file="sign-mac.sh" />
+        <!-- Only works if you have Michael's key, otherwise get him to run this command -->
+        <exec executable="sign-mac.sh" resolveexecutable="true" outputproperty="signoutput">
+            <arg value="${basedir}/${dist.mac}" />
+            <arg value="Michael"/>
+        </exec>
+        <echo message="${signoutput}"/>
         
         <delete dir="mac_tmp" />
 
@@ -636,6 +636,119 @@
         <exec executable="dpkg-deb" searchpath="true">
             <arg value="-b" />
             <arg file="bluejdeb" />
+            <arg value="${dist.linux}-unbundled.deb" />
+        </exec>
+        
+        <delete dir="bluejdeb" />
+    </target>
+
+    <target name="debian-bundled-dist">
+        <mkdir dir="bluejdeb" />
+        <copy todir="bluejdeb">
+            <fileset dir="debianfiles-bundled" includes="DEBIAN/**" />
+        </copy>
+        <copy todir="bluejdeb" overwrite="true">
+            <fileset dir="debianfiles-bundled" includes="DEBIAN/**" />
+        </copy>
+        
+        <mkdir dir="bluejdeb/usr" />
+        <mkdir dir="bluejdeb/usr/bin" />
+        <copy todir="bluejdeb/usr/bin" file="debianfiles-bundled/bluej" />
+        <chmod perm="ugo+x" file="bluejdeb/usr/bin/bluej" verbose="true" />
+        
+        <!-- lib files -->
+        <mkdir dir="bluejdeb/usr/share/bluej" />
+        <mkdir dir="bluejdeb-lib-tmp" />
+        <copy todir="bluejdeb-lib-tmp">
+            <fileset dir="${bluej_home}">
+                <patternset refid="bluej.libdirs" />
+                <patternset refid="bluej.libfiles" />
+            </fileset>
+        </copy>
+        <mkdir dir="bluejdeb-lib-tmp/lib/javafx"/>
+        <copy todir="bluejdeb-lib-tmp/lib/javafx">
+            <fileset dir="${openjfx_path}"/>
+        </copy>
+        <move todir="bluejdeb/usr/share/bluej">
+            <fileset dir="bluejdeb-lib-tmp/lib">
+                <patternset includes="**" />
+            </fileset>
+        </move>
+        <delete dir="bluejdeb-lib-tmp" />
+
+        <mkdir dir="bluejdeb/usr/share/bluej/jdk" />
+        <!-- Need to preserve permissions, which requires cp instead of copy task: -->
+        <exec executable="cp">
+            <arg value="-r"/>
+            <arg value="${deb_bundled_jdk_path}/."/>
+            <arg value="bluejdeb/usr/share/bluej/jdk"/>
+        </exec>
+
+        
+        <!-- examples and documentation -->
+        <mkdir dir="bluej-examples-tmp" />
+        <copy todir="bluej-examples-tmp">
+            <fileset dir="${bluej_home}">
+                <patternset refid="bluej.examples" />
+            </fileset>
+        </copy>
+        <mkdir dir="bluejdeb/usr/share/doc/BlueJ" />
+        <move todir="bluejdeb/usr/share/doc/BlueJ">
+            <fileset dir="bluej-examples-tmp/examples">
+                <patternset includes="**" />
+            </fileset>
+        </move>
+        <delete dir="bluej-examples-tmp" />
+        <copy todir="bluejdeb/usr/share/doc/BlueJ" file="../doc/LICENSE.txt" />
+        <copy todir="bluejdeb/usr/share/doc/BlueJ" file="../doc/THIRDPARTYLICENSE.txt" />
+        <copy todir="bluejdeb/usr/share/doc/BlueJ" file="../doc/README.TXT" />
+
+        <!-- desktop app extras -->
+        <copy todir="bluejdeb/usr/share">
+            <fileset dir="debianfiles">
+                <patternset includes="applications/**,icons/**,pixmaps/**" />
+            </fileset>
+        </copy>
+
+        <!-- update version number -->
+        <replaceregexp byline="true">
+            <regexp pattern="VERSION" />
+            <substitution expression="${bluej.version.debian}" />
+            <fileset dir="bluejdeb/DEBIAN" includes="control" />
+        </replaceregexp>
+        
+        <!-- you must do this as root, sigh -->
+                <!-- (but we can also do it using fakeroot -->
+        <chown owner="root">
+            <fileset dir="bluejdeb">
+                <patternset includes="**" />
+            </fileset>
+            <dirset dir="bluejdeb">
+                <patternset includes="**" />
+            </dirset>            
+        </chown>
+        <chgrp group="root">
+            <fileset dir="bluejdeb">
+                <patternset includes="**" />
+            </fileset>
+            <dirset dir="bluejdeb">
+                <patternset includes="**" />
+            </dirset>            
+        </chgrp>
+                <chmod perm="g-w">
+            <fileset dir="bluejdeb">
+                <patternset includes="**" />
+            </fileset>
+            <dirset dir="bluejdeb">
+                <patternset includes="**" />
+            </dirset>            
+                </chmod>
+        
+        <chmod perm="755" file="bluejdeb/DEBIAN/postinst" />
+        <chmod perm="755" file="bluejdeb/DEBIAN/postrm" />
+        <exec executable="dpkg-deb" searchpath="true">
+            <arg value="-b" />
+            <arg file="bluejdeb" />
             <arg value="${dist.linux}.deb" />
         </exec>
         
@@ -667,7 +780,7 @@
                 <exclude name="lib/bluej.jar"/>
                 <exclude name="lib/bluejcore.jar"/>
                 <exclude name="lib/bluejeditor.jar"/>
-                <exclude name="lib/bluejext.jar"/>
+                <exclude name="lib/bluejext2.jar"/>
                 <exclude name="lib/lang-stride.jar"/>
                 <exclude name="lib/extensions/greenfoot.jar"/>
                 <exclude name="lib/greenfoot/"/>

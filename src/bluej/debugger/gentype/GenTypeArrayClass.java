@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2010,2019  Michael Kolling and John Rosenberg
+ Copyright (C) 1999-2010,2019,2020  Michael Kolling and John Rosenberg
 
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -20,6 +20,11 @@
  LICENSE.txt file that accompanied this code.
  */
 package bluej.debugger.gentype;
+
+import threadchecker.OnThread;
+import threadchecker.Tag;
+
+import java.util.HashMap;
 
 /**
  * This class represents array types for which we have a reflective.
@@ -49,6 +54,7 @@ public class GenTypeArrayClass extends GenTypeClass
     }
     
     @Override
+    @OnThread(Tag.FXPlatform)
     public GenTypeClass getErasedType()
     {
         JavaType newComponentType = componentType.getErasedType();
@@ -63,5 +69,17 @@ public class GenTypeArrayClass extends GenTypeClass
     @Override
     public GenTypeClass mapToSuper(String basename) {
         return this;
+    }
+
+    @Override
+    public boolean isRaw()
+    {
+        return false;
+    }
+
+    @Override
+    public HashMap<String, GenTypeParameter> getMap()
+    {
+        return new HashMap<>();
     }
 }

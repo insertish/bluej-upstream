@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2012,2013,2014,2015,2016,2017,2018,2019  Michael Kolling and John Rosenberg
+ Copyright (C) 1999-2009,2012,2013,2014,2015,2016,2017,2018,2019,2020  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -42,7 +42,6 @@ import javafx.beans.value.ObservableIntegerValue;
 import threadchecker.OnThread;
 import threadchecker.Tag;
 import bluej.Config;
-import bluej.editor.EditorManager;
 
 /**
  * A class to manage the user editable preferences
@@ -61,6 +60,7 @@ public class PrefMgr
     public static final String AUTO_INDENT = "bluej.editor.autoIndent";
     public static final String LINENUMBERS = "bluej.editor.displayLineNumbers";
     public static final String MATCH_BRACKETS = "bluej.editor.matchBrackets";
+    public static final String CHECK_DISKFILECHANGES = "bluej.editor.checkDiskFileChanges";
     public static final String LINK_LIB = "doctool.linkToStandardLib";
     public static final String SHOW_TEST_TOOLS = "bluej.testing.showtools";
     public static final String SHOW_TEAM_TOOLS = "bluej.teamwork.showtools";
@@ -99,6 +99,7 @@ public class PrefMgr
     // initialised by a call to setEditorFontSize()
     @OnThread(Tag.FX)
     private static final IntegerProperty editorFontSize = new SimpleIntegerProperty(DEFAULT_JAVA_FONT_SIZE);
+    @OnThread(Tag.FX)
     private static final StringProperty editorStandardFont = new SimpleStringProperty("Roboto Mono");
     private static final StringProperty editorFallbackFont = new SimpleStringProperty("monospace");
     @OnThread(Tag.FX)
@@ -277,7 +278,6 @@ public class PrefMgr
     {
         if (size > 0) {
             initEditorFontSize(size);
-            EditorManager.getEditorManager().refreshAll();
         }
     }
     
@@ -313,7 +313,7 @@ public class PrefMgr
         return editorFontSize;
     }
 
-    @OnThread(Tag.FXPlatform)
+    @OnThread(Tag.FX)
     public static StringExpression getEditorFontCSS(boolean includeFamily)
     {
         if (editorFontCSS == null)
@@ -336,6 +336,11 @@ public class PrefMgr
     public static String getEditorFontFamilyCSS()
     {
         return "-fx-font-family: \"" + editorStandardFont.get() + "\", " + editorFallbackFont.get() + ";";
+    }
+
+    public static String getEditorFontFamily()
+    {
+        return editorStandardFont.get();
     }
 
     @OnThread(Tag.FXPlatform)
@@ -429,6 +434,7 @@ public class PrefMgr
         flags.put(AUTO_INDENT, Config.getPropString(AUTO_INDENT, "false"));
         flags.put(LINENUMBERS, Config.getPropString(LINENUMBERS, "false"));
         flags.put(MATCH_BRACKETS, Config.getPropString(MATCH_BRACKETS, "true"));
+        flags.put(CHECK_DISKFILECHANGES, Config.getPropString(CHECK_DISKFILECHANGES, "true"));
         flags.put(LINK_LIB, Config.getPropString(LINK_LIB, "true"));
         flags.put(SHOW_TEST_TOOLS, Config.getPropString(SHOW_TEST_TOOLS, "false"));
         flags.put(SHOW_TEAM_TOOLS, Config.getPropString(SHOW_TEAM_TOOLS, "false"));

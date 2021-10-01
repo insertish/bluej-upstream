@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program.
- Copyright (C) 1999-2009,2015,2016,2017,2019  Michael Kolling and John Rosenberg
+ Copyright (C) 1999-2009,2015,2016,2017,2019,2020  Michael Kolling and John Rosenberg
 
  This program is free software; you can redistribute it and/or
  modify it under the terms of the GNU General Public License
@@ -22,6 +22,7 @@
 package bluej.utility.javafx;
 
 import bluej.Config;
+import javafx.beans.binding.BooleanBinding;
 import javafx.beans.binding.BooleanExpression;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.ObjectProperty;
@@ -55,6 +56,8 @@ public abstract class FXAbstractAction
     private boolean hasMenuItem = false;
     private final BooleanProperty unavailable = new SimpleBooleanProperty(false);
     private final BooleanProperty disabled = new SimpleBooleanProperty(false);
+    // Kept as field to avoid bind GC issues:
+    private final BooleanBinding disabledOrUnavailable = disabled.or(unavailable);
     protected final ObjectProperty<KeyCombination> accelerator;
     private final Node buttonGraphic;
 
@@ -84,10 +87,16 @@ public abstract class FXAbstractAction
 
     public abstract void actionPerformed(boolean viaContextMenu);
 
-    public void bindEnabled(BooleanExpression enabled)
+    public void bindDisabled(BooleanExpression disabled)
     {
-        if (enabled != null)
-            disabled.bind(enabled.not());
+        if (disabled != null)
+        {
+            this.disabled.bind(disabled);
+        }
+        else
+        {
+            this.disabled.unbind();
+        }
     }
 
     public void setEnabled(boolean enabled)
@@ -127,7 +136,7 @@ public abstract class FXAbstractAction
     public Button makeButton()
     {
         Button button = new Button(name);
-        button.disableProperty().bind(disabled.or(unavailable));
+        button.disableProperty().bind(disabledOrUnavailable);
         button.setOnAction(e -> actionPerformed(false));
         if (buttonGraphic != null)
             button.setGraphic(buttonGraphic);
@@ -167,17 +176,19 @@ public abstract class FXAbstractAction
 
     /**
      * Makes a MenuItem which will run this action, but without an accelerator.
+     *
+     * @param nameOverride If non-null, will be used as the text on the menu item.  If localised, caller is responsible for calling Config.getString
      */
-    public MenuItem makeContextMenuItem()
+    public MenuItem makeContextMenuItem(String nameOverride)
     {
-        MenuItem menuItem = new MenuItem(name);
+        MenuItem menuItem = new MenuItem(nameOverride != null ? nameOverride : name);
         setMenuActionAndDisable(menuItem, true);
         return menuItem;
     }
 
     private void setMenuActionAndDisable(MenuItem menuItem, boolean contextMenu)
     {
-        menuItem.disableProperty().bind(disabled.or(unavailable));
+        menuItem.disableProperty().bind(disabledOrUnavailable);
         menuItem.setOnAction(e -> actionPerformed(true));
     }
 

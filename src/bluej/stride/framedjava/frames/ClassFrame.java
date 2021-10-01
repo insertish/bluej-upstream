@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 2014,2015,2016,2017,2018 Michael Kölling and John Rosenberg
+ Copyright (C) 2014,2015,2016,2017,2018,2019,2020 Michael Kölling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -22,6 +22,7 @@
 package bluej.stride.framedjava.frames;
 
 import bluej.Config;
+import bluej.parser.AssistContentThreadSafe;
 import bluej.editor.stride.BirdseyeManager;
 import bluej.parser.AssistContent.CompletionKind;
 import bluej.parser.AssistContent.ParamInfo;
@@ -43,18 +44,13 @@ import bluej.stride.operations.CopyFrameAsStrideOperation;
 import bluej.stride.operations.CustomFrameOperation;
 import bluej.stride.operations.FrameOperation;
 import bluej.stride.slots.EditableSlot;
-import bluej.stride.slots.EditableSlot.MenuItemOrder;
 import bluej.stride.slots.Focus;
 import bluej.stride.slots.HeaderItem;
 import bluej.stride.slots.Implements;
 import bluej.stride.slots.SlotLabel;
 import bluej.stride.slots.TriangleLabel;
 import bluej.utility.Utility;
-import bluej.utility.javafx.FXConsumer;
-import bluej.utility.javafx.FXPlatformConsumer;
-import bluej.utility.javafx.FXRunnable;
-import bluej.utility.javafx.JavaFXUtil;
-import bluej.utility.javafx.SharedTransition;
+import bluej.utility.javafx.*;
 import javafx.beans.binding.Bindings;
 import javafx.beans.binding.BooleanBinding;
 import javafx.beans.property.BooleanProperty;
@@ -218,24 +214,24 @@ public class ClassFrame extends TopLevelDocumentMultiCanvasFrame<ClassElement>
         ops.add(new CopyFrameAsImageOperation(editor));
         ops.add(new CopyFrameAsJavaOperation(editor));
         ops.add(new CustomFrameOperation(getEditor(), "addRemoveAbstract", Arrays.asList(Config.getString("frame.class.toggle.abstract")),
-                MenuItemOrder.TOGGLE_ABSTRACT, this, () ->  abstractModifier.set(!abstractModifier.get())));
+                AbstractOperation.MenuItemOrder.TOGGLE_ABSTRACT, this, () ->  abstractModifier.set(!abstractModifier.get())));
 
         if (extendsSlot.isEmpty())
         {
             ops.add(new CustomFrameOperation(getEditor(), "addExtends", Arrays.asList(Config.getString("frame.class.add.extends")),
-                    MenuItemOrder.TOGGLE_EXTENDS, this, () -> showAndFocusExtends()));
+                    AbstractOperation.MenuItemOrder.TOGGLE_EXTENDS, this, () -> showAndFocusExtends()));
         }
         else
         {
             CustomFrameOperation op = new CustomFrameOperation(getEditor(), "removeExtends",
                     Arrays.asList(Config.getString("frame.class.remove.extends.from").replace("$", extendsSlot.getText())),
-                    MenuItemOrder.TOGGLE_EXTENDS, this, () -> extendsSlot.setText(""));
+                    AbstractOperation.MenuItemOrder.TOGGLE_EXTENDS, this, () -> extendsSlot.setText(""));
             op.setWideCustomItem(true);
             ops.add(op);
         }
 
         ops.add(new CustomFrameOperation(getEditor(), "addImplements", Arrays.asList(Config.getString("frame.class.add.implements")),
-                MenuItemOrder.TOGGLE_IMPLEMENTS, this, () -> implementsSlot.addTypeSlotAtEnd("", true)));
+                AbstractOperation.MenuItemOrder.TOGGLE_IMPLEMENTS, this, () -> implementsSlot.addTypeSlotAtEnd("", true)));
 
         final List<TypeSlotFragment> types = implementsSlot.getTypes();
         for (int i = 0; i < types.size(); i++)
@@ -244,7 +240,7 @@ public class ClassFrame extends TopLevelDocumentMultiCanvasFrame<ClassElement>
             TypeSlotFragment type = types.get(i);
             CustomFrameOperation removeOp = new CustomFrameOperation(getEditor(), "removeImplements",
                     Arrays.asList(Config.getString("frame.class.remove.implements").replace("$", type.getContent())),
-                    MenuItemOrder.TOGGLE_IMPLEMENTS, this, () -> implementsSlot.removeIndex(index));
+                    AbstractOperation.MenuItemOrder.TOGGLE_IMPLEMENTS, this, () -> implementsSlot.removeIndex(index));
             removeOp.setWideCustomItem(true);
             ops.add(removeOp);
         }
@@ -508,7 +504,7 @@ public class ClassFrame extends TopLevelDocumentMultiCanvasFrame<ClassElement>
         {
             startingCanvas += 1;
             startingFrame = canvases.get(startingCanvas).getBlockContents().stream()
-                    .filter(f -> f instanceof CommentFrame).findFirst().orElse(null);
+                    .filter(f -> !(f instanceof CommentFrame)).findFirst().orElse(null);
         }
 
         // See if focus owner belongs in any of these frames:

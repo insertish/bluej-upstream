@@ -8,8 +8,7 @@ main.invalidPackage=Paquetage introuvable
 compileException=Exception pendant la compilation
 compiler.thread.title=Fil de compilation BlueJ
 
-debugger.assert.assertThat=Assertion \:
-debugger.assert.resultIs=r\u00E9sultat est
+debugger.assert.assertThatResIs=Assertion \: r\u00E9sultat est
 debugger.assert.equalTo=\u00E9gal \u00E0
 debugger.assert.equalToFloatingPoint=\u00E9gal \u00E0 (double ou float)
 debugger.assert.sameAs=le m\u00EAme que
@@ -357,7 +356,6 @@ pkgmgr.test.record=Enregistrement
 pkgmgr.test.run=Ex\u00E9cuter les tests
 pkgmgr.test.end=Terminer
 pkgmgr.test.succeeded=succ\u00E8s
-pkgmgr.test.noTestName=Vous devez nommer la classe-test (e.g. 'maclasseTest')
 pkgmgr.test.invalidTestName=Le nom de la classe-test doit \u00EAtre un identificateur Java valide
 pkgmgr.test.recording=Enregistrement en cours
 
@@ -491,7 +489,7 @@ debugger.execControls.terminateButtonText=Terminer
 
 debugger.options=Options
 debugger.hideSystemThreads=Cacher les fils syst\u00E8me
-debugger.threadRunning=<html><center>Fil en cours d'ex&eacute;cution.<br>Les fils doivent &ecirc;tre stopp&eacute;s pour pouvoir &ecirc;tre examin&eacute;s.</html>
+debugger.threadRunning=<html><center>Fil en cours d'ex\u00E9cution.<br>Les fils doivent \u00EAtre stopp\u00E9s pour pouvoir \u00EAtre examin\u00E9s.</html>
 
 # DialogManager labels
 
@@ -670,8 +668,6 @@ team.settings.personal=Personnel
 team.settings.location=Localisation
 team.settings.user=Utilisateur
 team.settings.password=Mot de passe
-team.settings.group=Groupe
-team.settings.serverType=Type de serveur
 team.settings.server=Serveur
 team.settings.prefix=Chemin du d\u00E9p\u00F4t
 team.settings.ext=ext (avec SSH)

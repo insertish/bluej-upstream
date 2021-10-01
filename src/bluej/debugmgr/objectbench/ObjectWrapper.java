@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2015,2016,2017,2018,2019  Michael Kolling and John Rosenberg
+ Copyright (C) 1999-2015,2016,2017,2018,2019,2020  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -32,8 +32,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
+import bluej.utility.javafx.ResizableRectangle;
 import bluej.views.ViewFilter.StaticOrInstance;
-import javafx.animation.Animation;
 import javafx.animation.ParallelTransition;
 import javafx.animation.ScaleTransition;
 import javafx.animation.TranslateTransition;
@@ -41,6 +41,7 @@ import javafx.beans.binding.When;
 import javafx.collections.ObservableList;
 import javafx.geometry.Point2D;
 import javafx.geometry.Side;
+import javafx.scene.AccessibleRole;
 import javafx.scene.Cursor;
 import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
@@ -64,10 +65,10 @@ import bluej.debugmgr.Invoker;
 import bluej.debugmgr.NamedValue;
 import bluej.debugmgr.ResultWatcher;
 import bluej.debugmgr.inspector.ObjectBackground;
-import bluej.extensions.BObject;
-import bluej.extensions.ExtensionBridge;
+import bluej.extensions2.BObject;
+import bluej.extensions2.ExtensionBridge;
 import bluej.extmgr.ExtensionsManager;
-import bluej.extmgr.FXMenuManager;
+import bluej.extmgr.ExtensionsMenuManager;
 import bluej.extmgr.ObjectExtensionMenu;
 import bluej.pkgmgr.Package;
 import bluej.pkgmgr.PkgMgrFrame;
@@ -116,9 +117,9 @@ public class ObjectWrapper extends StackPane implements InvokeListener, NamedVal
     
     public static final int WIDTH = 100;    // width including gap
     public static final int HEIGHT = 70;   // height including gap
-    public static final double CORNER_SIZE = 10.0;
-    public static final double FOCUSED_BORDER = 6.0;
-    public static final double UNFOCUSED_BORDER = 2.0;
+    public static final double CORNER_SIZE = 36;
+    public static final double FOCUSED_BORDER = 3.0;
+    public static final double UNFOCUSED_BORDER = 1.0;
     public static final double SHADOW_RADIUS = 3.0;
 
     // wild guess until we find out.
@@ -232,6 +233,8 @@ public class ObjectWrapper extends StackPane implements InvokeListener, NamedVal
         JavaFXUtil.addStyleClass(this, "object-wrapper");
 
         Label label = new Label(getName() + ":\n" + displayClassName);
+        setAccessibleText(label.getText() + " Object");
+        setAccessibleRole(AccessibleRole.NODE);
         JavaFXUtil.addStyleClass(label, "object-wrapper-text");
         createComponent(label);
         highlight.setMouseTransparent(true);
@@ -312,7 +315,6 @@ public class ObjectWrapper extends StackPane implements InvokeListener, NamedVal
      * There should be only one BObject object associated with each Package.
      * @return the BPackage associated with this Package.
      */
-    @OnThread(Tag.SwingIsFX)
     public synchronized final BObject getBObject ()
     {
         if ( singleBObject == null )
@@ -345,6 +347,36 @@ public class ObjectWrapper extends StackPane implements InvokeListener, NamedVal
                 || Modifier.isPrivate(clMods));
     }
     
+    private Class<?> unwrapArrays(String className)
+    {
+        String memberType = className.substring(0, className.length() - 2);
+        if (memberType.endsWith("[]"))
+        {
+            // Nested array:
+            return Array.newInstance(unwrapArrays(memberType), 0).getClass();
+        }
+        switch (memberType)
+        {
+            case "boolean":
+                return boolean[].class;
+            case "byte":
+                return byte[].class;
+            case "short":
+                return short[].class;
+            case "int":
+                return int[].class;
+            case "long":
+                return long[].class;
+            case "float":
+                return float[].class;
+            case "double":
+                return double[].class;
+            case "char":
+                return char[].class;
+        }
+        return Array.newInstance(pkg.loadClass(memberType), 0).getClass();
+    }
+    
     /**
      * Determine an appropriate type to use for this object in shell files.
      * The type must be accessible in the current package.
@@ -360,27 +392,7 @@ public class ObjectWrapper extends StackPane implements InvokeListener, NamedVal
         Class<?> cl = pkg.loadClass(className);
         if (cl == null && obj.isArray() && className.endsWith("[]"))
         {
-            String memberType = className.substring(0, className.length() - 2);
-            switch (memberType)
-            {
-                case "boolean":
-                    return boolean[].class;
-                case "byte":
-                    return byte[].class;
-                case "short":
-                    return short[].class;
-                case "int":
-                    return int[].class;
-                case "long":
-                    return long[].class;
-                case "float":
-                    return float[].class;
-                case "double":
-                    return double[].class;
-                case "char":
-                    return char[].class;
-            }
-            cl = Array.newInstance(pkg.loadClass(memberType), 0).getClass();
+            cl = unwrapArrays(className);
         }
         // If the class is inaccessible, use the invocation type.
         if (cl != null) {
@@ -428,7 +440,7 @@ public class ObjectWrapper extends StackPane implements InvokeListener, NamedVal
         JavaFXUtil.addStyleClass(item, MENU_STYLE_INBUILT);
         item.setOnAction(e -> removeObject());
 
-        FXMenuManager menuManager = new FXMenuManager(menu, extMgr, new ObjectExtensionMenu(this));
+        ExtensionsMenuManager menuManager = new ExtensionsMenuManager(menu, extMgr, new ObjectExtensionMenu(this));
         menuManager.addExtensionMenu(pkg.getProject());
     }
     
@@ -682,7 +694,7 @@ public class ObjectWrapper extends StackPane implements InvokeListener, NamedVal
     protected void inspectObject()
     {
         InvokerRecord ir = new ObjectInspectInvokerRecord(getName());
-        pkg.getProject().getInspectorInstance(obj, getName(), pkg, ir, pmf.getFXWindow(), this);  // shows the inspector
+        pkg.getProject().getInspectorInstance(obj, getName(), pkg, ir, pmf.getWindow(), this);  // shows the inspector
     }
     
     protected void removeObject()
@@ -801,38 +813,6 @@ public class ObjectWrapper extends StackPane implements InvokeListener, NamedVal
         highlight.setVisible(highlightOn);
     }
 
-    /**
-     * A Rectangle subclass that can be resized to any size during layout.
-     */
-    @OnThread(Tag.FX)
-    private static class ResizableRectangle extends Rectangle
-    {
-        @Override
-        public boolean isResizable()
-        {
-            return true;
-        }
-
-        @Override
-        public void resize(double width, double height)
-        {
-            setWidth(width);
-            setHeight(height);
-        }
-
-        @Override
-        public double maxWidth(double height)
-        {
-            return Double.MAX_VALUE;
-        }
-
-        @Override
-        public double maxHeight(double width)
-        {
-            return Double.MAX_VALUE;
-        }
-    }
-    
     /*
     @Override
     public AccessibleContext getAccessibleContext()

@@ -40,14 +40,6 @@ CollabNet (http://www.Collab.Net/).
 
 The following is a list of the libraries used in BlueJ, and their licenses:
 
-
-Antlr runtime library (3-clause BSD license) 
---------------------------------------------
-"antlr-runtime-3.4.jar", which is part of the Antlr package (http://www.antlr.org/),
-is also distributed as part of the SVNKit library, which BlueJ uses. It is distributed
-under the BSD license as found in "antlr-BSD.txt".
-
-
 Apache Commons libraries (Apache License version 2.0)
 -----------------------------------------------------
 Various components of the Apache Commons libraries (https://commons.apache.org/) are
@@ -70,7 +62,7 @@ license can be found in the "Apache-License-2.0.txt" file.
  
 ClassGraph library (MIT License)
 --------------------------------
-"classgraph-4.2.6.jar" is from the ClassGraph library, which allows scanning of Java
+"classgraph-4.8.90.jar" is from the ClassGraph library, which allows scanning of Java
 libraries for a list of present classes.  It is released by Luke Hutchison under
 the MIT License, and is available at https://github.com/classgraph/classgraph
 
@@ -87,11 +79,11 @@ The library is distributed under the Apache License version 2.0, as found in the
 "Apache-License-2.0.txt" file.
 
 
-EdDSA-Java (CC0 1.0 Universal)
-------------------------------
-"eddsa-0.2.0.jar" is a Java implementation of the EdDSA algorithm, used by the trilead
-library for doing SSH connections for SVNkit.  It is distributed under the CC0 1.0 Universal
-licence, as found in the "CC0-1.0-Universal.txt" file.
+Generics Resolver library (MIT License)
+--------------------------------
+"generics-resolver-2.0.1.jar", the Java generics runtime resolver, helps with generic
+types in type metadata.  It is released by Vyacheslav Rusakov under
+the MIT License, and is available at https://github.com/xvik/generics-resolver
 
 
 Guava - Google Core library (Apache License version 2.0)
@@ -104,19 +96,17 @@ It is distributed under the Apache License version 2.0, as found in the
 
 Hamcrest (3-clause BSD license)
 -------------------------------
-"hamcrest-core-1.3.jar" is part of the Hamcrest libary
+"hamcrest-core-1.3.jar" and "hamcrest-library-1.3.jar" are part of the Hamcrest libary
 (http://hamcrest.org/JavaHamcrest/) and is a dependency of JUnit, which
 is used by BlueJ.
 It is available under the "3 clause BSD" license as found in the
 "hamcrest-BSD.txt" file.
 
-
-jBCrypt library (ISC License)
------------------------------
-jBCrypt (in "jbcrypt-1.0.0.jar") is a Java implementation of the BCrypt algorithm, which is
-referenced by the trilead library for doing SSH connections with SVNkit.  It is licensed under
-the ISC licence, as found in the "jbcrypt-ISC.txt" file.
-
+JavaRuntype library (Apache License version 2.0)
+-----------------------------------------
+"javaruntype-1.3.jar", the JavaRuntype library is a library providing metadata for
+the Java type system.  It is a dependency of JUnit-Quickcheck.  The library is distributed under
+the Apache License version 2.0, as found in the "Apache-License-2.0.txt" file.
 
 JGit library (Eclipse Distribution License version 1.0)
 -------------------------------------------------------
@@ -132,19 +122,36 @@ which is used by Bluej. It is distributed under the terms of a BSD-style license
 as found in the "jsch-BSD.txt" file.
 
 
-JUnit (Common Public License v1.0)
+JUnit (Eclipse Public License v1.0)
 ----------------------------------
-"junit-4.11.jar" is part of the JUnit unit testing library (http://junit.org/) which is
-used by BlueJ. It is distributed under the terms of the Common Public License
-version 1.0, as found in the "CPL-v1.0.txt" file.
+"junit-*.jar" are part of the JUnit unit testing library (http://junit.org/) which is
+used by BlueJ. It is distributed under the terms of the Eclipse Public License
+version 2.0, as found in the "EPL-v2.0.txt" file.
 
+JUnit QuickCheck (MIT License)
+------------------------------
+"junit-quickcheck-core-0.8.2.jar", the JUnit QuickCheck library, provides QuickCheck-style
+property based testing for Java, by building on top of Java.  It is distributed
+under the MIT License and is available from https://github.com/pholser/junit-quickcheck
 
 NSMenuFX library (3-clause BSD license)
 ---------------------------------------
-"nsmenufx-2.1.4.jar", the NSMenuFX library (https://github.com/codecentric/NSMenuFX),
+"nsmenufx-2.1.8.jar", the NSMenuFX library (https://github.com/0x4a616e/NSMenuFX),
 is a library to customize the OS X menu bar when it is on FX to be able to customize
 the auto-generated application menu. This version is distributed under the terms of
 the BSD license as found in the "nsmenufx-BSD.txt" file.
+
+OGNL library (Apache License version 2.0)
+-----------------------------------------
+"ognl-3.1.12.jar", the OGNL library is a library supporting a small DSL for object
+queries.  It is a dependency of JUnit-Quickcheck.  The library is distributed under
+the Apache License version 2.0, as found in the "Apache-License-2.0.txt" file.
+
+OpenTest4J (Apache License version 2.0)
+-----------------------------------------------------
+"opentest4j-1.2.0.jar" is a utility library used by JUnit 5.
+The library is distributed under the Apache License version 2.0. A copy of this
+license can be found in the "Apache-License-2.0.txt" file.
 
 
 RichTextFX (GPLv2 with classpath exception, and 2-clause BSD licenses)
@@ -170,14 +177,6 @@ editor. It is distributed under the terms of the Apache License version 2.0, as 
 "Apache-License-2.0.txt" file.
 
 
-Sequence Library (3-clause BSD license)
----------------------------------------
-"sequence-library-1.0.3.jar" is part of a sequence library, available in source form
-from the subversion repository at http://svn.svnkit.com/repos/3rdparty (under the path
-de.regnis.q.sequence). This version is distributed under the terms of the BSD license
-as found in the "sequence-library-BSD.txt" file.
-
-
 SLF4J Simple Logging Facade for Java (MIT license)
 --------------------------------------------------
 "slf4j-api-1.7.2.jar" and "slf4j-jdk14-1.7.2.jar" provides logging capabilities
@@ -192,33 +191,10 @@ in the Stride editor. It is distributed under the terms of the SIL Open Font Lic
 as found in the "SIL-OFL-1.1.txt" file.
 
 
-SVNKit (TMate Open Source License)
-----------------------------------
-"svnkit.jar" is part of the SVNKit library (http://svnkit.com/) used by BlueJ for
-Subversion support. It is distributed under the terms of the TMate Open Source license,
-as found in the "svnkit.txt" file.
-
-
-SVNKit JavaHL bindings (Suvbersion 1.6 license)
--------------------------------------------
-"svnkit-javahl.jar", which provides Subversion "JavaHL"-compatible bindings for the
-SVNKit library, is used by BlueJ. It is distributed under the terms of the Subversion
-license, as found in the "svnkit-javahl.txt" file.
-
-
-SQLJet library (TMate Open Source License)
-------------------------------------------
-"sqljet-1.1.10", the SQLJet library (http://sqljet.com/), is distributed as part of
-the SVNKit library. The terms of distribution can be found in the "sqljet.txt" file
-and allow for distribution under the TMate Open Source License so long as SQLJet
-is distributed as part of SVNKit. 
-
-
-Trilead SSH library (BSD-like license)
---------------------------------------
-"trilead-ssh2-build-217-jenkins-11.jar" comprises the Trilead library, used by BlueJ
-to provide SSH support for version control. It is distributed under a BSD-like license
-as found in the "trilead.txt" file.
+TestFX library (EUPL)
+---------------------
+TestFX (testlib/testfx-{core,junit}-4.0.15-alpha.jar) is distributed under
+the EU Public Licence.  The licence can be found in the "testfx-EUPL.txt" file.
 
 
 XOM XML Object Modeller library (Lesser GNU Public License v2.1)
@@ -257,27 +233,24 @@ SOFTWARE.
 
 4. SUMMARY OF THIRD-PARTY JAR FILES AND LICENSES
 
-antlr-runtime-3.4.jar                    BSD License
 commons-logging-api-1.1.2.jar            Apache License v2.0
-classgraph-4.2.6.jar                     MIT License
+classgraph-4.8.90.jar                     MIT License
 diffutils-1.2.1.jar                      Apache License v2.0
-eddsa-0.2.0.jar                          CC0 1.0 Universal license
+generics-resolver-2.0.1.jar              MIT License
 guava-17.0.jar                           Apache License v2.0
 hamcrest-core-1.3.jar                    BSD License
 httpclient-4.1.1.jar                     Apache License v2.0
 httpcore-4.1.jar                         Apache License v2.0
 httpmime-4.1.1.jar                       Apache License v2.0
-jbcrypt-1.0.0.jar                        ISC License
+javaruntype-1.3.jar                      Apache License v2.0
 jsch-0.1.53.jar                          BSD License
-junit-4.11.jar                           Common Public License v1.0
-nsmenufx-2.1.4.jar                       BSD license
+junit-4.12.jar                           Common Public License v1.0
+junit-quickcheck-core-0.8.2.jar          MIT License
+nsmenufx-2.1.8.jar                       BSD license
+ognl-3.1.12.jar                          Apache License v2.0
 org.eclipse.jgit-4.9.0.jar               Eclipse Distribution License (EDL) v1.0
 richtextfx-fat-0.9.0.jar                 BSD License
-sequence-library-1.0.3.jar               BSD License
 slf4j-api-1.7.2.jar                      MIT License
 slf4j-jdk14-1.7.2.jar                    MIT License
 sqljet-1.1.10.jar                        TMate Open Source License
-svnkit-javahl.jar                        Subversion License
-svnkit.jar                               TMate Open Source License
-trilead-ssh2-build-217-jenkins-11.jar    BSD-like license
 xom-1.2.9.jar                            Lesser GPL v2.1

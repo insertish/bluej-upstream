@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2011,2019  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2011,2019,2020  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -24,18 +24,20 @@ package bluej.parser.nodes;
 import bluej.debugger.gentype.GenTypeDeclTpar;
 import bluej.debugger.gentype.JavaType;
 import bluej.debugger.gentype.Reflective;
-import bluej.editor.moe.MoeSyntaxDocument;
 import bluej.parser.ExpressionTypeInfo;
 import bluej.parser.entity.JavaEntity;
 import bluej.parser.entity.PackageOrClass;
 import bluej.parser.entity.TparEntity;
 import bluej.parser.entity.TypeEntity;
 import bluej.parser.entity.ValueEntity;
+import bluej.parser.nodes.NodeTree.NodeAndPosition;
 
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 
 /**
@@ -255,7 +257,7 @@ public class MethodNode extends JavaParentNode
     
     @Override
     protected ExpressionTypeInfo getExpressionType(int pos, int nodePos,
-            JavaEntity defaultType, MoeSyntaxDocument document)
+            JavaEntity defaultType, ReparseableDocument document)
     {
         if (Modifier.isStatic(modifiers)) {
             JavaType dtype = defaultType.getType();
@@ -264,5 +266,24 @@ public class MethodNode extends JavaParentNode
             }
         }
         return super.getExpressionType(pos, nodePos, defaultType, document);
+    }
+
+    /**
+     * Gets the local variables nodes of a method.
+     *
+     * @return a Map object containing the local variables nodes of that method.
+     */
+    public Map<String, Set<FieldNode>> getLocVarNodes()
+    {
+        Iterator<NodeAndPosition<ParsedNode>> children = getChildren(0);
+        while (children.hasNext())
+        {
+            NodeAndPosition<ParsedNode> child = children.next();
+            if (child.getNode() instanceof MethodBodyNode)
+            {
+                return ((MethodBodyNode) child.getNode()).variables;
+            }
+        }
+        return null;
     }
 }

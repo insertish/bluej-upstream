@@ -1,6 +1,6 @@
 /*
  This file is part of the Greenfoot program. 
- Copyright (C) 2014,2015,2016,2017,2018  Michael Kolling and John Rosenberg
+ Copyright (C) 2014,2015,2016,2017,2018,2019,2020  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -91,8 +91,7 @@ import java.util.List;
 
 
 /**
- * FXTabbedEditor is the editor window that contains all the editors in JavaFX tabs (currently,
- * this is the Stride editors only).
+ * FXTabbedEditor is the editor window that contains all the editors in JavaFX tabs
  *
  * Because you can drag between tabs, it is responsible for handling dragging, rather than the individual editor tabs doing it.
  *
@@ -295,14 +294,18 @@ public @OnThread(Tag.FX) class FXTabbedEditor
         });
 
         JavaFXUtil.addChangeListenerPlatform(stage.focusedProperty(), focused -> {
-            if (focused) {
-                ((FXTab) tabPane.getSelectionModel().getSelectedItem()).notifySelected();
-            }
-            else {
-                Tab selectedItem = tabPane.getSelectionModel().getSelectedItem();
-                // if 'selectedItem' is null, that mean it has been already notified unselected
-                // by the selectedItemProperty Listener added above.
-                if (selectedItem != null) {
+            Tab selectedItem = tabPane.getSelectionModel().getSelectedItem();
+            // It is possible during shutdown that the window becomes focused while no tabs are present, so guard against that:
+            if (selectedItem != null && selectedItem instanceof FXTab)
+            {
+                if (focused)
+                {
+                    ((FXTab) selectedItem).notifySelected();
+                }
+                else
+                {
+                    // if 'selectedItem' is null, that mean it has been already notified unselected
+                    // by the selectedItemProperty Listener added above.
                     ((FXTab) selectedItem).notifyUnselected();
                 }
             }
@@ -474,7 +477,11 @@ public @OnThread(Tag.FX) class FXTabbedEditor
     @OnThread(Tag.FXPlatform)
     public void openJavaCoreDocTab(String qualifiedClassName, String suffix)
     {
-        String target = Utility.getDocURL(qualifiedClassName, suffix);
+        Class<?> theClass = project.loadClass(qualifiedClassName);
+        // Guess java.base if we don't know the module:
+        String moduleName = theClass == null ? "java.base" : theClass.getModule().getName();
+        
+        String target = Utility.getDocURL(moduleName, qualifiedClassName, suffix);
         openWebViewTab(target);
     }
 
@@ -518,12 +525,16 @@ public @OnThread(Tag.FX) class FXTabbedEditor
      * @param visible Whether to add the tab and make window visible (true), or remove the tab (false).
      *                Window is only hidden if no tabs remain (handled elsewhere in code)
      * @param tab     The tab in question
+     * @return        True if the visible state needed to be changed, false if there was nothing
+     *                that needed to be done.
      */
-    public void setWindowVisible(boolean visible, Tab tab)
+    public boolean setWindowVisible(boolean visible, Tab tab)
     {
         if (visible)
         {
-            if (!stage.isShowing()) {
+            boolean wasAlreadyShowing = stage.isShowing();
+            if (!wasAlreadyShowing)
+            {
                 if (startSize != null)
                 {
                     stage.setX(startSize.getX());
@@ -539,11 +550,16 @@ public @OnThread(Tag.FX) class FXTabbedEditor
             if (!tabPane.getTabs().contains(tab))
             {
                 tabPane.getTabs().add(tab);
+                return true;
+            }
+            else
+            {
+                return !wasAlreadyShowing;
             }
         }
         else
         {
-            tabPane.getTabs().remove(tab);
+            return tabPane.getTabs().remove(tab);
         }
     }
     

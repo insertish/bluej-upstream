@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2010,2011,2012,2013,2014,2015,2016,2017,2018,2019  Michael Kolling and John Rosenberg
+ Copyright (C) 1999-2010,2011,2012,2013,2014,2015,2016,2017,2018,2019,2020  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -32,14 +32,13 @@ import java.net.URL;
 import java.util.*;
 
 import bluej.debugger.DebuggerObject;
-import bluej.extensions.event.DependencyEvent;
 import bluej.views.CallableView;
+import com.google.common.collect.Sets;
 import javafx.application.Platform;
 
 import bluej.compiler.CompileInputFile;
 import bluej.compiler.CompileReason;
 import bluej.compiler.CompileType;
-import bluej.editor.stride.FrameEditor;
 import bluej.pkgmgr.target.CSSTarget;
 import bluej.pkgmgr.target.DependentTarget.State;
 import bluej.pkgmgr.dependency.ExtendsDependency;
@@ -48,25 +47,17 @@ import bluej.utility.javafx.JavaFXUtil;
 import bluej.Config;
 import bluej.collect.DataCollectionCompileObserverWrapper;
 import bluej.collect.DataCollector;
-import bluej.compiler.CompileObserver;
-import bluej.compiler.Diagnostic;
-import bluej.compiler.FXCompileObserver;
-import bluej.compiler.EventqueueCompileObserverAdapter;
-import bluej.compiler.JobQueue;
-import bluej.debugger.Debugger;
-import bluej.debugger.DebuggerEvent;
-import bluej.debugger.DebuggerListener;
-import bluej.debugger.DebuggerThread;
-import bluej.debugger.ExceptionDescription;
-import bluej.debugger.SourceLocation;
+import bluej.compiler.*;
+import bluej.debugger.*;
 import bluej.debugmgr.CallHistory;
 import bluej.debugmgr.Invoker;
 import bluej.editor.Editor;
 import bluej.editor.TextEditor;
-import bluej.extensions.BPackage;
-import bluej.extensions.ExtensionBridge;
-import bluej.extensions.SourceType;
-import bluej.extensions.event.CompileEvent;
+import bluej.extensions2.BPackage;
+import bluej.extensions2.ExtensionBridge;
+import bluej.extensions2.SourceType;
+import bluej.extensions2.event.CompileEvent;
+import bluej.extensions2.event.CompileEvent.EventType;
 import bluej.extmgr.ExtensionsManager;
 import bluej.parser.AssistContent;
 import bluej.parser.AssistContent.CompletionKind;
@@ -75,29 +66,32 @@ import bluej.parser.ParseUtils;
 import bluej.parser.nodes.ParsedCUNode;
 import bluej.parser.symtab.ClassInfo;
 import bluej.pkgmgr.dependency.Dependency;
+import bluej.pkgmgr.dependency.ExtendsDependency;
+import bluej.pkgmgr.dependency.ImplementsDependency;
 import bluej.pkgmgr.dependency.UsesDependency;
-import bluej.pkgmgr.target.ClassTarget;
-import bluej.pkgmgr.target.DependentTarget;
-import bluej.pkgmgr.target.EditableTarget;
-import bluej.pkgmgr.target.PackageTarget;
-import bluej.pkgmgr.target.ParentPackageTarget;
-import bluej.pkgmgr.target.ReadmeTarget;
-import bluej.pkgmgr.target.Target;
-import bluej.pkgmgr.target.TargetCollection;
+import bluej.pkgmgr.target.*;
+import bluej.pkgmgr.target.DependentTarget.State;
 import bluej.prefmgr.PrefMgr;
-import bluej.utility.Debug;
-import bluej.utility.DialogManager;
-import bluej.utility.FileUtility;
-import bluej.utility.JavaNames;
-import bluej.utility.SortedProperties;
-import bluej.utility.Utility;
+import bluej.utility.*;
 import bluej.utility.filefilter.FrameSourceFilter;
 import bluej.utility.filefilter.JavaClassFilter;
 import bluej.utility.filefilter.JavaSourceFilter;
 import bluej.utility.filefilter.SubPackageFilter;
-
+import bluej.utility.javafx.JavaFXUtil;
+import bluej.views.CallableView;
+import javafx.application.Platform;
 import threadchecker.OnThread;
 import threadchecker.Tag;
+
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.lang.reflect.Modifier;
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.net.URL;
+import java.util.*;
 
 /**
  * A Java package (collection of Java classes).
@@ -1170,12 +1164,15 @@ public final class Package
         repaint();
     }
 
-    @OnThread(Tag.Any)
+    @OnThread(Tag.FXPlatform)
     public void repaint()
     {
-        JavaFXUtil.runNowOrLater(() -> {
-            PackageEditor ed = getEditor();
-            if (ed != null) ed.repaint();});
+        PackageEditor ed = getEditor();
+        if (ed != null)
+        {
+            ed.requestLayout();
+            JavaFXUtil.runAfterNextLayout(ed.getScene(), ed::repaint);
+        }
     }
 
     /**
@@ -2069,102 +2066,6 @@ public final class Package
     }
 
     /**
-     * Called when in an interesting state (e.g. adding a new dependency) and a
-     * target is selected. Calling with 'null' as parameter resets to idle state.
-     */
-    @OnThread(Tag.Any)
-    public void targetSelected(Target t)
-    {
-        /*
-        if(t == null) {
-            if(getState() != S_IDLE) {
-                setState(S_IDLE);
-                setStatus(" ");
-            }
-            return;
-        }
-
-        switch(getState()) {
-            case S_CHOOSE_USES_FROM :
-                if (t instanceof DependentTarget) {
-                    fromChoice = (DependentTarget) t;
-                    setState(S_CHOOSE_USES_TO);
-                    setStatus(chooseUsesTo);
-                }
-                else {
-                    setState(S_IDLE);
-                    setStatus(" ");
-                }
-                break;
-
-            case S_CHOOSE_USES_TO :
-                if (t != fromChoice && t instanceof DependentTarget) {
-                    setState(S_IDLE);
-                    addDependency(new UsesDependency(this, fromChoice, (DependentTarget) t), true);
-                    setStatus(" ");
-                }
-                break;
-
-            case S_CHOOSE_EXT_FROM :
-
-                if (t instanceof DependentTarget) {
-                    fromChoice = (DependentTarget) t;
-                    setState(S_CHOOSE_EXT_TO);
-                    setStatus(chooseInhTo);
-                }
-                else {
-                    setState(S_IDLE);
-                    setStatus(" ");
-                }
-                break;
-
-            case S_CHOOSE_EXT_TO :
-                if (t != fromChoice) {
-                    setState(S_IDLE);
-                    if (t instanceof ClassTarget && fromChoice instanceof ClassTarget) {
-
-                        ClassTarget from = (ClassTarget) fromChoice;
-                        ClassTarget to = (ClassTarget) t;
-
-                        // if the target is an interface then we have an
-                        // implements dependency
-                        if (to.isInterface()) {
-                            Dependency d = new ImplementsDependency(this, from, to);
-
-                            if (from.isInterface()) {
-                                userAddImplementsInterfaceDependency(d);
-                            }
-                            else {
-                                userAddImplementsClassDependency(d);
-                            }
-
-                            addDependency(d, true);
-                        }
-                        else {
-                            // an extends dependency can only be from a class to
-                            // another class
-                            if (!from.isInterface() && !to.isEnum() && !from.isEnum()) {
-                                Dependency d = new ExtendsDependency(this, from, to);
-                                userAddExtendsClassDependency(d);
-                                addDependency(d, true);
-                            }
-                            else {
-                                // TODO display an error dialog or status
-                            }
-                        }
-                    }
-                    setStatus(" ");
-                }
-                break;
-
-            default :
-                // e.g. deleting arrow - selecting target ignored
-                break;
-        }
-        */
-    }
-
-    /**
      * Use the dialog manager to display an error message. The PkgMgrFrame is
      * used to find a parent window so we can correctly offset the dialog.
      */
@@ -2208,15 +2109,16 @@ public final class Package
      * @return true if the debugger display is already taken care of, or
      * false if you still want to show the ExecControls window afterwards.
      */
-    private boolean showSource(DebuggerThread thread, String sourcename, int lineNo, ShowSourceReason reason, String msg)
+    @OnThread(Tag.FXPlatform)
+    private boolean showSource(DebuggerThread thread, String sourcename, int lineNo, ShowSourceReason reason, String msg, DebuggerObject currentObject)
     {
         boolean bringToFront = !sourcename.equals(lastSourceName);
         lastSourceName = sourcename;
 
         // showEditorMessage:
         Editor targetEditor = editorForTarget(new File(getPath(), sourcename).getAbsolutePath(), bringToFront);
-        if (targetEditor != null) {
-            DebuggerObject currentObject = thread.getCurrentObject(0);
+        if (targetEditor != null)
+        {
             if (getUI() != null)
             {
                 getUI().highlightObject(currentObject);
@@ -2410,7 +2312,8 @@ public final class Package
     /**
      * A breakpoint in this package was hit.
      */
-    public void hitBreakpoint(DebuggerThread thread)
+    @OnThread(Tag.FXPlatform)
+    public void hitBreakpoint(DebuggerThread thread, String classSourceName, int lineNumber, DebuggerObject currentObject)
     {
         String msg = null;
         if (PrefMgr.getFlag(PrefMgr.ACCESSIBILITY_SUPPORT)) {
@@ -2418,7 +2321,7 @@ public final class Package
             msg = msg.replace("$", thread.getName());
         }
         
-        if (!showSource(thread, thread.getClassSourceName(0), thread.getLineNumber(0), ShowSourceReason.BREAKPOINT_HIT, msg))
+        if (!showSource(thread, classSourceName, lineNumber, ShowSourceReason.BREAKPOINT_HIT, msg, currentObject))
         {
             getProject().getExecControls().show();
             getProject().getExecControls().selectThread(thread);
@@ -2429,18 +2332,17 @@ public final class Package
      * Execution stopped by someone pressing the "halt" button or we have just
      * done a "step".
      */
-    public void hitHalt(DebuggerThread thread)
+    @OnThread(Tag.FXPlatform)
+    public void hitHalt(DebuggerThread thread, String classSourceName, int lineNumber, DebuggerObject currentObject, boolean breakpoint)
     {
-        boolean breakpoint = thread.isAtBreakpoint();
         String msg = null;
         if (PrefMgr.getFlag(PrefMgr.ACCESSIBILITY_SUPPORT)) {
             msg = breakpoint ? Config.getString("debugger.accessibility.breakpoint") : Config.getString("debugger.accessibility.paused");
             msg = msg.replace("$", thread.getName());
         }
         
-        int frame = thread.getSelectedFrame();
         ShowSourceReason reason = breakpoint ? ShowSourceReason.BREAKPOINT_HIT : ShowSourceReason.STEP_OR_HALT;
-        if (!showSource(thread, thread.getClassSourceName(frame), thread.getLineNumber(frame), reason, msg))
+        if (!showSource(thread, classSourceName, lineNumber, reason, msg, currentObject))
         {
             getProject().getExecControls().show();
             getProject().getExecControls().selectThread(thread);
@@ -2450,9 +2352,10 @@ public final class Package
     /**
      * Display a source file from this package at the specified position.
      */
-    public void showSourcePosition(DebuggerThread thread, String sourceName, int lineNumber)
+    @OnThread(Tag.FXPlatform)
+    public void showSourcePosition(DebuggerThread thread, String sourceName, int lineNumber, DebuggerObject currentObject)
     {
-        showSource(thread, sourceName, lineNumber, ShowSourceReason.FRAME_SELECTED, null);
+        showSource(thread, sourceName, lineNumber, ShowSourceReason.FRAME_SELECTED, null, currentObject);
     }
     
     /**
@@ -2637,7 +2540,7 @@ public final class Package
             }
         }
 
-        private void sendEventToExtensions(String filename, int [] errorPosition, String message, int eventType, CompileType type)
+        private void sendEventToExtensions(String filename, int [] errorPosition, String message, EventType eventType, CompileType type)
         {
             File [] sources;
             if (filename != null) {
@@ -2661,7 +2564,7 @@ public final class Package
         public void startCompile(CompileInputFile[] sources, CompileReason reason, CompileType type, int compilationSequence)
         {
             // Send a compilation starting event to extensions.
-            CompileEvent aCompileEvent = new CompileEvent(CompileEvent.COMPILE_START_EVENT, type.keepClasses(), Utility.mapList(Arrays.asList(sources), CompileInputFile::getJavaCompileInputFile).toArray(new File[0]));
+            CompileEvent aCompileEvent = new CompileEvent(CompileEvent.EventType.COMPILE_START_EVENT, type.keepClasses(), Utility.mapList(Arrays.asList(sources), CompileInputFile::getJavaCompileInputFile).toArray(new File[0]));
             ExtensionsManager.getInstance().delegateEvent(aCompileEvent);
 
             // Set BlueJ status bar message
@@ -2709,13 +2612,13 @@ public final class Package
         private void errorMessage(String filename, int [] errorPosition, String message, CompileType type)
         {
             // Send a compilation Error event to extensions.
-            sendEventToExtensions(filename, errorPosition, message, CompileEvent.COMPILE_ERROR_EVENT, type);
+            sendEventToExtensions(filename, errorPosition, message, CompileEvent.EventType.COMPILE_ERROR_EVENT, type);
         }
 
         private void warningMessage(String filename, int [] errorPosition, String message, CompileType type)
         {
             // Send a compilation Error event to extensions.
-            sendEventToExtensions(filename, errorPosition, message, CompileEvent.COMPILE_WARNING_EVENT, type);
+            sendEventToExtensions(filename, errorPosition, message, CompileEvent.EventType.COMPILE_WARNING_EVENT, type);
         }
 
         /**
@@ -2807,120 +2710,14 @@ public final class Package
             fireChangedEvent();
             
             // Send a compilation done event to extensions.
-            int eventId = successful ? CompileEvent.COMPILE_DONE_EVENT : CompileEvent.COMPILE_FAILED_EVENT;
-            CompileEvent aCompileEvent = new CompileEvent(eventId, type.keepClasses(), Utility.mapList(Arrays.asList(sources), CompileInputFile::getJavaCompileInputFile).toArray(new File[0]));
+            EventType eventType = successful ? CompileEvent.EventType.COMPILE_DONE_EVENT : CompileEvent.EventType.COMPILE_FAILED_EVENT;
+            CompileEvent aCompileEvent = new CompileEvent(eventType, type.keepClasses(), Utility.mapList(Arrays.asList(sources), CompileInputFile::getJavaCompileInputFile).toArray(new File[0]));
             ExtensionsManager.getInstance().delegateEvent(aCompileEvent);
 
             for (FXCompileObserver chainedObserver : chainedObservers)
             {
                 chainedObserver.endCompile(sources, successful, type, compilationSequence);
             }
-        }
-    }
-    
-    private static class MisspeltMethodChecker implements MessageCalculator
-    {
-        private static final int MAX_EDIT_DISTANCE = 2;
-        private final String message;
-        private int lineNumber;
-        private int column;
-        private Project project;
-
-        public MisspeltMethodChecker(String message, int column, int lineNumber, Project project)
-        {
-            this.message = message;
-            this.column = column;
-            this.lineNumber = lineNumber;
-            this.project = project;
-        }
-        
-        private static String chopAtOpeningBracket(String name)
-        {
-            int openingBracket = name.indexOf('(');
-            if (openingBracket >= 0)
-                return name.substring(0,openingBracket);
-            else
-                return name;
-        }
-
-        private String getLine(TextEditor e)
-        {
-            return e.getText(new bluej.parser.SourceLocation(lineNumber, 1), new bluej.parser.SourceLocation(lineNumber, e.getLineLength(lineNumber-1)));
-        }
-        
-        private int getLineStart(TextEditor e)
-        {
-            return e.getOffsetFromLineColumn(new bluej.parser.SourceLocation(lineNumber, 1));
-        }
-        
-        @Override
-        public String calculateMessage(Editor e0)
-        {
-            if (e0 == null) {
-                return message;
-            }
-            TextEditor e = e0.assumeText();
-            
-            String missing = chopAtOpeningBracket(message.substring(message.lastIndexOf(' ') + 1));
-
-            ParsedCUNode pcuNode = e.getParsedNode();
-            if (pcuNode == null) {
-                return message;
-            }
-
-            // If it is a frameEditor, pcuNode above will be null, so the next lines won't be reached. If this change,
-            // i.e. pcuNode is not null for frameEditor, next lines should be fixed
-
-            // The column from the diagnostic object assumes tabs are 8 spaces; convert to a line position:
-            int pos = convertColumn(getLine(e), column) + getLineStart(e);
-
-            TreeSet<String> maybeTheyMeant = new TreeSet<>();
-            ExpressionTypeInfo suggests = pcuNode.getExpressionType(pos, e.getSourceDocument());
-            AssistContent[] values = ParseUtils.getPossibleCompletions(suggests, project.getJavadocResolver(), null);
-            if (values != null) {
-                for (AssistContent a : values) {
-                    String name = a.getName();
-
-                    if (a.getKind() == CompletionKind.METHOD && Utility.editDistance(name.toLowerCase(), missing.toLowerCase()) <= MAX_EDIT_DISTANCE) {
-                        maybeTheyMeant.add(a.getName());
-                    }
-                }
-            }
-
-            if (maybeTheyMeant.isEmpty()) {
-                return message;
-            } else {
-                String augmentedMessage = message + "; maybe you meant: " + maybeTheyMeant.pollFirst();
-                for (String sugg : maybeTheyMeant) {
-                    augmentedMessage += " or " + sugg;
-                }
-                return augmentedMessage;
-            }
-        }
-        
-        /** 
-         * Convert a column where a tab is counted as 8 to a column where a tab is counted
-         * as 1
-         */
-        private static int convertColumn(String string, int column)
-        {
-            int ccount = 0; // count of characters
-            int lpos = 0;   // count of columns (0 based)
-
-            int tabIndex = string.indexOf('\t');
-            while (tabIndex != -1 && lpos < column - 1) {
-                lpos += tabIndex - ccount;
-                ccount = tabIndex;
-                if (lpos >= column - 1) {
-                    break;
-                }
-                lpos = ((lpos + 8) / 8) * 8;  // tab!
-                ccount += 1;
-                tabIndex = string.indexOf('\t', ccount);
-            }
-
-            ccount += column - lpos;
-            return ccount;
         }
     }
 
@@ -2975,31 +2772,21 @@ public final class Package
                 showMessageWithText("compiler-error", diagnostic.getMessage());
                 return true;
             }
-                
+
             String message = diagnostic.getMessage();
-            // See if we can help the user a bit more if they've mis-spelt a method:
-            if (message.contains("cannot find symbol") && message.contains("method")) {
-                messageShown = showEditorDiagnostic(diagnostic,
-                        new MisspeltMethodChecker(message,
-                                (int) diagnostic.getStartColumn(),
-                                (int) diagnostic.getStartLine(),
-                                project), numErrors - 1, type);
-            }
-            else
-            {
-                messageShown = showEditorDiagnostic(diagnostic, null, numErrors - 1, type);
-            }
+            messageShown = showEditorDiagnostic(diagnostic, null, numErrors - 1, type);
+
             // Display the error message in the source editor
             switch (messageShown)
             {
-            case EDITOR_NOT_FOUND:
-                showMessageWithText("error-in-file", diagnostic.getFileName() + ":" +
+                case EDITOR_NOT_FOUND:
+                    showMessageWithText("error-in-file", diagnostic.getFileName() + ":" +
                         diagnostic.getStartLine() + "\n" + message);
-                return true;
-            case ERROR_SHOWN:
-                return true;
-            default:
-                return false;
+                    return true;
+                case ERROR_SHOWN:
+                    return true;
+                default:
+                    return false;
             }
         }
 
@@ -3117,12 +2904,8 @@ public final class Package
         DependentTarget to1 = d.getTo();
         from1.addDependencyOut(d, recalc);
         to1.addDependencyIn(d, recalc);
-
-        // Inform all listeners about the added dependency
-        DependencyEvent event = new DependencyEvent(d, this, DependencyEvent.Type.DEPENDENCY_ADDED);
-        ExtensionsManager.getInstance().delegateEvent(event);
     }
-    
+
     public void removeDependency(Dependency dependency, boolean recalc)
     {
         if (dependency instanceof UsesDependency)
@@ -3139,10 +2922,6 @@ public final class Package
 
         from.removeDependencyOut(dependency, recalc);
         to.removeDependencyIn(dependency, recalc);
-
-        // Inform all listeners about the removed dependency
-        DependencyEvent event = new DependencyEvent(dependency, this, DependencyEvent.Type.DEPENDENCY_REMOVED);
-        ExtensionsManager.getInstance().delegateEvent(event);
     }
 
     /**
@@ -3169,38 +2948,26 @@ public final class Package
      */
     public boolean checkDependecyCompilationError(ClassTarget classTarget)
     {
-        boolean dependencyError = false;
-        outerloop:
-        for (Dependency d : classTarget.dependencies())
+        // First calculate all dependencies, no matter how indirect,
+        // taking care to avoid an infinite loop in the case there is a mutual dependency:
+        LinkedList<ClassTarget> toCalculate = new LinkedList<>();
+        toCalculate.add(classTarget);
+        Set<ClassTarget> dependencies = Sets.newIdentityHashSet();
+        while (!toCalculate.isEmpty())
         {
-            ClassTarget dependent = (ClassTarget) d.getTo();
-            if (dependent.getState() == State.HAS_ERROR && dependent.hasSourceCode())
+            ClassTarget t = toCalculate.removeFirst();
+            for (Dependency d : t.dependencies())
             {
-                dependencyError = true;
-                break outerloop;
-            }
-            else
-            {
-                List<Dependency> dependencyParents = dependent.getParents();
-                dependencyError = dependencyParents.stream()
-                        .filter(pv -> pv.getTo().getState() == State.HAS_ERROR)
-                        .findFirst().isPresent();
-                if (dependencyError)
+                ClassTarget to = (ClassTarget) d.getTo();
+                // If it's a dependency we haven't encountered before, we'll also
+                // need to calculate its dependencies:
+                if (dependencies.add(to))
                 {
-                    break outerloop;
-                }
-                //check if the dependant has parents compilation errors
-                for (Dependency parentDependency : dependencyParents)
-                {
-                    ClassTarget dependencyParent = (ClassTarget) parentDependency.getTo();
-                    dependencyError = checkDependecyCompilationError(dependencyParent);
-                    if (dependencyError)
-                    {
-                        break outerloop;
-                    }
+                    toCalculate.add(to);
                 }
             }
         }
-        return dependencyError;
+        
+        return dependencies.stream().anyMatch(d -> d.getState() == State.HAS_ERROR && d.hasSourceCode());
     }
 }

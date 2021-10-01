@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2013,2016,2017,2018  Michael Kolling and John Rosenberg
+ Copyright (C) 1999-2009,2013,2016,2017,2018,2020  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -21,13 +21,24 @@
  */
 package bluej.pkgmgr.target;
 
+import bluej.extmgr.ClassExtensionMenu;
+import bluej.extmgr.ExtensionsManager;
+import bluej.extmgr.ExtensionsMenuManager;
 import bluej.pkgmgr.Package;
 import bluej.pkgmgr.PackageEditor;
+import bluej.utility.Debug;
+import bluej.utility.javafx.AbstractOperation;
 import bluej.utility.javafx.JavaFXUtil;
 
+import java.util.List;
+import java.util.Map;
 import java.util.Properties;
+
+import javafx.collections.FXCollections;
 import javafx.geometry.Bounds;
 import javafx.geometry.Point2D;
+import javafx.scene.AccessibleAttribute;
+import javafx.scene.AccessibleRole;
 import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
 import javafx.scene.control.Labeled;
@@ -51,10 +62,10 @@ import threadchecker.Tag;
  * @author Michael Cahill
  */
 public abstract class Target
-    implements Comparable<Target>
+    implements Comparable<Target>, AbstractOperation.ContextualItem<Target>
 {
-    static final int DEF_WIDTH = 80;
-    static final int DEF_HEIGHT = 50;
+    static final int DEF_WIDTH = 120;
+    static final int DEF_HEIGHT = 70;
     static final int ARR_HORIZ_DIST = 5;
     static final int ARR_VERT_DIST = 10;
     static final int HANDLE_SIZE = 20;
@@ -114,16 +125,22 @@ public abstract class Target
      * Create a new target with default size.
      */
     @OnThread(Tag.FXPlatform)
-    public Target(Package pkg, String identifierName)
+    public Target(Package pkg, String identifierName, String accessibleTargetType)
     {
-        pane.setPrefWidth(calculateWidth(new Label(), identifierName));
+        this.pkg = pkg;
+        this.identifierName = identifierName;
+        this.displayName = identifierName;
+        
+        pane.setPrefWidth(calculateWidth(new Label(), identifierName, DEF_WIDTH));
         pane.setPrefHeight(DEF_HEIGHT);
         // We set this here rather than via CSS because we vary it dynamically:
         pane.setCursor(Cursor.HAND);
         JavaFXUtil.addStyleClass(pane, "target");
         pane.setEffect(new DropShadow(SHADOW_RADIUS, SHADOW_RADIUS/2.0, SHADOW_RADIUS/2.0, javafx.scene.paint.Color.GRAY));
-
+        
         pane.setFocusTraversable(true);
+        updateAccessibleName(accessibleTargetType, null);
+        pane.setAccessibleRole(AccessibleRole.BUTTON);
         JavaFXUtil.addFocusListener(pane, hasFocus -> {
             PackageEditor pkgEditor = pkg.getEditor();
 
@@ -309,17 +326,32 @@ public abstract class Target
         });
 
         JavaFXUtil.listenForContextMenu(pane, (x, y) -> {
-            pkg.getEditor().selectOnly(this);
-            popupMenu(x.intValue(), y.intValue(), pkg.getEditor());
+            // If we are not in the current selection, make us the selection:
+            if (!pkg.getEditor().getSelection().contains(Target.this))
+            {
+                pkg.getEditor().selectOnly(Target.this);
+            }
+            
+            AbstractOperation.MenuItems menuItems = AbstractOperation.getMenuItems(pkg.getEditor().getSelection(), true);
+            ContextMenu contextMenu = AbstractOperation.MenuItems.makeContextMenu(Map.of("", menuItems));
+            if (pkg.getEditor().getSelection().size() == 1 && pkg.getEditor().getSelection().get(0) instanceof ClassTarget)
+            {
+                ClassTarget classTarget = (ClassTarget)pkg.getEditor().getSelection().get(0);
+                ExtensionsMenuManager menuManager = new ExtensionsMenuManager(contextMenu, ExtensionsManager.getInstance(), new ClassExtensionMenu(classTarget));
+                menuManager.addExtensionMenu(getPackage().getProject());
+            }
+            showingMenu(contextMenu);
+            contextMenu.show(pane, x.intValue(), y.intValue());
             return true;
         }, KeyCode.SPACE, KeyCode.ENTER);
 
         if (pkg == null)
             throw new NullPointerException();
+    }
 
-        this.pkg = pkg;
-        this.identifierName = identifierName;
-        this.displayName = identifierName;
+    protected void updateAccessibleName(String accessibleTargetType, String suffix)
+    {
+        pane.setAccessibleText(getIdentifierName() + (accessibleTargetType != null && !accessibleTargetType.isEmpty() ? " " + accessibleTargetType : "") + (suffix == null ? "" : suffix));
     }
 
     @OnThread(Tag.FXPlatform)
@@ -357,15 +389,17 @@ public abstract class Target
      * @return the width the target should have to fully display its name.
      */
     @OnThread(Tag.FX)
-    protected static int calculateWidth(Labeled node, String name)
+    protected static int calculateWidth(Labeled node, String name, int minWidth)
     {
         int width = 0;
         if (name != null)
             width = (int)JavaFXUtil.measureString(node, name);
-        if ((width + 20) <= DEF_WIDTH)
-            return DEF_WIDTH;
+        if ((width + 20) <= minWidth)
+            return minWidth;
         else
-            return (width + 29) / PackageEditor.GRID_SIZE * PackageEditor.GRID_SIZE;
+            // Snap to GRID_SIZE coordinates, at the next coordinate past width + 20.
+            // e.g. GRID_SIZE=10, width = 17, snap to 40 (17 + 20 -> next snap).
+            return ((width + 20 + (PackageEditor.GRID_SIZE - 1)) / PackageEditor.GRID_SIZE) * PackageEditor.GRID_SIZE;
     }
     
     /**
@@ -621,9 +655,6 @@ public abstract class Target
 
     @OnThread(Tag.FXPlatform)
     public abstract void doubleClick(boolean openInNewWindow);
-
-    @OnThread(Tag.FXPlatform)
-    public abstract void popupMenu(int x, int y, PackageEditor editor);
 
     public abstract void remove();
 

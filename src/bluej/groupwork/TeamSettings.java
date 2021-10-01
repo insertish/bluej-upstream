@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2015,2016,2017  Michael Kolling and John Rosenberg
+ Copyright (C) 1999-2009,2015,2016,2017,2019,2020  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -32,31 +32,26 @@ import threadchecker.Tag;
 @OnThread(Tag.Any)
 public class TeamSettings
 {
-    private TeamworkProvider provider;
     private String protocol;
     private String server;
+    private int port;
     private String prefix;
-    private String group;
+    private String branch;
     private String username;
     private String password;
     private String yourName;
     private String yourEmail;
     
-    public TeamSettings(TeamworkProvider provider, String protocol, String server,
-            String prefix, String group, String username, String password)
+    public TeamSettings(String protocol, String server, int port,
+            String prefix, String branch, String username, String password)
     {
-        this.provider = provider;
         this.protocol = protocol;
         this.server = server;
+        this.port = port;
         this.prefix = prefix;
-        this.group = group;
+        this.branch = branch;
         this.username = username;
         this.password = password;
-    }
-    
-    public TeamworkProvider getProvider()
-    {
-        return provider;
     }
     
     public String getProtocol()
@@ -68,15 +63,19 @@ public class TeamSettings
     {
         return server;
     }
+
+    public int getPort() {
+        return port;
+    }
     
     public String getPrefix()
     {
         return prefix;
     }
-    
-    public String getGroup()
+
+    public String getBranch()
     {
-        return group;
+        return branch;
     }
     
     public String getUserName()
@@ -126,15 +125,18 @@ public class TeamSettings
      * @param protocol the string containting the protocol
      * @param server the server address
      * @param prefix the repository path in the server
-     * @param userName the user name used for login
      * @return the connection string in URI format.
      */
-    public static String getURI(String protocol, String server, String prefix){
+    public static String getURI(String protocol, String server, int port, String prefix){
         
         String gitUrl = protocol + "://";
 
 
         gitUrl += server;
+        if(port > 0) {
+            gitUrl += (":" + port);
+        }
+
         if (prefix.length() != 0 && !prefix.startsWith("/")) {
             gitUrl += "/";
         }

@@ -13,14 +13,14 @@
     <!-- 
      This is the only place you need to change the version number.
      After changing the version number the target "update-version-number" should be run -->
-    <property name="bluej.version.major" value="4" />
-    <property name="bluej.version.minor" value="2" />
-    <property name="bluej.version.release" value="2" />
+    <property name="bluej.version.major" value="5" />
+    <property name="bluej.version.minor" value="0" />
+    <property name="bluej.version.release" value="0" />
     <property name="bluej.version.suffix" value="" />
     <!-- suffix with no spaces, eg "pre2" -->
     <property name="bluej.version.nonspace.suffix" value="" />
     <!-- Suffix added after version number in output files -->
-    <property name="bluej.rcsuffix" value="-rc1"/>
+    <property name="bluej.rcsuffix" value="-rc4"/>
     
     <property name="bluej.version" value="${bluej.version.major}.${bluej.version.minor}.${bluej.version.release}${bluej.version.suffix}" />
     <property name="bluej.version.nosuffix" value="${bluej.version.major}.${bluej.version.minor}.${bluej.version.release}" />
@@ -45,14 +45,15 @@
     <property name="test.build" value="test/classes"/>
     <property name="test.report" value="test/report"/>
 
-    <property name="extensions.lib"  location="${bluej_home}/lib/extensions"/>
+    <property name="extensions.lib"  location="${bluej_home}/lib/extensions2"/>
 
     <property name="boot.jar" value="${bluej_home}/lib/bluej.jar"/>
     <property name="core.jar" value="${bluej_home}/lib/bluejcore.jar"/>
     <property name="editor.jar" value="${bluej_home}/lib/bluejeditor.jar"/>
-    <property name="extension.jar" value="${bluej_home}/lib/bluejext.jar"/>
+    <property name="extension2.jar" value="${bluej_home}/lib/bluejext2.jar"/>
     <property name="lang-stride.jar" value="${bluej_home}/lib/lang-stride.jar"/>
     <property name="greenfoot-native.jar" value="${bluej_home}/lib/greenfoot-native.jar"/>
+    <property name="bluej-junit-ext.jar" value="${bluej_home}/lib/userlib/bluej-junit-ext.jar"/>
 
     <path id="javafx.class.path">
         <pathelement location="${openjfx_path}/lib/javafx.base.jar"/>
@@ -80,16 +81,8 @@
     
     <!-- Set up classpath (does not include jar files built by us) -->
     <path id="bluej.class.path">
-        <pathelement location="${bluej_home}/lib/junit-4.11.jar"/>
+        <fileset dir="${bluej_home}/lib/" includes="junit-*.jar" />
         <pathelement location="${bluej_home}/lib/hamcrest-core-1.3.jar"/>
-        <pathelement location="${bluej_home}/lib/svnkit.jar"/>
-        <pathelement location="${bluej_home}/lib/svnkit-javahl.jar"/>
-        <pathelement location="${bluej_home}/lib/eddsa-0.2.0.jar"/>
-        <pathelement location="${bluej_home}/lib/jbcrypt-1.0.0.jar"/>
-        <pathelement location="${bluej_home}/lib/trilead-ssh2-build-217-jenkins-11.jar"/>
-        <pathelement location="${bluej_home}/lib/antlr-runtime-3.4.jar"/>
-        <pathelement location="${bluej_home}/lib/sequence-library-1.0.3.jar"/>
-        <pathelement location="${bluej_home}/lib/sqljet-1.1.10.jar"/>
         <pathelement location="${bluej_home}/lib/httpclient-4.1.1.jar"/>
         <pathelement location="${bluej_home}/lib/httpcore-4.1.jar"/>
         <pathelement location="${bluej_home}/lib/httpmime-4.1.1.jar"/>
@@ -99,9 +92,23 @@
         <pathelement location="${bluej_home}/lib/guava-17.0.jar"/>
         <pathelement location="${bluej_home}/lib/jsch-0.1.53.jar"/>
         <pathelement location="${bluej_home}/lib/org.eclipse.jgit-4.9.0.jar"/>
-        <pathelement location="${bluej_home}/lib/nsmenufx-2.1.4.jar"/>
+        <pathelement location="${bluej_home}/lib/nsmenufx-2.1.8.jar"/>
         <pathelement location="${bluej_home}/lib/richtextfx-fat-0.9.0.jar"/>
-        <pathelement location="${bluej_home}/lib/classgraph-4.2.6.jar"/>
+        <pathelement location="${bluej_home}/lib/classgraph-4.8.90.jar"/>
+    </path>
+    
+    <path id="test.class.path">
+        <pathelement location="${bluej_home}/lib/hamcrest-library-1.3.jar"/>
+        <pathelement location="${bluej_home}/lib/slf4j-api-1.7.2.jar"/>
+        <pathelement location="${bluej_home}/lib/slf4j-jdk14-1.7.2.jar"/>
+        <pathelement location="${bluej_home}/lib/testlib/antlr-runtime-3.4.jar"/>
+        <pathelement location="${bluej_home}/lib/testlib/generics-resolver-2.0.1.jar"/>
+        <pathelement location="${bluej_home}/lib/testlib/javaruntype-1.3.jar"/>
+        <pathelement location="${bluej_home}/lib/testlib/junit-quickcheck-core-0.8.2.jar"/>
+        <pathelement location="${bluej_home}/lib/testlib/ognl-3.1.12.jar"/>
+        <pathelement location="${bluej_home}/lib/testlib/openjfx-monocle-jdk-11+26.jar"/>
+        <pathelement location="${bluej_home}/lib/testlib/testfx-core-4.0.15-alpha.jar"/>
+        <pathelement location="${bluej_home}/lib/testlib/testfx-junit-4.0.15-alpha.jar"/>
     </path>
 
     <import file="shared.xml"/>
@@ -119,7 +126,7 @@
                 <pathelement location="${threadchecker.build}"/>
                 <pathelement location="${threadchecker.pluginbuild}"/>
                 <path refid="javafx.class.path"/>
-                <pathelement location="${bluej_home}/lib/nsmenufx-2.1.4.jar"/>
+                <pathelement location="${bluej_home}/lib/nsmenufx-2.1.8.jar"/>
             </classpath>
             <compilerarg value="-Xmaxerrs"/><compilerarg value="100"/>
             <compilerarg value="-Xplugin:threadchecker.TCPlugin"/>
@@ -189,6 +196,7 @@
             <classpath>
                 <path refid="javafx.class.path"/>
                 <path refid="bluej.class.path"/>
+                <path refid="test.class.path"/>
                 <pathelement location="${threadchecker.build}"/>
                 <pathelement location="${boot.build}"/>
                 <pathelement location="${core.build}"/>
@@ -220,7 +228,7 @@
         <delete quiet="true" file="${core.jar}"/>
         <jar compress="yes" jarfile="${core.jar}">
             <fileset dir="${core.build}">
-                <exclude name="bluej/extensions/**" />
+                <exclude name="bluej/extensions2/**" />
                 <exclude name="bluej/editor/**" />
                 <exclude name="org/**" />
                 <exclude name="lang/**" />
@@ -228,6 +236,20 @@
             <fileset dir="lib">
                 <include name="stylesheets/**"/>
             </fileset>
+        </jar>
+    </target>
+
+    <target name="jar-junit-extension" depends="jar-boot, compile-core">
+        <!-- delete the old jar first. To make sure it gets recreated -->
+        <delete quiet="true" file="${bluej-junit-ext.jar}"/>
+        <jar compress="yes" jarfile="${bluej-junit-ext.jar}">
+            <fileset dir="${core.build}/bluej/runtime">
+                <exclude name="**" />
+                <include name="UnitTestExtension.java" />
+            </fileset>
+            <metainf dir="${core.src}/bluej/runtime">
+                <include name="services/**"/>
+            </metainf>
         </jar>
     </target>
 
@@ -256,20 +278,20 @@
 
     <target name="jar-extension" depends="jar-boot, compile-core">
         <!-- delete the old jar first. To make sure it gets recreated -->
-        <delete quiet="true" file="${extension.jar}"/>
-        <jar compress="yes" jarfile="${extension.jar}">
+        <delete quiet="true" file="${extension2.jar}"/>
+        <jar compress="yes" jarfile="${extension2.jar}">
             <fileset dir="${core.build}">
-                <include name="bluej/extensions/**" />
+                <include name="bluej/extensions2/**" />
             </fileset>
         </jar>
     </target>
 
-    <target name="ready-to-run" depends="jar-core, jar-editor, jar-extension, jar-stride">
+    <target name="ready-to-run" depends="jar-core, jar-editor, jar-extension, jar-stride, jar-junit-extension">
     </target>
 
     <target name="ready-to-run-greenfoot" description="prepare to run Greenfoot">
         <!-- We can exclude version control from the build -->
-        <property name="srcexcludes" value="bluej/groupwork/svn/**,bluej/groupwork/git/**" />
+        <property name="srcexcludes" value="bluej/groupwork/git/**" />
         <antcall target="ready-to-run" />
     </target>
 
@@ -289,7 +311,6 @@
                 <pathelement location="${boot.jar}"/>
                 <pathelement location="/System/Library/Java"/>
             </classpath>
-            <jvmarg value="-Djavafx.embed.singleThread=true"/>
         </java>
     </target>
 
@@ -316,7 +337,7 @@
     <!-- The simple targets for doing a complete build: -->
     <target name="mac" description="Clean, update version number and build Mac installer" depends="clean,update-version-number,mac-dist"/>
     <target name="windows" description="Clean, update version number and build Windows installers" depends="clean,update-version-number,windows-msi-bundled-dist,windows-standalone"/>
-    <target name="debian" description="Clean, update version number and build Debian/Ubuntu installer (run with fakeroot ant)" depends="clean,update-version-number,debian-dist"/>
+    <target name="debian" description="Clean, update version number and build Debian/Ubuntu installer (run with fakeroot ant)" depends="clean,update-version-number,debian-dist,debian-bundled-dist"/>
 
     <target name="urls-rc" description="Check and print RC links">
         <ant dir="package" target="urls-rc"/>
@@ -330,15 +351,20 @@
     <target name="debian-dist" description="Build the .deb Debian/Ubuntu package" depends="check-fakeroot,dist">
         <ant dir="package" target="debian-dist"/>
     </target>
+    <target name="debian-bundled-dist" description="Build the .deb Debian/Ubuntu package" depends="check-fakeroot,dist">
+        <ant dir="package" target="debian-bundled-dist"/>
+    </target>
 
     <target name="test" depends="compile-boot, compile-core, compile-test">
         <junit printsummary="yes" haltonfailure="yes">
             <classpath>
                 <path refid="javafx.class.path"/>
                 <path refid="bluej.class.path"/>
+                <path refid="test.class.path"/>
+                
                 <pathelement location="${boot.build}"/>
                 <pathelement location="${core.build}"/>
-                <pathelement location="${extension.jar}"/>
+                <pathelement location="${extension2.jar}"/>
                 <pathelement location="${editor.jar}"/>
                 <pathelement location="${lang-stride.jar}"/>
                 <pathelement location="${test.build}"/>
@@ -347,6 +373,16 @@
             </classpath>
 
             <formatter type="brief" usefile="false"/>
+            
+            <jvmarg value="-Djava.awt.headless=true"/>
+            <jvmarg value="-Dtestfx.robot=glass"/>
+            <jvmarg value="-Dtestfx.headless=true"/>
+            <jvmarg value="-Dprism.order=sw"/>
+            <jvmarg value="-Dprism.text=t2k"/>
+            <jvmarg value="-Dtestfx.setup.timeout=5000"/>
+            <jvmarg value="-Dglass.platform=Monocle"/>
+            <jvmarg value="-Dmonocle.platform=Headless"/>
+            <jvmarg value="-Dheadless.geometry=1280x1024-32"/>
 
             <batchtest fork="yes" skipnontests="true">
                 <fileset dir="${test.src}">
@@ -356,7 +392,7 @@
         </junit>
     </target>
 
-    <target name="doc-extension">
+    <target name="doc-extension" depends="jar-boot, compile-boot">
         <mkdir dir="${extension.doc}"/>
         <javadoc destdir="${extension.doc}"
             packagenames="bluej.extensions.event"
@@ -364,16 +400,21 @@
 
             Windowtitle="BlueJ Extensions API"
             Doctitle="BlueJ Extensions API"
-            bottom="&lt;a href=http://www.bluej.org/&gt;BlueJ homepage&lt;/a&gt;">
+            bottom="&lt;a href=http://www.bluej.org/&gt;BlueJ homepage&lt;/a&gt;"
+            Encoding="utf8">
 
             <fileset dir="src" defaultexcludes="yes">
-                <include name="bluej/extensions/*.java" />
-                <exclude name="bluej/extensions/ExtensionBridge.java"/>
-                <include name="bluej/extensions/editor/*.java"/>
-                <exclude name="bluej/extensions/editor/EditorBridge.java"/>
+                <include name="bluej/extensions2/*.java" />
+                <exclude name="bluej/extensions2/ExtensionBridge.java"/>
+                <include name="bluej/extensions2/editor/*.java"/>
+                <exclude name="bluej/extensions2/editor/EditorBridge.java"/>
+                <include name="bluej/extensions2/event/*.java"/>
             </fileset>
             <classpath>
                 <path refid="bluej.class.path"/>
+                <pathelement location="${threadchecker.build}"/>
+                <pathelement location="${threadchecker.pluginbuild}"/>
+                <path refid="javafx.class.path"/>
                 <pathelement location="${boot.jar}"/>
             </classpath>
         </javadoc>
@@ -453,20 +494,20 @@
         <mkdir dir="boot/resources/bluej"/>
         <java classname="DrawVersionOnSplash" classpath="util/classes" fork="yes" jvm="${run_java_home}/${java_command_dir_name}/java">
             <arg value="resources/unversioned-bluej-splash.png"/> <!-- original -->
-            <arg value="Version ${bluej.version}"/> <!-- text -->
+            <arg value="${bluej.version}"/> <!-- text -->
             <arg value="${bluej_home}/lib/fonts/SourceSansPro-Bold.ttf"/> <!-- font -->
             <arg value="16"/> <!-- font size -->
-            <arg value="237"/> <!-- X position -->
-            <arg value="130"/> <!-- Y position -->
+            <arg value="215"/> <!-- X position -->
+            <arg value="114"/> <!-- Y position -->
             <arg value="boot/resources/bluej/gen-bluej-splash.png"/> <!-- destination -->
         </java>
         <java classname="DrawVersionOnSplash" classpath="util/classes" fork="yes" jvm="${run_java_home}/${java_command_dir_name}/java">
             <arg value="resources/unversioned-bluej-splash@2x.png"/> <!-- original -->
-            <arg value="Version ${bluej.version}"/> <!-- text -->
+            <arg value="${bluej.version}"/> <!-- text -->
             <arg value="${bluej_home}/lib/fonts/SourceSansPro-Bold.ttf"/> <!-- font -->
             <arg value="32"/> <!-- font size -->
-            <arg value="470"/> <!-- X position -->
-            <arg value="260"/> <!-- Y position -->
+            <arg value="430"/> <!-- X position -->
+            <arg value="228"/> <!-- Y position -->
             <arg value="boot/resources/bluej/gen-bluej-splash@2x.png"/> <!-- destination -->
         </java>
     </target>
@@ -483,7 +524,7 @@
         <delete quiet="false" file="${greenfoot-native.jar}" />
         <delete dir="package/scenarios" />
         <delete>
-            <fileset file="lib/extensions/greenfoot.jar"/>
+            <fileset file="lib/extensions2/greenfoot.jar"/>
         </delete>
         
         <delete includeEmptyDirs="true">
@@ -497,7 +538,7 @@
         <delete quiet="true" dir="${core.build}" />
         <delete quiet="true" file="${core.jar}" />
         <delete quiet="true" file="${editor.jar}" />
-        <delete quiet="true" file="${extension.jar}" />
+        <delete quiet="true" file="${extension2.jar}" />
         <delete quiet="true" file="${lang-stride.jar}" />
     </target>
 
@@ -529,35 +570,39 @@
                 <!-- DO NOT add to this list without first ensuring that the above requirements
                      are met! -->
 
-                <exclude name="antlr-runtime-3.4.jar"/>
                 <exclude name="commons-logging-api-1.1.2.jar"/>
-                <exclude name="classgraph-4.2.6.jar"/>
+                <exclude name="classgraph-4.8.90.jar"/>
                 <exclude name="diffutils-1.2.1.jar"/>
-                <exclude name="eddsa-0.2.0.jar"/>
                 <exclude name="guava-17.0.jar"/>
                 <exclude name="hamcrest-core-1.3.jar"/>
+                <exclude name="hamcrest-library-1.3.jar"/>
                 <exclude name="httpclient-4.1.1.jar"/>
                 <exclude name="httpcore-4.1.jar"/>
                 <exclude name="httpmime-4.1.1.jar"/>
-                <exclude name="jbcrypt-1.0.0.jar"/>
-                <exclude name="junit-4.11.jar"/>
-                <exclude name="nsmenufx-2.1.4.jar"/>
+                <exclude name="junit-*.jar"/>
+                <exclude name="nsmenufx-2.1.8.jar"/>
+                <exclude name="opentest4j-1.2.0.jar"/>
                 <exclude name="richtextfx-fat-0.9.0.jar"/>
-                <exclude name="sequence-library-1.0.3.jar"/>
-                <exclude name="svnkit.jar"/>
-                <exclude name="svnkit-javahl.jar"/>
-                <exclude name="sqljet-1.1.10.jar"/>
                 <exclude name="xom-1.2.9.jar"/>
                 <exclude name="jsch-0.1.53.jar"/>
                 <exclude name="org.eclipse.jgit-4.9.0.jar"/>
                 <exclude name="slf4j-api-1.7.2.jar"/>
                 <exclude name="slf4j-jdk14-1.7.2.jar"/>
-                <exclude name="trilead-ssh2-build-217-jenkins-11.jar"/>
 
                 <!-- Greenfoot libraries: -->
                 <exclude name="jl1.0.1.jar"/>
                 <exclude name="opencsv-2.3.jar"/>
 
+            </fileset>
+            <fileset dir="lib/testlib">
+                <exclude name="antlr-runtime-3.4.jar"/>
+                <exclude name="generics-resolver-2.0.1.jar"/>
+                <exclude name="javaruntype-1.3.jar"/>
+                <exclude name="junit-quickcheck-core-0.8.2.jar"/>
+                <exclude name="ognl-3.1.12.jar"/>
+                <exclude name="openjfx-monocle-jdk-11+26.jar"/> <!-- Same licence as OpenJFX -->
+                <exclude name="testfx-core-4.0.15-alpha.jar"/>
+                <exclude name="testfx-junit-4.0.15-alpha.jar"/>
             </fileset>
         </pathconvert>
         

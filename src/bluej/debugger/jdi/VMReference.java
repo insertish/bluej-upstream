@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2011,2012,2013,2014,2015,2016,2017,2018,2019  Michael Kolling and John Rosenberg
+ Copyright (C) 1999-2009,2010,2011,2012,2013,2014,2015,2016,2017,2018,2019,2020  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -40,6 +40,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 
+import bluej.debugger.Debugger.EventHandlerRunnable;
 import bluej.debugger.RunOnThread;
 import bluej.utility.DialogManager;
 import bluej.utility.javafx.FXPlatformSupplier;
@@ -166,7 +167,7 @@ public class VMReference
     private ClassType serverClass = null;
 
     // the thread running inside the ExecServer
-    private ThreadReference serverThread = null;
+    private JdiThread serverThread = null;
     private boolean serverThreadStarted = false;
 
     // the worker thread running inside the ExecServer
@@ -189,6 +190,9 @@ public class VMReference
     private int exitStatus;
     @OnThread(Tag.Any)
     private ExceptionDescription lastException;
+
+    // Boolean flag indicating if the VM is being closed by BlueJ internally.
+    private boolean queuedForClose = false;
 
     /**
      * Launch a remote debug VM using a TCP/IP socket.
@@ -451,9 +455,6 @@ public class VMReference
      * Launch the debug VM and set up the I/O connectors to the terminal.
      * @param initDir   the directory which the vm should be started in
      * @param params    the parameters (including executable as first param)
-     * @param line      a buffer which receives the first line of output from
-     *                  the debug vm process
-     * @param term      the terminal to connect to process I/O
      */
     @OnThread(Tag.Any)
     private Process launchVM(File initDir, String [] params)
@@ -582,6 +583,7 @@ public class VMReference
     public synchronized void close()
     {
         if (machine != null) {
+            queuedForClose = true;
             closeIO();
             // cause the debug VM to exit when disposed
             try {
@@ -783,6 +785,7 @@ public class VMReference
      * @return a Reference to the class mirrored in the remote VM
      * @throws ClassNotFoundException  if the remote class can't be loaded
      */
+    @OnThread(Tag.NOTVMEventHandler)
     ReferenceType loadClass(String className)
         throws ClassNotFoundException
     {
@@ -800,6 +803,7 @@ public class VMReference
      *                   the current established project classloader
      * @return     A reference to the loaded class, or null if the class could not be loaded.
      */
+    @OnThread(Tag.NOTVMEventHandler)
     ReferenceType loadClass(String className, ClassLoaderReference clr)
     {
         synchronized(workerThread) {
@@ -871,14 +875,10 @@ public class VMReference
     /**
      * "Start" a class (i.e. invoke its main method)
      * 
-     * @param loader
-     *            the class loader to use
-     * @param classname
+     * @param className
      *            the class to start
-     * @param eventParam
-     *            when a BlueJEvent is generated for a breakpoint, this
-     *            parameter is passed as the event parameter
      */
+    @OnThread(Tag.NOTVMEventHandler)
     public DebuggerResult runShellClass(String className)
     {
         // Calls to this method are protected by serverThreadLock in JdiDebugger
@@ -913,7 +913,7 @@ public class VMReference
             return new DebuggerResult(JdiObject.getDebuggerObject(objR));
         }
         catch (VMDisconnectedException e) {
-            exitStatus = Debugger.TERMINATED;
+            exitStatus = getDebuggerExitStatus();
             return new DebuggerResult(exitStatus);
         }
         catch (Exception e) {
@@ -926,10 +926,16 @@ public class VMReference
         
         return new DebuggerResult(lastException);
     }
-    
+
+    private int getDebuggerExitStatus()
+    {
+        return queuedForClose ? Debugger.TERMINATED_BY_BLUEJ : Debugger.TERMINATED_BY_USER_SYSTEM_EXIT;
+    }
+
     /**
      * Invoke the default constructor for some class, and return the resulting object.
      */
+    @OnThread(Tag.NOTVMEventHandler)
     public DebuggerResult instantiateClass(String className)
     {
         ObjectReference obj = null;
@@ -938,9 +944,9 @@ public class VMReference
             obj = invokeConstructor(className);
         }
         catch (VMDisconnectedException e) {
-            exitStatus = Debugger.TERMINATED;
+            exitStatus = getDebuggerExitStatus();
             // return null; // debugger state change handled elsewhere
-            return new DebuggerResult(Debugger.TERMINATED);
+            return new DebuggerResult(exitStatus);
         }
         catch (Exception e) {
             // remote invocation failed
@@ -970,6 +976,7 @@ public class VMReference
      * @return  The newly constructed object (or null if error/exception
      *          occurs)
      */
+    @OnThread(Tag.NOTVMEventHandler)
     public DebuggerResult instantiateClass(String className, String [] paramTypes, ObjectReference [] args)
     {
         ObjectReference obj = null;
@@ -978,7 +985,7 @@ public class VMReference
             obj = invokeConstructor(className, paramTypes, args);
         }
         catch (VMDisconnectedException e) {
-            exitStatus = Debugger.TERMINATED;
+            exitStatus = getDebuggerExitStatus();
             return new DebuggerResult(exitStatus); // debugger state change handled elsewhere
         }
         catch (Exception e) {
@@ -1005,18 +1012,7 @@ public class VMReference
     {
         eventHandler.emitThreadEvent(thread, halted);
     }
-    
-    /**
-     * Return the status of the last invocation. One of (NORMAL_EXIT,
-     * FORCED_EXIT, EXCEPTION, TERMINATED).
-     * 
-     * (?? Question: What is the difference between "FORCED_EXIT" and
-     *  "TERMINATED"? We only seem to use the latter -dm)
-     */
-    public int getExitStatus()
-    {
-        return exitStatus;
-    }
+
 
     /**
      * Return the text of the last exception.
@@ -1037,6 +1033,7 @@ public class VMReference
     /**
      * The VM has been disconnected or ended.
      */
+    @OnThread(Tag.VMEventHandler)
     public void vmDisconnectEvent()
     {
         synchronized (this) {
@@ -1048,7 +1045,7 @@ public class VMReference
             // If VM disconnect occurs during invocation, the server thread won't
             // restart in this VM; the method waiting for it to start will hang
             // indefinitely unless we kick it here.
-            exitStatus = Debugger.TERMINATED;
+            exitStatus = getDebuggerExitStatus();
             if (!serverThreadStarted) {
                 notifyAll();
             }
@@ -1069,6 +1066,7 @@ public class VMReference
     /**
      * A thread has started.
      */
+    @OnThread(Tag.VMEventHandler)
     public void threadStartEvent(ThreadStartEvent tse)
     {
         owner.threadStart(tse.thread());
@@ -1077,6 +1075,7 @@ public class VMReference
     /**
      * A thread has died.
      */
+    @OnThread(Tag.VMEventHandler)
     public void threadDeathEvent(ThreadDeathEvent tde)
     {
         ThreadReference tr = tde.thread();
@@ -1093,6 +1092,7 @@ public class VMReference
      * A thread has been suspended (due to a breakpoint, step, or
      * call to DebuggerThread.halt()).
      */
+    @OnThread(Tag.VMEventHandler)
     public void threadHaltedEvent(JdiThread thread)
     {
         owner.threadHalted(thread);
@@ -1101,6 +1101,7 @@ public class VMReference
     /**
      * A thread has been resumed.
      */
+    @OnThread(Tag.VMEventHandler)
     public void threadResumedEvent(JdiThread thread)
     {
         owner.threadResumed(thread);
@@ -1210,6 +1211,7 @@ public class VMReference
     /**
      * A breakpoint has been hit or step completed in a thread.
      */
+    @OnThread(Tag.VMEventHandler)
     public void breakpointEvent(LocatableEvent event, int debuggerEventType, boolean skipUpdate)
     {
         // if the breakpoint is marked as with the SERVER_STARTED property
@@ -1220,7 +1222,7 @@ public class VMReference
             // wake up the waitForStartup() method
             synchronized (this) {
                 serverThreadStarted = true;
-                serverThread = event.thread();
+                serverThread = owner.findThread(event.thread());
                 owner.raiseStateChangeEvent(Debugger.IDLE);
                 notifyAll();
             }
@@ -1247,7 +1249,7 @@ public class VMReference
         }
         else {
             // breakpoint set by user in user code
-            if (serverThread.equals(event.thread())) {
+            if (serverThread.sameThread(event.thread())) {
                 owner.raiseStateChangeEvent(Debugger.SUSPENDED);
             }
             
@@ -1288,6 +1290,7 @@ public class VMReference
             };
     }
 
+    @OnThread(Tag.VMEventHandler)
     public boolean screenBreakpointEvent(LocatableEvent event, int debuggerEventType)
     {
         BreakpointProperties props = makeBreakpointProperties(event.request());
@@ -1310,6 +1313,7 @@ public class VMReference
      * Find and load all classes declared in the same source file as className
      * and then find the Location object for the source at the line 'line'.
      */
+    @OnThread(Tag.FXPlatform)
     private Location loadClassesAndFindLine(String className, int line)
     {
         ReferenceType remoteClass = null;
@@ -1391,6 +1395,7 @@ public class VMReference
      * @param properties The collection of properties to set on the breakpoint.  Can be null.
      * @return null if there was no problem, or an error string
      */
+    @OnThread(Tag.FXPlatform)
     String setBreakpoint(String className, int line, Map<String, String> properties)
     {
         Location location = loadClassesAndFindLine(className, line);
@@ -1442,6 +1447,7 @@ public class VMReference
     }
     
     // As above but sets the breakpoint on the first line of a given method
+    @OnThread(Tag.FXPlatform)
     String setBreakpoint(String className, String methodName, Map<String, String> properties)
     {
         try {
@@ -1471,6 +1477,7 @@ public class VMReference
      *            The line number of the breakpoint.
      * @return null if there was no problem, or an error string
      */
+    @OnThread(Tag.FXPlatform)
     String clearBreakpoint(String className, int line)
     {
         Location location = loadClassesAndFindLine(className, line);
@@ -1520,29 +1527,6 @@ public class VMReference
         }
     }
 
-    /**
-     * Return a list of the Locations of user breakpoints in the VM.
-     */
-    public List<Location> getBreakpoints()
-    {
-        // Debug.message("[VMRef] getBreakpoints()");
-
-        EventRequestManager erm = machine.eventRequestManager();
-        List<Location> breaks = new LinkedList<Location>();
-
-        List<BreakpointRequest> allBreakpoints = erm.breakpointRequests();
-        Iterator<BreakpointRequest> it = allBreakpoints.iterator();
-
-        while (it.hasNext()) {
-            BreakpointRequest bp = (BreakpointRequest) it.next();
-
-            if (bp.location().declaringType().classLoader() == currentLoader) {
-                breaks.add(bp.location());
-            }
-        }
-
-        return breaks;
-    }
     
     /**
      * Remove all user breakpoints
@@ -1587,72 +1571,6 @@ public class VMReference
         
         erm.deleteEventRequests(toDelete);
     }
-
-    /**
-     * Restore the previosuly saved breakpoints with the new classloader.
-     * 
-     * @param loader
-     *            The new class loader to restore the breakpoints into
-     */
-    public void restoreBreakpoints(List<Location> saved)
-    {
-        // Debug.message("[VMRef] restoreBreakpoints()");
-
-        EventRequestManager erm = machine.eventRequestManager();
-
-        // create the list of locations - converted to the new classloader
-        // this has to be done before we suspend the machine because
-        // loadClassesAndFindLine needs the machine running to work
-        // see bug #526
-        List<Location> newSaved = new ArrayList<Location>();
-
-        Iterator<Location> savedIterator = saved.iterator();
-
-        while (savedIterator.hasNext()) {
-            Location oldLocation = savedIterator.next();
-
-            Location newLocation = loadClassesAndFindLine(oldLocation.declaringType().name(), oldLocation.lineNumber());
-
-            if (newLocation != null) {
-                newSaved.add(newLocation);
-            }
-        }
-
-        // to stop our server thread getting away from us, lets halt the
-        // VM temporarily
-        synchronized(workerThread) {
-            workerThreadReadyWait();
-            
-            // we need to throw away all the breakpoints referring to the old
-            // class loader but then we need to restore our internal breakpoints
-            
-            // Note, we have to be careful when deleting breakpoints. There is
-            // a JDI bug which causes threads to halt indefinitely when hitting
-            // a breakpoint that is being deleted. That's why we wait for the
-            // worker thread to be in a stopped state before we proceed, and we
-            // suspend the machine to prevent problems with the server thread.
-            // Also we make sure any pending breakpoint events are processed before
-            // removing the breakpoints.
-            machine.suspend();
-            eventHandler.waitQueueEmpty();
-            erm.deleteAllBreakpoints();
-            serverClassAddBreakpoints();
-            
-            // add all the new breakpoints we have created
-            Iterator<Location> it = newSaved.iterator();
-            
-            while (it.hasNext()) {
-                Location l = (Location) it.next();
-                
-                BreakpointRequest bpreq = erm.createBreakpointRequest(l);
-                bpreq.setSuspendPolicy(EventRequest.SUSPEND_EVENT_THREAD);
-                bpreq.putProperty(VMEventHandler.DONT_RESUME, "yes");
-                bpreq.enable();
-            }
-            machine.resume();
-        }
-    }
-
     // -- support methods --
 
     /**
@@ -1664,7 +1582,7 @@ public class VMReference
         synchronized(this) {
             try {
                 while (!serverThreadStarted) {
-                    if (exitStatus == Debugger.TERMINATED)
+                    if (exitStatus == Debugger.TERMINATED_BY_BLUEJ || exitStatus == Debugger.TERMINATED_BY_USER_SYSTEM_EXIT)
                         throw new VMDisconnectedException();
                     wait(); // wait for new thread to start
                 }
@@ -1679,11 +1597,11 @@ public class VMReference
      * Calls to this method should be synchronized on the serverThreadLock
      * (in JdiDebugger).
      */
+    @SuppressWarnings("threadchecker")
     private void resumeServerThread()
     {
         synchronized (eventHandler) {
-            serverThread.resume();
-            owner.serverThreadResumed(serverThread);
+            serverThread.contServerThread();
             owner.raiseStateChangeEvent(Debugger.RUNNING);
         }
         // Note, we do the state change after the resume because the state
@@ -1701,7 +1619,7 @@ public class VMReference
     {
         try {
             while (!workerThreadReady || workerThreadReserved) {
-                if (exitStatus == Debugger.TERMINATED) {
+                if (exitStatus == Debugger.TERMINATED_BY_BLUEJ || exitStatus == Debugger.TERMINATED_BY_USER_SYSTEM_EXIT) {
                     throw new VMDisconnectedException();
                 }
                 workerThread.wait();
@@ -1721,7 +1639,7 @@ public class VMReference
     {
         try {
             while (!workerThreadReady) {
-                if (exitStatus == Debugger.TERMINATED) {
+                if (exitStatus == Debugger.TERMINATED_BY_BLUEJ || exitStatus == Debugger.TERMINATED_BY_USER_SYSTEM_EXIT) {
                     throw new VMDisconnectedException();
                 }
                 workerThread.wait();
@@ -1738,9 +1656,9 @@ public class VMReference
             obj = launchFXAppHelper(className);
         }
         catch (VMDisconnectedException e) {
-            exitStatus = Debugger.TERMINATED;
+            exitStatus = getDebuggerExitStatus();
             // return null; // debugger state change handled elsewhere
-            return () -> new DebuggerResult(Debugger.TERMINATED);
+            return () -> new DebuggerResult(exitStatus);
         }
         catch (Exception e) {
             // remote invocation failed
@@ -1824,6 +1742,7 @@ public class VMReference
      * 
      * @return  The newly constructed object
      */
+    @OnThread(Tag.NOTVMEventHandler)
     private ObjectReference invokeConstructor(String className, String [] paramTypes, ObjectReference [] args)
     {
         // Calls to this method are serialized via serverThreadLock in JdiDebugger
@@ -1972,7 +1891,7 @@ public class VMReference
         setStaticFieldObject(serverClass, ExecServer.CLASS_TO_RUN_NAME, cl);
         setStaticFieldObject(serverClass, ExecServer.METHOD_TO_RUN_NAME, method);
         setStaticFieldValue(serverClass, ExecServer.EXEC_ACTION_NAME, machine.mirrorOf(ExecServer.TEST_RUN));
-        
+
         // Resume the thread, wait for it to finish and the new thread to start
         serverThreadStarted = false;
         resumeServerThread();
@@ -2251,6 +2170,12 @@ public class VMReference
             workerThreadReadyWait();
             setStaticFieldValue(serverClass, ExecServer.RUN_ON_THREAD_NAME, machine.mirrorOf(fieldValue));
         }
+    }
+
+    @OnThread(Tag.Any)
+    public void runOnEventHandler(EventHandlerRunnable runnable)
+    {
+        eventHandler.queueRunnable(runnable);
     }
 
     /**

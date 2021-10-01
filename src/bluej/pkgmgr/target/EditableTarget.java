@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2011,2013,2014,2016,2017,2018  Michael Kolling and John Rosenberg
+ Copyright (C) 1999-2009,2011,2013,2014,2016,2017,2018,2020  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -24,10 +24,11 @@ package bluej.pkgmgr.target;
 import java.io.File;
 import java.io.IOException;
 
+import bluej.Config;
 import bluej.editor.Editor;
 import bluej.editor.EditorWatcher;
 import bluej.pkgmgr.Package;
-import bluej.prefmgr.PrefMgr;
+import bluej.pkgmgr.target.actions.EditableTargetOperation;
 import bluej.prefmgr.PrefMgrDialog;
 import threadchecker.OnThread;
 import threadchecker.Tag;
@@ -40,11 +41,14 @@ import threadchecker.Tag;
 public abstract class EditableTarget extends Target
     implements EditorWatcher
 {
+    public static final String MENU_STYLE_INBUILT = "class-action-inbuilt";
+    public final static String editStr = Config.getString("pkgmgr.classmenu.edit");
+    public final static String removeStr = Config.getString("pkgmgr.classmenu.remove");
     protected Editor editor;
 
-    protected EditableTarget(Package pkg, String name)
+    protected EditableTarget(Package pkg, String name, String accessibleTargetType)
     {
-        super(pkg, name);
+        super(pkg, name, accessibleTargetType);
     }
 
     /**
@@ -132,4 +136,5 @@ public abstract class EditableTarget extends Target
     }
 
     // --- end of EditorWatcher interface ---
+
 }

@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2012,2014,2016,2017  Michael Kolling and John Rosenberg
+ Copyright (C) 1999-2009,2010,2012,2014,2016,2017,2019,2020  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -77,7 +77,7 @@ public class ShareAction extends TeamAction
         // The team settings controller is not initially associated with the
         // project, so you can still modify the repository location
         final TeamSettingsController tsc = new TeamSettingsController(project.getProjectDir());
-        Repository repository = tsc.trytoEstablishRepository(true);
+        Repository repository = tsc.trytoEstablishRepository(true, true);
         if (repository == null) {
             // User cancelled, or there is an error in establishing the repository
             return;
@@ -90,7 +90,7 @@ public class ShareAction extends TeamAction
             String msg = DialogManager.getMessage("team-error-saving-project");
             if (msg != null) {
                 String finalMsg = Utility.mergeStrings(msg, ioe.getLocalizedMessage());
-                DialogManager.showErrorTextFX(pmf.getFXWindow(), finalMsg);
+                DialogManager.showErrorTextFX(pmf.getWindow(), finalMsg);
                 return;
             }
         }
@@ -112,30 +112,24 @@ public class ShareAction extends TeamAction
                 {
                     // Run and Wait
                     CompletableFuture<Set<File>> filesFuture = new CompletableFuture<>();
-                    CompletableFuture<Boolean> isDVCSFuture = new CompletableFuture<>();
 
                     Platform.runLater( () -> {
                         project.setTeamSettingsController(tsc);
                         Set<File> projFiles = tsc.getProjectFiles(true);
                         // Make copy, to ensure thread safety:
                         filesFuture.complete(new HashSet<>(projFiles));
-                        isDVCSFuture.complete(tsc.isDVCS());
                     });
 
                     try {
                         Set<File> files = filesFuture.get();
-                        Boolean isDVCS = isDVCSFuture.get();
 
                         Set<File> newFiles = new LinkedHashSet<>(files);
                         Set<File> binFiles = TeamUtils.extractBinaryFilesFromSet(newFiles);
                         command = repository.commitAll(newFiles, binFiles, Collections.emptySet(),
                                 files, Config.getString("team.share.initialMessage"));
                         result = command.getResult();
-                        //In DVCS, we need an aditional command: pushChanges.
-                        if (isDVCS){
-                            command = repository.pushChanges();
-                            result = command.getResult();
-                        }
+                        command = repository.pushChanges();
+                        result = command.getResult();
                     }
                     catch (InterruptedException | ExecutionException e)
                     {
@@ -144,7 +138,7 @@ public class ShareAction extends TeamAction
                 }
 
                 Platform.runLater(() -> {
-                    TeamUtils.handleServerResponseFX(result, pmf.getFXWindow());
+                    TeamUtils.handleServerResponseFX(result, pmf.getWindow());
                     pmf.stopProgress();
                     if (!result.isError())
                     {

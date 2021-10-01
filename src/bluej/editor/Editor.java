@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2011,2013,2014,2015,2016,2017,2018,2019  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2011,2013,2014,2015,2016,2017,2018,2019,2020,2021  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -27,6 +27,7 @@ import java.util.List;
 import bluej.compiler.CompileType;
 import bluej.compiler.Diagnostic;
 import bluej.debugger.DebuggerThread;
+import bluej.editor.fixes.EditorFixesManager;
 import bluej.prefmgr.PrefMgr.PrintSize;
 import bluej.editor.stride.FrameEditor;
 import bluej.parser.symtab.ClassInfo;
@@ -36,6 +37,8 @@ import bluej.utility.javafx.FXPlatformConsumer;
 import bluej.utility.javafx.FXRunnable;
 import javafx.print.PrinterJob;
 import javafx.scene.image.Image;
+import threadchecker.OnThread;
+import threadchecker.Tag;
 
 
 /**
@@ -46,7 +49,6 @@ import javafx.scene.image.Image;
  */
 public interface Editor
 {
-
     /**
      * Reload and display the same file that was displayed before.
      * This should generated a modificationEvent followed by a saveEvent.
@@ -200,10 +202,28 @@ public interface Editor
      */
     boolean isModified();
 
+    void removeErrorHighlights();
+
+    /**
+     * A callback to update the latest progress when printing a file.  Also allows cancellation
+     * by returning false.  Callers must check and obey the return!
+     */
+    public static interface PrintProgressUpdate
+    {
+        /**
+         * 
+         * @param curProgress Number of lines printed
+         * @param totalProgress Total number of lines to print
+         * @return true to continue printing, false to cancel
+         */
+        @OnThread(Tag.Any)
+        public boolean printProgress(int curProgress, int totalProgress);
+    }
+    
     /**
      * Returns an action which will print the contents of the editor
      */
-    FXRunnable printTo(PrinterJob printerJob, PrintSize printSize, boolean printLineNumbers, boolean printBackground);
+    FXRunnable printTo(PrinterJob printerJob, PrintSize printSize, boolean printLineNumbers, boolean printScopeBackgrounds, PrintProgressUpdate progressUpdateCallback);
 
     /**
      * Set the 'read-only' property of this editor.
@@ -314,6 +334,12 @@ public interface Editor
     void removeImports(List<String> importTargets);
 
     /**
+     * Adds the specified import into the editor;
+     */
+    void addImportFromQuickFix(String importName);
+
+
+    /**
      * Set the header image (in the tab header) for this editor
      * @param image The image to use (any size).
      */
@@ -324,4 +350,11 @@ public interface Editor
      * @param millisSinceEpoch
      */
     void setLastModified(long millisSinceEpoch);
+
+    /**
+     *  Gets the associated Quick Fixes error manager of an Editor
+     *  Each implementation of an editor is responsible for holding an instance
+     *  of EditorFixesManager.
+     */
+    EditorFixesManager getEditorFixesManager();
 }

@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2015,2016,2017,2018  Michael Kolling and John Rosenberg
+ Copyright (C) 1999-2009,2015,2016,2017,2018,2019,2020  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -22,15 +22,12 @@
 package bluej.groupwork.ui;
 
 import java.util.Arrays;
-import java.util.List;
 import java.io.File;
 import java.net.URI;
 import java.net.URISyntaxException;
 
 import javafx.beans.binding.Bindings;
 import javafx.beans.binding.BooleanBinding;
-import javafx.collections.ObservableList;
-import javafx.geometry.Pos;
 import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
@@ -39,7 +36,6 @@ import javafx.scene.control.PasswordField;
 import javafx.scene.control.TextField;
 import javafx.scene.layout.ColumnConstraints;
 import javafx.scene.layout.GridPane;
-import javafx.scene.layout.HBox;
 import javafx.scene.layout.Pane;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
@@ -47,11 +43,8 @@ import javafx.scene.layout.VBox;
 import bluej.Config;
 import bluej.groupwork.TeamSettings;
 import bluej.groupwork.TeamSettingsController;
-import bluej.groupwork.TeamSettingsController.ServerType;
 import bluej.groupwork.TeamworkProvider;
 import bluej.groupwork.actions.ValidateConnectionAction;
-import bluej.utility.Debug;
-import bluej.utility.javafx.HorizontalRadio;
 import bluej.utility.javafx.JavaFXUtil;
 
 import threadchecker.OnThread;
@@ -67,6 +60,7 @@ import threadchecker.Tag;
 public class TeamSettingsPanel extends VBox
 {
     private TeamSettingsController teamSettingsController;
+    private TeamworkProvider teamworkProvider;
     private TeamSettingsDialog teamSettingsDialog;
 
     private GridPane personalPane;
@@ -76,62 +70,50 @@ public class TeamSettingsPanel extends VBox
     private Label prefixLabel    = new Label(Config.getString("team.settings.prefix"));
     private Label protocolLabel  = new Label(Config.getString("team.settings.protocol"));
     private Label uriLabel       = new Label(Config.getString("team.settings.uri"));
+    private Label branchLabel    = new Label(Config.getString("team.settings.branch"));
 
     private Label yourNameLabel  = new Label(Config.getString("team.settings.yourName"));
     private Label yourEmailLabel = new Label(Config.getString("team.settings.yourEmail"));
     private Label userLabel      = new Label(Config.getString("team.settings.user"));
     private Label passwordLabel  = new Label(Config.getString("team.settings.password"));
-    private Label groupLabel     = new Label(Config.getString("team.settings.group"));
-
-
-    private final HorizontalRadio<ServerType> serverTypes;
 
     private final TextField serverField = new TextField();
+    private final TextField portField = new TextField();
     private final TextField prefixField = new TextField();
     private final ComboBox<String> protocolComboBox = new ComboBox<>();
     private final TextField uriField = new TextField();
+    private final TextField branchField = new TextField();
 
     private final TextField yourNameField = new TextField();
     private final TextField yourEmailField = new TextField();
     private final TextField userField = new TextField();
     private final PasswordField passwordField = new PasswordField();
-    private final TextField groupField = new TextField();
-    
+
     /** identifies which field is the primary server information field */
     private TextField locationPrimaryField;
     /** identifiers which field is the primary personal information field */
     private TextField personalPrimaryField;
 
     private CheckBox useAsDefault;
-    private ServerType selectedServerType = null;
 
-    public TeamSettingsPanel(TeamSettingsController teamSettingsController, TeamSettingsDialog dialog, ObservableList<String> styleClass)
+    private boolean isShareAction = false;
+
+    public TeamSettingsPanel(TeamSettingsController teamSettingsController, TeamSettingsDialog dialog, boolean isShareAction)
     {
         this.teamSettingsController = teamSettingsController;
+        this.teamworkProvider = teamSettingsController.getTeamworkProvider();
+
         this.teamSettingsDialog = dialog;
 
+        this.isShareAction = isShareAction;
+
         JavaFXUtil.addStyleClass(this, "panel");
-
-        serverTypes = new HorizontalRadio<>(Arrays.asList(ServerType.Subversion, ServerType.Git));
-        serverTypes.select(ServerType.Subversion);
-
-        HBox serverTypeBox = new HBox();
-        JavaFXUtil.addStyleClass(serverTypeBox, "serverType-box");
-        serverTypeBox.getChildren().add(new Label(Config.getString("team.settings.serverType")));
-        serverTypeBox.getChildren().addAll(serverTypes.getButtons());
-        serverTypeBox.setAlignment(Pos.CENTER);
-        this.getChildren().add(serverTypeBox);
 
         useAsDefault = new CheckBox(Config.getString("team.settings.rememberSettings"));
 
         locationPane = createGridPane();
         personalPane = createGridPane();
-        preparePanes(serverTypes.selectedProperty().get());
-
-        JavaFXUtil.addChangeListenerPlatform(serverTypes.selectedProperty(), type -> {
-            preparePanes(type);
-            updateOKButtonBinding();
-        });
+        preparePanes();
 
         ValidateConnectionAction validateConnectionAction = new ValidateConnectionAction(this, dialog::getOwner);
         Button validateButton = new Button();
@@ -196,58 +178,35 @@ public class TeamSettingsPanel extends VBox
         return container;
     }
 
-    private void preparePanes(ServerType type)
+    private void preparePanes()
     {
-        prepareLocationPane(type);
-        preparePersonalPane(type);
+        prepareLocationPane();
+        preparePersonalPane();
 
         setProviderSettings();
 
         useAsDefault.setDisable(false);
     }
 
-    private void preparePersonalPane(ServerType type)
+    private void preparePersonalPane()
     {
         personalPane.getChildren().clear();
-
-        switch (type) {
-            case Subversion:
-                personalPane.addRow(0, userLabel, userField);
-                personalPane.addRow(1, passwordLabel, passwordField);
-                personalPane.addRow(2, groupLabel, groupField);
-                personalPrimaryField = userField;
-                break;
-            case Git:
-                personalPane.addRow(0, yourNameLabel, yourNameField);
-                personalPane.addRow(1, yourEmailLabel, yourEmailField);
-                personalPane.addRow(2, userLabel, userField);
-                personalPane.addRow(3, passwordLabel, passwordField);
-                personalPrimaryField = yourNameField;
-                break;
-            default:
-                Debug.reportError(type + " is not recognisable as s server type");
-        }
+        personalPane.addRow(0, yourNameLabel, yourNameField);
+        personalPane.addRow(1, yourEmailLabel, yourEmailField);
+        personalPane.addRow(2, userLabel, userField);
+        personalPane.addRow(3, passwordLabel, passwordField);
+        personalPrimaryField = yourNameField;
     }
 
-    private void prepareLocationPane(ServerType type)
+    private void prepareLocationPane()
     {
         locationPane.getChildren().clear();
         protocolComboBox.setEditable(false);
-
-        switch (type) {
-            case Subversion:
-                locationPane.addRow(0, serverLabel, serverField);
-                locationPane.addRow(1, prefixLabel, prefixField);
-                locationPane.addRow(2, protocolLabel, protocolComboBox);
-                locationPrimaryField = serverField;
-                break;
-            case Git:
-                locationPane.addRow(0, uriLabel, uriField);
-                locationPrimaryField = uriField;
-                break;
-            default:
-                Debug.reportError(type + " is not recognisable as s server type");
-        }
+        locationPane.addRow(0, uriLabel, uriField);
+        locationPrimaryField = uriField;
+        if(!this.isShareAction)
+            locationPane.addRow(1, branchLabel, branchField);
+        branchField.setPromptText(Config.getString("team.settings.defaultBranch"));
     }
     
     /**
@@ -282,40 +241,21 @@ public class TeamSettingsPanel extends VBox
         if (password != null) {
             setPassword(password);
         }
-        String group = teamSettingsController.getPropString("bluej.teamsettings.groupname");
-        if(group != null) {
-            setGroup(group);
-        }
+
         String useAsDefault = teamSettingsController.getPropString("bluej.teamsettings.useAsDefault");
         if (useAsDefault != null) {
             setUseAsDefault(Boolean.getBoolean(useAsDefault));
         }
         
         String providerName = teamSettingsController.getPropString("bluej.teamsettings.vcs");
-        // We always go through the providers.  If the user had no preference,
-        // we select the first one, and update the email/name enabled states accordingly:
-        List<TeamworkProvider> teamProviders = teamSettingsController.getTeamworkProviders();
-        for (int index = 0; index < teamProviders.size(); index++)
+        if ((teamworkProvider.getProviderName().equalsIgnoreCase(providerName)
+            || (providerName == null)) && teamSettingsController.getProject() != null)
         {
-            TeamworkProvider provider = teamProviders.get(index);
-            if (provider.getProviderName().equalsIgnoreCase(providerName)
-                || (providerName == null && index == 0))
-            {
-                // Select first if no stored preference:
-                serverTypes.select(ServerType.valueOf(teamProviders.get(index).getProviderName()));
-                if (provider.needsEmail())
-                {
-                    if (teamSettingsController.getProject() != null)
-                    {
-                        File respositoryRoot = teamSettingsController.getProject().getProjectDir();
-                        setTextFieldText(yourEmailField, provider.getYourEmailFromRepo(respositoryRoot));
-                        setTextFieldText(yourNameField, provider.getYourNameFromRepo(respositoryRoot));
-                    }
-                }
-                break;
-            }
+            File respositoryRoot = teamSettingsController.getProject().getProjectDir();
+            setTextFieldText(yourEmailField, teamworkProvider.getYourEmailFromRepo(respositoryRoot));
+            setTextFieldText(yourNameField, teamworkProvider.getYourNameFromRepo(respositoryRoot));
         }
-        
+
         setProviderSettings();
     }
     
@@ -327,7 +267,7 @@ public class TeamSettingsPanel extends VBox
     private void setProviderSettings()
     {
         String keyBase = "bluej.teamsettings."
-            + getSelectedProvider().getProviderName().toLowerCase() + ".";
+            +  teamworkProvider.getProviderName().toLowerCase() + ".";
         
         String prefix = teamSettingsController.getPropString(keyBase + "repositoryPrefix");
         if (prefix != null) {
@@ -338,35 +278,39 @@ public class TeamSettingsPanel extends VBox
             setServer(server);
         }
 
+        int port = teamSettingsController.getPropInt(keyBase + "port");
+        if(port > 0) {
+            setPort(port);
+        }
+
         fillProtocolSelections();
         
         String protocol = readProtocolString();
         if (protocol != null){
             setProtocol(protocol);
         }
+
+        String branch = teamSettingsController.getPropString(keyBase + "branch");
+        if (branch != null) {
+            setBranch(branch);
+        }
     }
 
-    /**
-     * Empty the protocol selection box, then fill it with the available protocols
-     * from the currently selected teamwork provider.
-     */
+
     private void fillProtocolSelections()
     {
-        ServerType type = serverTypes.selectedProperty().get();
-        if (type != selectedServerType) {
-            selectedServerType = type;
-            protocolComboBox.getItems().clear();
-
-            TeamworkProvider provider = teamSettingsController.getTeamworkProvider(type);
-            protocolComboBox.getItems().addAll(Arrays.asList(provider.getProtocols()));
-        }
+        protocolComboBox.getItems().addAll(Arrays.asList(teamworkProvider.getProtocols()));
     }
     
     private String readProtocolString()
     {
         String keyBase = "bluej.teamsettings."
-            + getSelectedProvider().getProviderName().toLowerCase() + "."; 
+            + teamworkProvider.getProviderName().toLowerCase() + ".";
         return teamSettingsController.getPropString(keyBase + "protocol");
+    }
+
+    private void setBranch(String branch){
+        branchField.setText(branch);
     }
 
     private void setUser(String user)
@@ -389,11 +333,6 @@ public class TeamSettingsPanel extends VBox
         passwordField.setText(password);
     }
     
-    private void setGroup(String group)
-    {
-        groupField.setText(group);
-    }
-    
     private void setPrefix(String prefix)
     {
         prefixField.setText(prefix);
@@ -403,13 +342,15 @@ public class TeamSettingsPanel extends VBox
     {
         serverField.setText(server);
     }
+
+    private void setPort(int port) { portField.setText("" + port); }
     
     /**
      * Set the protocol to that identified by the given protocol key.
      */
     private void setProtocol(String protocolKey)
     {
-        String protocolLabel = getSelectedProvider().getProtocolLabel(protocolKey);
+        String protocolLabel = teamworkProvider.getProtocolLabel(protocolKey);
         protocolComboBox.getSelectionModel().select(protocolLabel);
     }
     
@@ -418,13 +359,11 @@ public class TeamSettingsPanel extends VBox
         useAsDefault.setSelected(use);
     }
     
-    public TeamworkProvider getSelectedProvider()
+    public TeamworkProvider getProvider()
     {
-        return teamSettingsController.getTeamworkProviders().stream()
-                .filter(provider -> provider.getProviderName().equals(serverTypes.selectedProperty().get().name()))
-                .findAny().get();
+        return teamworkProvider;
     }
-    
+
     private String getUser()
     {
         return userField.getText();
@@ -434,57 +373,51 @@ public class TeamSettingsPanel extends VBox
     {
         return passwordField.getText();
     }
-
-    private String getGroup()
-    {
-        //DCVS does not have group.
-        if (getSelectedProvider().needsEmail()){
-            return "";
-        }
-        return groupField.getText();
-    }
     
     private String getPrefix()
     {
-        if (getSelectedProvider().needsEmail()) {
-            try {
-                URI uri = new URI(uriField.getText());
-                return uri.getPath();
-            } catch (URISyntaxException ex) {
-                return null;
-            }
+        try {
+            URI uri = new URI(uriField.getText());
+            return uri.getPath();
+        } catch (URISyntaxException ex) {
+            return null;
         }
-        return prefixField.getText();
     }
+
+    private String getBranch(){
+        //the branch is an optional setting. So empty/null value is to be understood as default branch
+        return branchField.getText();
+    }
+
     
     private String getServer()
     {
-        if (getSelectedProvider().needsEmail()) {
-            try {
-                URI uri = new URI(uriField.getText());
-                return uri.getHost();
-            } catch (URISyntaxException ex) {
-                return null;
-            }
-        }
-        return serverField.getText();
-    }
-    
-    private String getProtocolKey()
-    {
-        if (getSelectedProvider().needsEmail()) {
-            try {
-                URI uri = new URI(uriField.getText());
-                return uri.getScheme();
-            } catch (URISyntaxException ex) {
-                return null;
-            }
-        }
-        int protocol = protocolComboBox.getSelectionModel().getSelectedIndex();
-        if (protocol == -1) {
+        try {
+            URI uri = new URI(uriField.getText());
+            return uri.getHost();
+        } catch (URISyntaxException ex) {
             return null;
         }
-        return getSelectedProvider().getProtocolKey(protocol);
+    }
+
+    private int getPort()
+    {
+        try {
+            URI uri = new URI(uriField.getText());
+            return uri.getPort();
+        } catch (URISyntaxException ex) {
+            return -1;
+        }
+    }
+
+    private String getProtocolKey()
+    {
+        try {
+            URI uri = new URI(uriField.getText());
+            return uri.getScheme();
+        } catch (URISyntaxException ex) {
+            return null;
+        }
     }
     
     public boolean getUseAsDefault()
@@ -504,8 +437,8 @@ public class TeamSettingsPanel extends VBox
     
     public TeamSettings getSettings()
     {
-        TeamSettings result = new TeamSettings(getSelectedProvider(), getProtocolKey(),
-                getServer(), getPrefix(), getGroup(), getUser(), getPassword());
+        TeamSettings result = new TeamSettings(getProtocolKey(),
+                getServer(), getPort(), getPrefix(), getBranch(), getUser(), getPassword());
         result.setYourEmail(getYourEmail());
         result.setYourName(getYourName());
         return result;
@@ -519,42 +452,42 @@ public class TeamSettingsPanel extends VBox
     {
         teamSettingsDialog.getOkButton().disableProperty().unbind();
 
-        BooleanBinding disabled = userField.textProperty().isEmpty();
-        switch (serverTypes.selectedProperty().get()) {
-            case Subversion:
-                disabled = disabled.or(serverField.textProperty().isEmpty());
-                break;
-            case Git:
-                disabled = disabled.or(uriField.textProperty().isEmpty())
-                        .or(yourNameField.textProperty().isEmpty())
-                        .or(yourEmailField.textProperty().isEmpty())
-                        .or(Bindings.createBooleanBinding(() -> !yourEmailField.getText().contains("@"), yourEmailField.textProperty()));
-                break;
-        }
+        BooleanBinding disabled = userField.textProperty().isEmpty()
+                .or(uriField.textProperty().isEmpty())
+                .or(yourNameField.textProperty().isEmpty())
+                .or(yourEmailField.textProperty().isEmpty())
+                .or(Bindings.createBooleanBinding(() -> !yourEmailField.getText().contains("@"), yourEmailField.textProperty()));
 
         teamSettingsDialog.getOkButton().disableProperty().bind(disabled);
     }
 
     /**
      * Disable the fields used to specify the repository:
-     * group, prefix, server and protocol
+     * prefix, server, branch and protocol
      */
     public void disableRepositorySettings()
     {
-        serverTypes.setDisable(true);
-        groupField.setDisable(true);
         prefixField.setDisable(true);
+        branchField.setDisable(true);
         serverField.setDisable(true);
+        portField.setDisable(true);
         protocolComboBox.setDisable(true);
         uriField.setDisable(true);
 
         if (uriField.isVisible() && uriField.getText().isEmpty()){
             //update uri.
-            uriField.setText(TeamSettings.getURI(readProtocolString(), serverField.getText(), prefixField.getText()));
+            int port  = -1;
+            try{
+                port = Integer.parseInt(portField.getText());
+            }
+            catch(NumberFormatException nex){
+            }
+
+            uriField.setText(TeamSettings.getURI(readProtocolString(), serverField.getText(), port, prefixField.getText()));
         }
 
-        groupLabel.setDisable(true);
         prefixLabel.setDisable(true);
+        branchLabel.setDisable(true);
         serverLabel.setDisable(true);
         protocolLabel.setDisable(true);
     }

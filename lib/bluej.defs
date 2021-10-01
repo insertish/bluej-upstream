@@ -478,7 +478,7 @@ bluej.vm.args=-ea
 ## Java defaults need to be modified.  
 #####################################################################
 
-bluej.windows.vm.args=-Djavafx.embed.singleThread=true
+bluej.windows.vm.args=-Dhttps.protocols=TLSv1,TLSv1.1,TLSv1.2
 
 
 #####################################################################
@@ -531,4 +531,4 @@ image.editordivider.close=bluej_arrow_naviview_close.gif
 image.extmgr.info=extmgr-info.gif
 
 #inspector object reference arrow
-image.inspector.objectref=objectref.gif
+image.inspector.objectref=objectref.png

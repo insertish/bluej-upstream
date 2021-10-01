@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 2014,2015,2016 Michael Kölling and John Rosenberg
+ Copyright (C) 2014,2015,2016,2019,2020 Michael Kölling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -21,37 +21,35 @@
  */
 package bluej.stride.framedjava.errors;
 
-import bluej.editor.EditorWatcher;
+import bluej.editor.fixes.FixDisplayManager;
+import bluej.editor.fixes.FixSuggestion;
 import bluej.editor.stride.CodeOverlayPane;
 import bluej.editor.stride.CodeOverlayPane.WidthLimit;
 import bluej.stride.generic.InteractionManager;
-import bluej.utility.Utility;
 import bluej.utility.javafx.FXPlatformRunnable;
 import bluej.utility.javafx.JavaFXUtil;
 import javafx.scene.control.Label;
 import javafx.scene.input.MouseEvent;
-import javafx.scene.layout.HBox;
-import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
+import javafx.scene.text.TextFlow;
 import javafx.util.Duration;
 import threadchecker.OnThread;
 import threadchecker.Tag;
 
-import java.util.ArrayList;
 import java.util.List;
 
-public class ErrorAndFixDisplay
+public class ErrorAndFixDisplay extends FixDisplayManager
 {
     private static final Duration SHOW_DELAY = Duration.millis(400);
-    /** Spacing between display and node it refers to, in pixels */
+    /**
+     * Spacing between display and node it refers to, in pixels
+     */
     private static final double SPACING = 5.0;
     private final InteractionManager editor;
     private final CodeError error;
     private final ErrorFixListener slot;
     private final VBox vbox = new VBox();
-    private final List<FixDisplay> fixes = new ArrayList<>();
-    private int highlighted = -1; // Offset into error.getFixSuggestions()
     private FXPlatformRunnable cancelShow;
     private boolean showing = false;
 
@@ -80,30 +78,23 @@ public class ErrorAndFixDisplay
         // We must consume the mouse pressed event to stop the focus from moving away
         // from the text slot when the mouse is clicked on us:
         vbox.setOnMousePressed(MouseEvent::consume);
-        
-        Label errorLabel = new Label(prefix + err.getMessage());
+
+        TextFlow errorLabel = null;
+        if (!(err instanceof DirectSlotError) || (err instanceof DirectSlotError && (((DirectSlotError) err).getItalicMessageStartIndex() == -1 || ((DirectSlotError) err).getItalicMessageEndIndex() == -1)))
+        {
+            errorLabel = new TextFlow(new Label(prefix + err.getMessage()));
+        } else
+        {
+            DirectSlotError dsError = (DirectSlotError) err;
+            Label beforeItalicText = (dsError.getItalicMessageStartIndex() > 0) ? new Label(dsError.getMessage().substring(0, dsError.getItalicMessageStartIndex())) : new Label("");
+            Label italicText = new Label(dsError.getMessage().substring(dsError.getItalicMessageStartIndex(), dsError.getItalicMessageEndIndex()));
+            JavaFXUtil.withStyleClass(italicText, "error-fix-display-italic");
+            Label afterItalicText = (dsError.getItalicMessageEndIndex() < dsError.getMessage().length() - 1) ? new Label(dsError.getMessage().substring(dsError.getItalicMessageEndIndex())) : new Label("");
+            errorLabel = new TextFlow(beforeItalicText, italicText, afterItalicText);
+        }
         JavaFXUtil.addStyleClass(errorLabel, "error-label");
         vbox.getChildren().add(errorLabel);
-        
-        for (FixSuggestion fix : err.getFixSuggestions())
-        {
-            FixDisplay l = new FixDisplay("  Fix: " + fix.getDescription());
-            l.onMouseClickedProperty().set(e ->
-                {
-                    recordExecute(fixes.indexOf(l));
-                    fix.execute();
-                    ErrorAndFixDisplay.this.hide();
-                    slot.fixedError(error);
-                    e.consume();
-                });
-            l.onMouseEnteredProperty().set(e -> setHighlighted(fixes.indexOf(l)));
-            vbox.getChildren().add(l);
-            fixes.add(l);
-        }
-        
-        JavaFXUtil.addStyleClass(vbox, "error-fix-display");
-        vbox.setMinWidth(250.0);
-        
+        prepareFixDisplay(vbox, (List<FixSuggestion>) err.getFixSuggestions(), () -> editor.getFrameEditor().getWatcher(), err.getIdentifier());
         CodeOverlayPane.setDropShadow(vbox);
     }
     
@@ -127,16 +118,8 @@ public class ErrorAndFixDisplay
             vbox.toBack();
             error.focusedProperty().set(true);
             showing = true;
-            recordShow();
+            recordShow(() -> editor.getFrameEditor().getWatcher());
         });
-    }
-
-    @OnThread(Tag.FXPlatform)
-    private void recordShow()
-    {
-        final EditorWatcher watcher = editor.getFrameEditor().getWatcher();
-        List<String> fixDisplayText = Utility.mapList(fixes, FixDisplay::getDisplayText);
-        watcher.recordShowErrorMessage(error.getIdentifier(), fixDisplayText);
     }
 
     @OnThread(Tag.FXPlatform)
@@ -166,11 +149,12 @@ public class ErrorAndFixDisplay
             vbox.toBack();
             error.focusedProperty().set(true);
             showing = true;
-            recordShow();
+            recordShow(() -> editor.getFrameEditor().getWatcher());
         });
     }
 
-    @OnThread(Tag.FXPlatform)
+    @Override
+    @OnThread(value = Tag.FXPlatform, ignoreParent = true)
     public void hide()
     {
         if (cancelShow != null)
@@ -182,76 +166,11 @@ public class ErrorAndFixDisplay
         error.focusedProperty().set(false);
         showing = false;
     }
-    
-    public boolean hasFixes()
-    {
-        return !fixes.isEmpty();
-    }
-    
-    /**
-     * Called when down is pressed on the slot we are joined to.
-     * Only call this if hasFixes() returns true, otherwise handle keypress differently.
-     */
-    public void down()
-    {
-        setHighlighted(Math.min(fixes.size() - 1, highlighted + 1));
-    }
-    
-    /**
-     * Called when up is pressed on the slot we are joined to.
-     * Only call this if hasFixes() returns true, otherwise handle keypress differently.
-     */
-    public void up()
-    {
-        setHighlighted(Math.max(0, highlighted - 1));
-    }
-    
-    private void setHighlighted(int newHighlight)
-    {
-        if (highlighted != newHighlight)
-        {
-            // Remove highlight from old item:
-            if (highlighted != -1)
-                fixes.get(highlighted).setHighlight(false);
-            highlighted = newHighlight;
-            // Highlight new item:
-            if (highlighted != -1)
-                fixes.get(highlighted).setHighlight(true);
-        }
-    }
 
-    
-    
-    private static class FixDisplay extends HBox
+    @OnThread(value = Tag.FXPlatform, ignoreParent = true)
+    protected void postFixError()
     {
-        private final Label enterHint = new Label("\u21B5");
-        private final String displayText;
-
-        public FixDisplay(String display)
-        {
-            this.displayText = display;
-            enterHint.setVisible(false);
-            Label l = new Label(display);
-            getChildren().addAll(l, enterHint);
-            HBox.setHgrow(l, Priority.ALWAYS);
-            l.setMaxWidth(9999);
-        }
-        
-        private void setHighlight(boolean highlight)
-        {
-            if (highlight)
-                JavaFXUtil.addStyleClass(this, "fix-highlight");
-            else
-                JavaFXUtil.removeStyleClass(this, "fix-highlight");
-            
-            enterHint.setVisible(highlight);
-        }
-
-        @OnThread(Tag.Any)
-        public String getDisplayText()
-        {
-            return displayText;
-        }
+        slot.fixedError(error);
     }
 
     @OnThread(Tag.FXPlatform)
@@ -259,18 +178,11 @@ public class ErrorAndFixDisplay
     {
         if (highlighted != -1)
         {
-            recordExecute(highlighted);
+            recordExecute(() -> editor.getFrameEditor().getWatcher(), highlighted);
             error.getFixSuggestions().get(highlighted).execute();
             ErrorAndFixDisplay.this.hide();
             slot.fixedError(error);
         }
-    }
-
-    @OnThread(Tag.FXPlatform)
-    private void recordExecute(int fixIndex)
-    {
-        final EditorWatcher watcher = editor.getFrameEditor().getWatcher();
-        watcher.recordFix(error.getIdentifier(), fixIndex);
     }
 }
 

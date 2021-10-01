@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 2014,2015,2016,2017,2018 Michael Kölling and John Rosenberg
+ Copyright (C) 2014,2015,2016,2017,2018,2019,2020 Michael Kölling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -37,6 +37,7 @@ import bluej.stride.framedjava.ast.StructuredSlotFragment;
 import bluej.stride.framedjava.ast.links.PossibleLink;
 import bluej.stride.framedjava.slots.InfixStructured.RangeType;
 import bluej.stride.generic.ExtensionDescription;
+import bluej.utility.javafx.*;
 import javafx.beans.binding.BooleanBinding;
 import javafx.beans.binding.BooleanExpression;
 import javafx.beans.binding.StringExpression;
@@ -83,20 +84,11 @@ import bluej.stride.slots.FocusParent;
 import bluej.stride.slots.HeaderItem;
 import bluej.stride.slots.LinkedIdentifier;
 import bluej.stride.slots.SlotLabel;
-import bluej.stride.slots.SuggestionList;
-import bluej.stride.slots.SuggestionList.SuggestionDetails;
-import bluej.stride.slots.SuggestionList.SuggestionDetailsWithCustomDoc;
-import bluej.stride.slots.SuggestionList.SuggestionListListener;
+import bluej.editor.fixes.SuggestionList;
+import bluej.editor.fixes.SuggestionList.SuggestionDetails;
+import bluej.editor.fixes.SuggestionList.SuggestionDetailsWithCustomDoc;
+import bluej.editor.fixes.SuggestionList.SuggestionListListener;
 import bluej.utility.Utility;
-import bluej.utility.javafx.ErrorUnderlineCanvas;
-import bluej.utility.javafx.FXBiConsumer;
-import bluej.utility.javafx.FXConsumer;
-import bluej.utility.javafx.FXFunction;
-import bluej.utility.javafx.FXPlatformConsumer;
-import bluej.utility.javafx.FXPlatformFunction;
-import bluej.utility.javafx.FXRunnable;
-import bluej.utility.javafx.JavaFXUtil;
-import bluej.utility.javafx.SharedTransition;
 import threadchecker.OnThread;
 import threadchecker.Tag;
 
@@ -293,7 +285,7 @@ public abstract class StructuredSlot<SLOT_FRAGMENT extends StructuredSlotFragmen
         // to those of javac, and then preferring shorter errors (as probably being more specific)
         List<CodeError> sortedErrors = allErrors.stream()
             .sorted((a, b) -> CodeError.compareErrors(a, b)).collect(Collectors.toList());
-        
+
         sortedErrors.forEach(e -> {
             // Add the error if it doesn't overlap:
             if (shownErrors.stream().allMatch(shown -> !shown.overlaps(e)))
@@ -397,6 +389,18 @@ public abstract class StructuredSlot<SLOT_FRAGMENT extends StructuredSlotFragmen
         err.bindFresh(getFreshExtra(err).or(getParentFrame().freshProperty()), editor);
         recalculateShownErrors();
     }
+
+    @OnThread(Tag.FXPlatform)
+    /**
+     * Updates an error in the error list, required when errors are first added without being
+     * fully ready : when there are several errors in a slot, not updating them may cause issues
+     */
+    public void updateError(CodeError err)
+    {
+        allErrors.removeIf(codeError -> codeError.getIdentifier()==err.getIdentifier());
+        addError(err);
+    }
+
 
     protected BooleanExpression getFreshExtra(CodeError err)
     {
@@ -1076,8 +1080,7 @@ public abstract class StructuredSlot<SLOT_FRAGMENT extends StructuredSlotFragmen
         return topLevel;
     }
 
-    //package-visible
-    FocusParent<HeaderItem> getSlotParent()
+    public FocusParent<HeaderItem> getSlotParent()
     {
         return row;
     }
@@ -1199,9 +1202,9 @@ public abstract class StructuredSlot<SLOT_FRAGMENT extends StructuredSlotFragmen
     }
     
     @Override
-    public Map<TopLevelMenu, MenuItems> getMenuItems(boolean contextMenu)
+    public Map<TopLevelMenu, AbstractOperation.MenuItems> getMenuItems(boolean contextMenu)
     {
-        HashMap<TopLevelMenu, MenuItems> itemMap = new HashMap<>();
+        HashMap<TopLevelMenu, AbstractOperation.MenuItems> itemMap = new HashMap<>();
 
         // We must have at least one dummy item for the menu to be shown:
         final Menu recentMenu = new Menu(Config.getString("frame.slot.recent"));
@@ -1228,15 +1231,15 @@ public abstract class StructuredSlot<SLOT_FRAGMENT extends StructuredSlotFragmen
             }
         });
 
-        final ObservableList<SortedMenuItem> originalItems = FXCollections.observableArrayList();
-        final FXConsumer<ObservableList<SortedMenuItem>> setToOriginal = l -> {
+        final ObservableList<AbstractOperation.SortedMenuItem> originalItems = FXCollections.observableArrayList();
+        final FXConsumer<ObservableList<AbstractOperation.SortedMenuItem>> setToOriginal = l -> {
             if (contextMenu)
-                l.setAll(MenuItemOrder.RECENT_VALUES.item(recentMenu));
+                l.setAll(AbstractOperation.MenuItemOrder.RECENT_VALUES.item(recentMenu));
             else
                 l.clear();
         };
         setToOriginal.accept(originalItems);
-        itemMap.put(TopLevelMenu.EDIT, new MenuItems(originalItems) {
+        itemMap.put(TopLevelMenu.EDIT, new AbstractOperation.MenuItems(originalItems) {
             @OnThread(Tag.FXPlatform)
             public void onShowing()
             {
@@ -1260,9 +1263,9 @@ public abstract class StructuredSlot<SLOT_FRAGMENT extends StructuredSlotFragmen
 
                     setToOriginal.accept(items);
                     items.addAll(
-                        MenuItemOrder.CUT.item(cut),
-                        MenuItemOrder.COPY.item(copy),
-                        MenuItemOrder.PASTE.item(paste)
+                        AbstractOperation.MenuItemOrder.CUT.item(cut),
+                        AbstractOperation.MenuItemOrder.COPY.item(copy),
+                        AbstractOperation.MenuItemOrder.PASTE.item(paste)
                     );
                 }
                 if (hoverErrorCurrentlyShown != null ){
@@ -1273,10 +1276,10 @@ public abstract class StructuredSlot<SLOT_FRAGMENT extends StructuredSlotFragmen
 
         if (contextMenu)
         {
-            final SortedMenuItem scanningItem = MenuItemOrder.GOTO_DEFINITION.item(new MenuItem("Scanning..."));
+            final AbstractOperation.SortedMenuItem scanningItem = AbstractOperation.MenuItemOrder.GOTO_DEFINITION.item(new MenuItem("Scanning..."));
             scanningItem.getItem().setDisable(true);
 
-            itemMap.put(TopLevelMenu.VIEW, new MenuItems(FXCollections.observableArrayList())
+            itemMap.put(TopLevelMenu.VIEW, new AbstractOperation.MenuItems(FXCollections.observableArrayList())
             {
 
                 private void removeScanning()
@@ -1295,7 +1298,7 @@ public abstract class StructuredSlot<SLOT_FRAGMENT extends StructuredSlotFragmen
                     FXPlatformConsumer<Optional<LinkedIdentifier>> withLink = optLink -> {
                         removeScanning();
                         optLink.ifPresent(defLink -> {
-                            items.add(MenuItemOrder.GOTO_DEFINITION.item(JavaFXUtil.makeMenuItem(Config.getString("frame.slot.goto")
+                            items.add(AbstractOperation.MenuItemOrder.GOTO_DEFINITION.item(JavaFXUtil.makeMenuItem(Config.getString("frame.slot.goto")
                                     .replace("$", defLink.getName()), defLink.getOnClick(), null)));
                         });
                     };

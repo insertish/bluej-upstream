@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2011,2012,2014,2015,2016,2018  Michael Kolling and John Rosenberg
+ Copyright (C) 1999-2009,2010,2011,2012,2014,2015,2016,2018,2019,2020  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -217,7 +217,7 @@ public class Invoker
      */
     public Invoker(PkgMgrFrame pmf, CallableView member, ResultWatcher watcher)
     {
-        this(pmf.getFXWindow(), pmf.getPackage(), member, watcher, pmf.getPackage().getCallHistory(), pmf.getObjectBench(),
+        this(pmf.getWindow(), pmf.getPackage(), member, watcher, pmf.getPackage().getCallHistory(), pmf.getObjectBench(),
                 pmf.getObjectBench(), pmf.getProject().getDebugger(), null);
 
         codepad = false;
@@ -275,7 +275,7 @@ public class Invoker
         this.member = member;
         this.instanceName = instanceName;
         this.typeMap = typeMap;
-        this.parent = pmf.getFXWindow();
+        this.parent = pmf.getWindow();
         this.pkg = pmf.getPackage();
         final Package pkg = pmf.getPackage();
         this.pkgPath = pkg.getPath();
@@ -320,10 +320,14 @@ public class Invoker
     public void invokeInteractive()
     {
         gotError = false;
-        // check for a method call with no parameter
-        // if so, just do it
-        if ((!constructing || Config.isGreenfoot()) && !member.hasParameters()) {
-            doInvocation(null, (JavaType []) null, null);
+        // Here are the different cases for when we do/don't show an invoker dialog:
+        // - If there's parameters needed, we must always show the dialog
+        // - If there's no parameters and a void return, we never show a dialog as there's nothing to ask.
+        // - If there's no parameters to a constructor, we still show the dialog in BlueJ (we need to ask for an object name for the object bench) but not in Greenfoot
+        // - If there's no parameters and a non-void return, we show the dialog if we're in BlueJ in testing mode because they may want to add an assertion for the result
+        if ((!constructing || Config.isGreenfoot()) && !member.hasParameters() && (!inTestMode() || isVoidReturn()))
+        {
+            doInvocation(null, (JavaType[]) null, null);
         }
         else {
 
@@ -503,7 +507,7 @@ public class Invoker
             }
             else {
                 ir = new MethodInvokerRecord(method.getGenericReturnType(), command + actualArgString, args);
-                objName = "result";
+                objName = "__bluej__result__";
             }
         }
 
@@ -547,6 +551,30 @@ public class Invoker
                 endCompile(new CompileInputFile[0], false, CompileType.INTERNAL_COMPILE, -1);
             }
         }
+    }
+
+    /**
+     * Set the assertion statement to the associated invocation record.
+     */
+    public void setAssertionStatement(String statement)
+    {
+        ir.addAssertion(statement);
+    }
+
+    /**
+     * Get the Unique ID of the associated invocation record.
+     */
+    public int getUniqueIRIdentifier()
+    {
+        return ir.getUniqueIdentifier();
+    }
+
+    /**
+     * Get the associated package.
+     */
+    public Package getPackage()
+    {
+        return pkg;
     }
 
     /**
@@ -605,7 +633,7 @@ public class Invoker
         if (hasResult) {
             if (resultType.equals(""))
                 resultType = null;
-            objName = "result";
+            objName = "__bluej__result__";
             ir = new ExpressionInvokerRecord(commandString);
         }
         else {
@@ -749,14 +777,14 @@ public class Invoker
             }
             else {
                 buffer.append("return new java.lang.Object() { ");
-                buffer.append(constype + " result;" + Config.nl);
+                buffer.append(constype + " __bluej__result__;" + Config.nl);
                 buffer.append("{ ");
                 buffer.append(paramInit);
                 if (localVars != null) {
                     writeVariables("lv:", buffer, false, localVars.getValueIterator(), nameTransform);
                 }
                 buffer.append("try {" + Config.nl);
-                buffer.append("result=(");
+                buffer.append("__bluej__result__=(");
             }
             buffer.append(callString);
             // Append a new line, as the call string may end with a //-style comment
@@ -1098,7 +1126,7 @@ public class Invoker
             dialog.setOKEnabled(true);
         }
     }
-    
+
     @OnThread(Tag.FXPlatform)
     private void closeCallDialog()
     {
@@ -1177,10 +1205,8 @@ public class Invoker
      * a freshly created object, a function result or an exception) and make
      * sure that it gets processed appropriately.
      * 
-     * <p>"exitStatus" and "result" fields should be set with appropriate values before
+     * <p>"exitStatus" and "__bluej__result__" fields should be set with appropriate values before
      * calling this.
-     * 
-     * <p>This method is called on the Swing event thread.
      */
     @OnThread(Tag.FXPlatform)
     public void handleResult(DebuggerResult result, boolean unwrap)
@@ -1242,13 +1268,14 @@ public class Invoker
                     watcher.putException(exc, ir);
                     break;
 
-                case Debugger.TERMINATED : // terminated by user
+                case Debugger.TERMINATED_BY_USER_SYSTEM_EXIT : // terminated by user
+                case Debugger.TERMINATED_BY_BLUEJ:
                     if (!codepad)
                     {
                         //Only record this if it wasn't on behalf of the codepad (codepad records separately):
                         DataCollector.invokeMethodTerminated(pkg, commandString);
                     }
-                    watcher.putVMTerminated(ir);
+                    watcher.putVMTerminated(ir, status == Debugger.TERMINATED_BY_USER_SYSTEM_EXIT);
                     break;
 
             } // switch
@@ -1268,6 +1295,11 @@ public class Invoker
     public void graphChanged()
     {
         // Nothing needs doing.
+    }
+
+    public boolean isVoidReturn()
+    {
+        return member.isVoid();
     }
 
     static class CleverQualifyTypeNameTransform
@@ -1349,5 +1381,10 @@ public class Invoker
         }
 
         return JavaNames.typeName(typeName);
+    }
+
+    public boolean inTestMode()
+    {
+        return pkg.getProject().inTestMode();
     }
 }

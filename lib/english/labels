@@ -9,8 +9,7 @@ main.invalidPackage=Package not found
 compileException=Exception during compilation
 compiler.thread.title=BlueJ compiler thread
 
-debugger.assert.assertThat=Assert that:
-debugger.assert.resultIs=result is
+debugger.assert.assertThatResIs=Assert that: result is
 debugger.assert.equalTo=equal to
 debugger.assert.equalToFloatingPoint= equal to (double or float)
 debugger.assert.sameAs=the same as
@@ -120,10 +119,14 @@ prefmgr.edit.colortransparency=Scope Highlighting
 prefmgr.edit.usesyntaxhilighting=Use syntax highlighting
 prefmgr.edit.autoindent=Auto-indent (Enter and Tab keys)
 prefmgr.edit.displaylinenumbers=Display line numbers
+prefmgr.edit.checkfilechangeondisk=Check file changes on the disk
 prefmgr.edit.matchBrackets=Match brackets
 prefmgr.edit.keybindingstitle=Key Bindings
 prefmgr.edit.highlightLighter=Lighter
 prefmgr.edit.highlightDarker=Darker
+
+# Extensions Preferences panel
+prefmgr.extensions.noContent=No extension content to display.
 
 # Interface preferences panel
 prefmgr.interface.title=Interface
@@ -136,6 +139,7 @@ prefmgr.accessibility.support=Accessibility Mode [only for use with screen reade
 # Extensions Manager Help panel
 extmgr.title=BlueJ:  Installed Extensions
 extmgr.extensions=Extensions
+extmgr.noExtensionInstalled=No extension installed.
 extmgr.systemExtensionShort=System
 extmgr.systemExtensionLong=System extension (active for all projects)
 extmgr.projectExtensionShort=Project
@@ -202,6 +206,8 @@ editor.find-next-backwardLabel = Find Next Backward
 editor.go-to-lineLabel = Go to line...
 editor.replaceLabel = Replace...
 editor.toggle-breakpointLabel = Set/Clear Breakpoint
+editor.set.breakpoint.hint = Click to set breakpoint
+editor.set.breakpoint.fail = Cannot set breakpoint on this line
 editor.toggle-interface-viewLabel = Toggle Documentation View
 
 editor.go-to-lineLabel = Go to line...
@@ -226,10 +232,28 @@ editor.preferencesLabel = Preferences...
 editor.printDialog.title=BlueJ:  Print Source Code
 editor.printDialog.printLineNumbers=Print Line Numbers
 editor.printDialog.printHighlighting=Print with Scope Highlighting
+editor.printDialog.printHighlighting.tooltip=This slows down printing and is not supported for large print jobs
 editor.printDialog.fontSize=Font size
 editor.printDialog.fontSize.small=Small
 editor.printDialog.fontSize.standard=Standard
 editor.printDialog.fontSize.large=Large
+
+# Editor quick fix messages
+editor.quickfix.correctToSugg.fixMsg=Correct to:\u0020
+editor.quickfix.unknownType.errorMsg=Unknown type:\u0020
+editor.quickfix.unknownType.fixMsg.class=Import class\u0020
+editor.quickfix.unknownType.fixMsg.package=Import package\u0020
+editor.quickfix.undeclaredVar.errorMsg=Undeclared variable:\u0020
+editor.quickfix.undeclaredVar.fixMsg.local=Declare variable here
+editor.quickfix.undeclaredVar.fixMsg.class=Declare field in class
+editor.quickfix.undeclaredMethod.errorMsg=Undeclared method:\u0020
+editor.quickfix.wrongComparisonOperator.errorMsg=Assignment found instead of boolean expression. \n\
+                                                 Did you mean "=="?
+editor.quickfix.wrongComparisonOperator.fixMsg=Replace "=" with "=="
+editor.quickfix.unreportedException.errorMsg.part1=The possible exception of type\u0020
+editor.quickfix.unreportedException.errorMsg.part2=\u0020needs to be handled
+editor.quickfix.unreportedException.fixMsg.trycatch=Surround this line with try/catch
+editor.quickfix.unreportedException.fixMsg.throws=Add throws statement for this exception in the containing method
 
 # Dialog titles and texts
 editor.functions.title = Editor Functions
@@ -396,7 +420,6 @@ pkgmgr.test.record=recording
 pkgmgr.test.run=Run Tests
 pkgmgr.test.end=End
 pkgmgr.test.succeeded=succeeded
-pkgmgr.test.noTestName=You must specify a name for the test
 pkgmgr.test.invalidTestName=The test name must be a valid Java identifier
 pkgmgr.test.recording=recording
 
@@ -564,7 +587,7 @@ terminal.running=Type input and press Enter to send to program
 
 #TestDisplay Window
 testdisplay.title = BlueJ:  Test Results
-testdisplay.counter.runs=Runs:
+testdisplay.counter.runs=Tests:
 testdisplay.counter.errors=Errors:
 testdisplay.counter.failures=Failures:
 testdisplay.counter.totalTime=Total Time:
@@ -761,14 +784,14 @@ team.settings.yourName=Your name
 team.settings.yourEmail=Your e-mail
 team.settings.user=User
 team.settings.password=Password
-team.settings.group=Group
-team.settings.serverType=Server type
 team.settings.server=Server
 team.settings.prefix=Repository Path
 team.settings.ext=ext (using SSH)
 team.settings.pserver=pserver
 team.settings.protocol=Protocol
 team.settings.uri=Repository URI
+team.settings.branch=Branch
+team.settings.defaultBranch=Default branch
 team.settings.rememberSettings=Remember settings for future projects
 team.settings.checkConnection=Check connection
 
@@ -792,6 +815,12 @@ team.checkconn.checking=Checking connection...
 team.checkconn.ok=Connection is ok.
 team.checkconn.bad=Could not connect to server.
 
+team.load.SVNnotSupported.title=SVN not supported
+
+team.load.SVNnotSupported.details=This version of BlueJ does no longer support SVN.\n\nPlease choose one of these options:\n\t- Make this project standalone\n\t  (this will remove all information related to SVN),\nor\n\t- Open this project without team work functionality\n\t  (SVN information will be retained, and you can still open it as a shared project with BlueJ 4 and earlier).
+
+team.load.SVNnotSupported.details.RemoveSVNOption=Make this project standalone
+team.load.SVNnotSupported.details.KeepSVNOption=Open this project without team work functionality
 
 
 
@@ -899,7 +928,6 @@ newProject.parent=Location
 newProject.path=Path
 newProject.parent.choose=Choose...
 newProject.error.parentNotExist=Location does not exist
-newProject.error.nameEmpty=Name cannot be empty
 newProject.error.compoundExist=Path already exists
 newProject.error.pathInvalid=Path is invalid
 newProject.prompt=Enter a name for the new project
@@ -908,3 +936,8 @@ newProject.prompt=Enter a name for the new project
 classTarget.noSource=no source
 
 bluej.central.msg.title=BlueJ - Latest News
+
+printing.progress.title=Printing
+printing.progress.file=File progress (${cur}/${total} lines)
+printing.progress.project=Project progress (${cur}/${total} items)
+printing.progress.canceling=Canceling...

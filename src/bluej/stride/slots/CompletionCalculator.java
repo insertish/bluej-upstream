@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 2014,2015,2016,2018 Michael Kölling and John Rosenberg
+ Copyright (C) 2014,2015,2016,2018,2020 Michael Kölling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -21,10 +21,11 @@
  */
 package bluej.stride.slots;
 
+import bluej.editor.fixes.SuggestionList;
 import javafx.scene.control.TextField;
 import bluej.stride.framedjava.ast.JavaFragment.PosInSourceDoc;
 import bluej.stride.framedjava.elements.CodeElement;
-import bluej.stride.slots.SuggestionList.SuggestionListListener;
+import bluej.editor.fixes.SuggestionList.SuggestionListListener;
 import bluej.utility.javafx.FXPlatformConsumer;
 import threadchecker.OnThread;
 import threadchecker.Tag;

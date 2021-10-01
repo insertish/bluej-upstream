@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2011,2016  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2011,2016,2019,2020  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -30,6 +30,8 @@ import bluej.debugger.gentype.GenTypeDeclTpar;
 import bluej.debugger.gentype.GenTypeParameter;
 import bluej.debugger.gentype.JavaType;
 import bluej.utility.JavaUtils;
+import bluej.views.FormattedPrintWriter.ColorScheme;
+import bluej.views.FormattedPrintWriter.SizeScheme;
 import threadchecker.OnThread;
 import threadchecker.Tag;
 
@@ -225,6 +227,7 @@ public class MethodView extends CallableView implements Comparable<MethodView>
     /**
      * Check whether this is method returns void
      */
+    @Override
     public boolean isVoid()
     {
         return method.getReturnType() == void.class;
@@ -300,7 +303,10 @@ public class MethodView extends CallableView implements Comparable<MethodView>
         }
 
         out.setItalic(false);
-        out.setBold(true);
+        out.setBold(false);
+        out.setSize(SizeScheme.DEFAULT);
+        out.setColor(ColorScheme.DEFAULT);
+
         for(int i=0; i<indents; i++) {
             out.indentLine();
         }

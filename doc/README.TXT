@@ -1,5 +1,5 @@
 
-BlueJ version 4.2.2       --        README.TXT
+BlueJ version 5.0.0       --        README.TXT
 
 Information about BlueJ
 -----------------------
@@ -32,7 +32,7 @@ bluej.properties file.
 The BlueJ Team
 --------------
 BlueJ is being developed by:
-University of Kent: Michael Kölling, Neil Brown, Pierre Weill-Tessier
+University of Kent: Michael Kölling, Ian Utting, Davin McCall, Neil Brown, Amjad Altadmri
 
 The BlueJ License
 -----------------

@@ -210,18 +210,58 @@
 .call-dialog-content .hanging-flow-pane {
     -bj-row-spacing: 0.5em;
 }
+.call-dialog-content .call-label {
+    -fx-font-weight:bold;
+}
+.call-dialog-content .assert-panel {
+}
+.call-dialog-content .assert-panel .assert-row {
+    -fx-spacing: 0.5em;
+    -fx-padding: 0 0 0 0.5em;
+}
+.call-dialog-content .assert-panel .delta-row {
+    -fx-spacing: 0.5em;
+    -fx-padding: 0.5em 0 0 0.5em;
+}
+.call-dialog-content .assert-panel .assert-checkbox {
+    -fx-padding: 0.2em 0 0 0;
+}
+.call-dialog-content .assert-panel .delta-label {
+    -fx-padding: 0.25em 0 0 0;
+}
+.call-dialog-content .assert-panel .assert-field-data {
+    -fx-pref-width: 10em;
+    -fx-alignment: baseline-left;
+}
+.call-dialog-content .assert-panel .assert-field-delta {
+    -fx-pref-width: 5em;
+}
 .constructor-instance-name-row {
     -fx-spacing: 1em;
 }
 .formatted-print-flow .formatted-print-line {
-    -fx-font-family: "Source Sans Pro";
-    -fx-font-size: 125%;
+    -fx-font-size: 100%;
 }
 .formatted-print-flow .formatted-print-line:bj-bold {
     -fx-font-weight: bold;
 }
 .formatted-print-flow .formatted-print-line:bj-italic {
-    -fx-font-shape: italic;
+    -fx-font-style: italic;
+}
+.formatted-print-flow .formatted-print-line:bj-color-default {
+    -fx-fill: black;
+}
+.formatted-print-flow .formatted-print-line:bj-color-gray {
+    -fx-fill: darkslategrey;
+}
+.formatted-print-flow .formatted-print-line:bj-size-default {
+    -fx-font-size: 100%;
+}
+.formatted-print-flow .formatted-print-line:bj-size-small {
+    -fx-font-size: 90%;
+}
+.formatted-print-flow .formatted-print-line:bj-size-large {
+    -fx-font-size: 110%;
 }
 
 /* Extensions Dialog */
@@ -275,6 +315,9 @@
 /* Preference Manager */
 .prefmgr-titled {
     -fx-collapsible: false;
+    -fx-text-overrun: center-ellipsis;
+    /* Needed to prevent some titles (especially user libraries) having very high min width: */
+    -fx-min-width: 400px;    
 }
 .prefmgr-titled > *.content {
     -fx-border-width: 0;
@@ -321,6 +364,11 @@
     -fx-padding: 2em 4em 2em 4em;
     -fx-fill-width: true;
 }
+
+.prefmgr-ext-innerpanel {
+   -fx-spacing: 1em;
+}
+
 .prefmgr-experiment-participant {
     -fx-hgap: 1em;
     -fx-vgap: 0.5em;
@@ -425,10 +473,6 @@
     -fx-spacing: 0.8em;
 }
 
-.team-settings .panel .serverType-box {
-     -fx-spacing: 0.8em;
-}
-
 .team-settings .grid {
     -fx-min-width:  40em;
     -fx-pref-width: 40em;
@@ -440,7 +484,7 @@
 }
 
 .team-test-connection {
-    -fx-min-width:  10em;
+    -fx-min-width:  50em;
     -fx-pref-width: 25em;
 
     -fx-min-height:  16em;
@@ -448,6 +492,19 @@
 }
 
 .team-test-connection .pane{
+    -fx-padding: 0.833em; /* 10px */
+    -fx-spacing: 0.833em;
+}
+
+.team-load-SVNnotsupported {
+    -fx-min-width:  51em;
+    -fx-pref-width: 51em;
+
+    -fx-min-height:  18em;
+    -fx-pref-height: 18em;
+}
+
+.team-load-SVNnotsupported .pane{
     -fx-padding: 0.833em; /* 10px */
     -fx-spacing: 0.833em;
 }

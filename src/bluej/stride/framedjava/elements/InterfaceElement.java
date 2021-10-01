@@ -1,47 +1,34 @@
 /*
- This file is part of the BlueJ program. 
- Copyright (C) 2014,2015,2016,2019 Michael Kölling and John Rosenberg
- 
- This program is free software; you can redistribute it and/or 
- modify it under the terms of the GNU General Public License 
- as published by the Free Software Foundation; either version 2 
- of the License, or (at your option) any later version. 
- 
- This program is distributed in the hope that it will be useful, 
- but WITHOUT ANY WARRANTY; without even the implied warranty of 
- MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the 
- GNU General Public License for more details. 
- 
- You should have received a copy of the GNU General Public License 
- along with this program; if not, write to the Free Software 
- Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA. 
- 
- This file is subject to the Classpath exception as provided in the  
+ This file is part of the BlueJ program.
+ Copyright (C) 2014,2015,2016,2019,2020 Michael Kölling and John Rosenberg
+
+ This program is free software; you can redistribute it and/or
+ modify it under the terms of the GNU General Public License
+ as published by the Free Software Foundation; either version 2
+ of the License, or (at your option) any later version.
+
+ This program is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ GNU General Public License for more details.
+
+ You should have received a copy of the GNU General Public License
+ along with this program; if not, write to the Free Software
+ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+
+ This file is subject to the Classpath exception as provided in the
  LICENSE.txt file that accompanied this code.
  */
 package bluej.stride.framedjava.elements;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.IdentityHashMap;
-import java.util.List;
-
-import java.util.stream.Stream;
-
 import bluej.debugger.gentype.ConstructorReflective;
-import bluej.stride.framedjava.ast.FrameFragment;
-import bluej.stride.framedjava.errors.SyntaxCodeError;
-import bluej.stride.generic.AssistContentThreadSafe;
-import bluej.stride.generic.InteractionManager;
-import javafx.application.Platform;
-import nu.xom.Element;
-import threadchecker.OnThread;
-import threadchecker.Tag;
-import bluej.editor.moe.MoeSyntaxDocument;
+import bluej.editor.flow.HoleDocument;
+import bluej.editor.flow.JavaSyntaxView;
+import bluej.editor.flow.ScopeColorsBorderPane;
 import bluej.parser.ExpressionTypeInfo;
 import bluej.parser.entity.EntityResolver;
+import bluej.parser.nodes.ReparseableDocument;
+import bluej.stride.framedjava.ast.FrameFragment;
 import bluej.stride.framedjava.ast.JavaFragment;
 import bluej.stride.framedjava.ast.JavaFragment.PosInSourceDoc;
 import bluej.stride.framedjava.ast.JavaSource;
@@ -49,11 +36,27 @@ import bluej.stride.framedjava.ast.JavadocUnit;
 import bluej.stride.framedjava.ast.NameDefSlotFragment;
 import bluej.stride.framedjava.ast.SlotFragment;
 import bluej.stride.framedjava.ast.TypeSlotFragment;
+import bluej.stride.framedjava.errors.SyntaxCodeError;
 import bluej.stride.framedjava.frames.InterfaceFrame;
 import bluej.stride.framedjava.frames.TopLevelFrame;
 import bluej.stride.framedjava.slots.ExpressionSlot;
+import bluej.parser.AssistContentThreadSafe;
 import bluej.stride.generic.Frame.ShowReason;
+import bluej.stride.generic.InteractionManager;
 import bluej.utility.Utility;
+import javafx.application.Platform;
+import javafx.beans.property.ReadOnlyBooleanWrapper;
+import nu.xom.Element;
+import threadchecker.OnThread;
+import threadchecker.Tag;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.IdentityHashMap;
+import java.util.List;
+import java.util.stream.Stream;
 
 public class InterfaceElement extends DocumentContainerCodeElement implements TopLevelCodeElement
 {
@@ -155,7 +158,7 @@ public class InterfaceElement extends DocumentContainerCodeElement implements To
     public ExpressionTypeInfo getCodeSuggestions(PosInSourceDoc pos, ExpressionSlot<?> completing)
     {
         // Must get document before asking for completions:
-        MoeSyntaxDocument doc = getSourceDocument(completing);
+        ReparseableDocument doc = getSourceDocument(completing);
         return doc.getParser().getExpressionType(pos.offset, getSourceDocument(completing));
     }
 
@@ -317,9 +320,12 @@ public class InterfaceElement extends DocumentContainerCodeElement implements To
     }
     
     @OnThread(Tag.FXPlatform)
-    private MoeSyntaxDocument getSourceDocument(ExpressionSlot completing)
+    private ReparseableDocument getSourceDocument(ExpressionSlot completing)
     {
-        return getDAP(completing).getDocument(projectResolver);
+        JavaSyntaxView doc = getDAP(completing).getDocument(projectResolver);
+        // There is no scheduled parsing for off-screen documents so we must manually finish any reparsing:
+        doc.flushReparseQueue();
+        return doc;
     }
 
     @OnThread(Tag.FXPlatform)
@@ -385,7 +391,7 @@ public class InterfaceElement extends DocumentContainerCodeElement implements To
         public final JavaSource java;
         public final IdentityHashMap<JavaFragment, Integer> fragmentPositions;
         private String src;
-        private MoeSyntaxDocument document;
+        private JavaSyntaxView document;
 
         public DocAndPositions(String src, JavaSource java, IdentityHashMap<JavaFragment, Integer> fragmentPositions)
         {
@@ -395,13 +401,14 @@ public class InterfaceElement extends DocumentContainerCodeElement implements To
         }
 
         @OnThread(Tag.FXPlatform)
-        public MoeSyntaxDocument getDocument(EntityResolver projectResolver)
+        public JavaSyntaxView getDocument(EntityResolver projectResolver)
         {
             if (document == null)
             {
-                document = new MoeSyntaxDocument(projectResolver);
-                document.insertString(0, src);
-                document.enableParser(true);
+                HoleDocument doc = new HoleDocument();
+                this.document = new JavaSyntaxView(doc, null, new ScopeColorsBorderPane(), projectResolver, new ReadOnlyBooleanWrapper(false));
+                doc.replaceText(0, 0, src);
+                this.document.enableParser(true);
             }
             return document;
         }

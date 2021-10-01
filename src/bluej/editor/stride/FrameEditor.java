@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 2014,2015,2016,2017,2018,2019 Michael Kölling and John Rosenberg
+ Copyright (C) 2014,2015,2016,2017,2018,2019,2020,2021 Michael Kölling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -29,14 +29,14 @@ import bluej.collect.StrideEditReason;
 import bluej.compiler.CompileReason;
 import bluej.compiler.CompileType;
 import bluej.compiler.Diagnostic;
-import bluej.debugger.DebuggerField;
-import bluej.debugger.DebuggerObject;
 import bluej.debugger.DebuggerThread;
 import bluej.debugger.gentype.GenTypeClass;
 import bluej.editor.Editor;
 import bluej.editor.EditorWatcher;
 import bluej.editor.TextEditor;
-import bluej.editor.moe.MoeSyntaxDocument;
+import bluej.editor.fixes.EditorFixesManager;
+import bluej.parser.nodes.ReparseableDocument;
+import bluej.pkgmgr.target.role.Kind;
 import bluej.prefmgr.PrefMgr.PrintSize;
 import bluej.parser.AssistContent;
 import bluej.parser.AssistContent.CompletionKind;
@@ -63,14 +63,9 @@ import bluej.stride.framedjava.elements.TopLevelCodeElement;
 import bluej.stride.framedjava.errors.DirectSlotError;
 import bluej.stride.framedjava.errors.SyntaxCodeError;
 import bluej.stride.framedjava.frames.DebugInfo;
-import bluej.stride.framedjava.frames.DebugVarInfo;
 import bluej.stride.framedjava.frames.LocalCompletion;
-import bluej.stride.framedjava.frames.LocalTypeCompletion;
-import bluej.stride.framedjava.frames.PrimitiveDebugVarInfo;
-import bluej.stride.framedjava.frames.ReferenceDebugVarInfo;
 import bluej.stride.framedjava.slots.ExpressionSlot;
-import bluej.stride.generic.AssistContentThreadSafe;
-import bluej.stride.generic.InteractionManager.Kind;
+import bluej.parser.AssistContentThreadSafe;
 import bluej.utility.Debug;
 import bluej.utility.JavaReflective;
 import bluej.utility.Utility;
@@ -89,14 +84,11 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStreamWriter;
-import java.lang.reflect.Modifier;
 import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -145,6 +137,9 @@ public class FrameEditor implements Editor
     private final DebugInfo debugInfo = new DebugInfo();
     @OnThread(Tag.FXPlatform) private HighlightedBreakpoint curBreakpoint;
     @OnThread(Tag.FXPlatform) private final List<HighlightedBreakpoint> execHistory = new ArrayList<>();
+    /** The Editor Quick Fixes manager associated with this Editor */
+    @OnThread(Tag.Any)
+    private final EditorFixesManager editorFixesMgr;
 
     /** Stride source at last save. Assigned on FX thread only, readable on any thread. */
     private volatile TopLevelCodeElement lastSource;
@@ -218,6 +213,7 @@ public class FrameEditor implements Editor
         this.pkg = pkg;
         this.javaSource = new SimpleObjectProperty<>();
         this.callbackOnOpen = callbackOnOpen;
+        this.editorFixesMgr = new EditorFixesManager(watcher.getPackage().getProject().getImports());
         lastSource = Loader.loadTopLevelElement(frameFilename, resolver, pkg.getQualifiedName());
     }
 
@@ -514,7 +510,7 @@ public class FrameEditor implements Editor
 
             @Override
             @OnThread(Tag.FXPlatform)
-            public FXRunnable printTo(PrinterJob printerJob, PrintSize printSize, boolean printLineNumbers, boolean printBackground) { return FrameEditor.this.printTo(printerJob, printSize, printLineNumbers, printBackground); }
+            public FXRunnable printTo(PrinterJob printerJob, PrintSize printSize, boolean printLineNumbers, boolean printBackground, PrintProgressUpdate progressUpdate) { return FrameEditor.this.printTo(printerJob, printSize, printLineNumbers, printBackground, progressUpdate); }
 
             @Override
             @OnThread(Tag.FXPlatform)
@@ -579,22 +575,7 @@ public class FrameEditor implements Editor
 
             @Override
             @OnThread(Tag.FXPlatform)
-            public void setSelection(int firstlineNumber, int firstColumn,
-                    int secondLineNumber, int SecondColumn) {
-                throw new UnsupportedOperationException();
-
-            }
-
-            @Override
-            @OnThread(Tag.FXPlatform)
             public void setSelection(SourceLocation begin, SourceLocation end) {
-                throw new UnsupportedOperationException();
-
-            }
-
-            @Override
-            @OnThread(Tag.FXPlatform)
-            public void setSelection(int lineNumber, int column, int len) {
                 throw new UnsupportedOperationException();
 
             }
@@ -633,7 +614,7 @@ public class FrameEditor implements Editor
 
             @Override
             @OnThread(Tag.FXPlatform)
-            public MoeSyntaxDocument getSourceDocument() {
+            public ReparseableDocument getSourceDocument() {
                 throw new UnsupportedOperationException();
             }
 
@@ -764,6 +745,18 @@ public class FrameEditor implements Editor
             }
 
             @Override
+            public EditorFixesManager getEditorFixesManager(){
+                return FrameEditor.this.editorFixesMgr;
+            }
+
+            @Override
+            @OnThread(Tag.FXPlatform)
+            public void addImportFromQuickFix(String importName)
+            {
+                FrameEditor.this.addImportFromQuickFix(importName);
+            }
+
+            @Override
             @OnThread(Tag.FXPlatform)
             public void removeImports(List<String> importTargets)
             {
@@ -775,6 +768,13 @@ public class FrameEditor implements Editor
             public void setHeaderImage(Image image)
             {
                 FrameEditor.this.setHeaderImage(image);
+            }
+
+            @Override
+            @OnThread(Tag.FXPlatform)
+            public void removeErrorHighlights()
+            {
+                FrameEditor.this.removeErrorHighlights();
             }
         };
     }
@@ -846,7 +846,7 @@ public class FrameEditor implements Editor
         // Disable Stride debugger:
         if (true)
             return true;
-        
+        /*
         removeStepMark();
         setVisibleFX(true, true, false);
         HashMap<String, DebugVarInfo> vars = new HashMap<String, DebugVarInfo>();
@@ -893,7 +893,7 @@ public class FrameEditor implements Editor
                 curBreakpoint = js.handleStop(lineNumber, debugInfo);
                 if (curBreakpoint.isBreakpointFrame())
                 {
-                    thread.step();
+                    getPackage().getProject().getDebugger().runOnEventHandler(() -> thread.step());
                 }
                 else
                 {
@@ -909,7 +909,7 @@ public class FrameEditor implements Editor
                 Debug.reportError("Exception attempting to save Java source for Stride class", ioe);
             }
         });
-        
+        */
         return true;
     }
 
@@ -979,7 +979,7 @@ public class FrameEditor implements Editor
 
     @Override
     @OnThread(Tag.FXPlatform)
-    public FXRunnable printTo(PrinterJob job, PrintSize printSize, boolean printLineNumbers, boolean printBackground)
+    public FXRunnable printTo(PrinterJob job, PrintSize printSize, boolean printLineNumbers, boolean printBackground, PrintProgressUpdate progressUpdate)
     {
         CompletableFuture<Boolean> inited = new CompletableFuture<>();
         if (panel == null)
@@ -1163,25 +1163,30 @@ public class FrameEditor implements Editor
         LocationMap rootPathMap = el.toXML().buildLocationMap();
         // We must start these futures going on the FX thread
         List<Future<List<DirectSlotError>>> futures = allElements.flatMap(e -> e.findDirectLateErrors(panel, rootPathMap)).collect(Collectors.toList());
-        // Then wait for them on another thread, and hop back to FX to finish:
-        Utility.runBackground(() -> {
-            ArrayList<DirectSlotError> allLates = new ArrayList<>();
-            try
+        // Then wait for them on another thread
+        new Thread() {
+            @Override
+            @OnThread(Tag.Worker)
+            public void run()
             {
-                // Wait for all futures:
-                for (Future<List<DirectSlotError>> f : futures)
-                    allLates.addAll(f.get());
+                ArrayList<DirectSlotError> allLates = new ArrayList<>();
+                try
+                {
+                    // Wait for all futures:
+                    for (Future<List<DirectSlotError>> f : futures)
+                        allLates.addAll(f.get());
+                }
+                catch (ExecutionException | InterruptedException e)
+                {
+                    Debug.reportError(e);
+                }
+                Platform.runLater(() -> {
+                    panel.updateErrorOverviewBar(false);
+                    List<DiagnosticWithShown> diagnostics = Utility.mapList(allLates, e -> e.toDiagnostic(javaFilename.getName(), frameFilename));
+                    watcher.recordLateErrors(diagnostics, compilationIdentifier);
+                });
             }
-            catch (ExecutionException | InterruptedException e)
-            {
-                Debug.reportError(e);
-            }
-            Platform.runLater(() -> {
-                panel.updateErrorOverviewBar(false);
-                List<DiagnosticWithShown> diagnostics = Utility.mapList(allLates, e -> e.toDiagnostic(javaFilename.getName(), frameFilename));
-                watcher.recordLateErrors(diagnostics, compilationIdentifier);
-            });
-        });
+        }.start();
     }
         
     @Override
@@ -1219,7 +1224,7 @@ public class FrameEditor implements Editor
         ArrayList<AssistContent> joined = new ArrayList<>();
         if (suggests != null)
         {
-            AssistContent[] assists = ParseUtils.getPossibleCompletions(suggests, javadocResolver, null);
+            AssistContent[] assists = ParseUtils.getPossibleCompletions(suggests, javadocResolver, null, null);
             if (assists != null)
                 joined.addAll(Arrays.asList(assists));
         }
@@ -1236,7 +1241,7 @@ public class FrameEditor implements Editor
                 // TODO in future, only do this if we are importing Greenfoot classes.
                 JavaReflective greenfootClassRef = new JavaReflective(pkg.loadClass("greenfoot.Greenfoot"));
                 ExpressionTypeInfo greenfootClass = new ExpressionTypeInfo(new GenTypeClass(greenfootClassRef), null, null, true, false);
-                AssistContent[] greenfootStatic = ParseUtils.getPossibleCompletions(greenfootClass, javadocResolver, null);
+                AssistContent[] greenfootStatic = ParseUtils.getPossibleCompletions(greenfootClass, javadocResolver, null, null);
                 Arrays.stream(greenfootStatic).filter(ac -> ac.getKind() == CompletionKind.METHOD).forEach(ac -> joined.add(new PrefixCompletionWrapper(ac, "Greenfoot.")));
             }
 
@@ -1261,11 +1266,11 @@ public class FrameEditor implements Editor
         {
             members = new ArrayList<>();
             // Add it whether overridden or not:
-            ParseUtils.getPossibleCompletions(suggests, javadocResolver, (ac, isOverridden) -> members.add(ac));
+            ParseUtils.getPossibleCompletions(suggests, javadocResolver, (ac, isOverridden) -> members.add(ac), null);
         }
         else
         {
-            AssistContent[] result = ParseUtils.getPossibleCompletions(suggests, javadocResolver, null);
+            AssistContent[] result = ParseUtils.getPossibleCompletions(suggests, javadocResolver, null, null);
             if (result == null)
                 members = Collections.emptyList();
             else
@@ -1295,6 +1300,23 @@ public class FrameEditor implements Editor
         }
         panel.insertMethodCallInConstructor(methodName, after);
         codeModified();
+    }
+
+    @Override
+    @OnThread(Tag.Any)
+    public EditorFixesManager getEditorFixesManager(){
+        return editorFixesMgr;
+    }
+
+    public boolean containsImport(String importName)
+    {
+        return panel.containsImport(importName);
+    }
+
+    @Override
+    public void addImportFromQuickFix(String importName)
+    {
+        panel.addImport(importName);
     }
 
     @Override
@@ -1335,35 +1357,9 @@ public class FrameEditor implements Editor
     }
 
     @OnThread(Tag.FXPlatform)
-    public List<AssistContentThreadSafe> getLocalTypes(Class<?> superType, boolean includeSelf, Set<Kind> kinds)
+    public List<AssistContentThreadSafe> getLocalTypes(Class<?> superType, Set<Kind> kinds)
     {
-        return pkg.getClassTargets()
-                  .stream()
-                  .filter(ct -> {
-                      if (superType != null)
-                      {
-                          ClassInfo info = ct.getSourceInfo().getInfoIfAvailable();
-                          if (info == null)
-                              return false;
-                          // This code won't pick up the case where A extends B, and B has "superType"
-                          // as a super type, but I'm not sure how we can easily tell that.
-                          boolean hasSuperType = false;
-                          hasSuperType |= superType.getName().equals(info.getSuperclass());
-                          // Check interfaces:
-                          hasSuperType |= info.getImplements().stream().anyMatch(s -> superType.getName().equals(s));
-                          if (!hasSuperType)
-                              return false;
-                      }
-                      
-                      if (ct.isInterface())
-                          return kinds.contains(Kind.INTERFACE);
-                      else if (ct.isEnum())
-                          return kinds.contains(Kind.ENUM);
-                      else 
-                          return kinds.contains(Kind.CLASS_FINAL) || kinds.contains(Kind.CLASS_NON_FINAL);
-                  })
-                  .map(ct -> new AssistContentThreadSafe(LocalTypeCompletion.getCompletion(ct)))
-                  .collect(Collectors.toList());
+        return ParseUtils.getLocalTypes(pkg, superType, kinds);
     }
 
     public void showNextError()
@@ -1454,5 +1450,15 @@ public class FrameEditor implements Editor
     public bluej.pkgmgr.Package getPackage()
     {
         return pkg;
+    }
+
+    @Override
+    public void removeErrorHighlights()
+    {
+        if (panel != null)
+        {
+            panel.flagErrorsAsOld();
+            panel.removeOldErrors();
+        }
     }
 }

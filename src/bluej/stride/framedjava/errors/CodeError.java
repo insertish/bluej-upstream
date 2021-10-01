@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 2014,2015,2016,2018 Michael Kölling and John Rosenberg
+ Copyright (C) 2014,2015,2016,2018,2019,2020 Michael Kölling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -23,6 +23,7 @@ package bluej.stride.framedjava.errors;
 
 import java.util.List;
 
+import bluej.editor.fixes.FixSuggestion;
 import bluej.utility.javafx.JavaFXUtil;
 import javafx.beans.binding.BooleanBinding;
 import javafx.beans.binding.BooleanExpression;
@@ -171,7 +172,6 @@ public abstract class CodeError
      *   either because they overlap,
      *   and this is detected pre-compilation (and the other is a compile error)
      *   or they are detected at the same stage and this refers to an earlier or smaller region
-     * Returns 0 if two errors can be shown alongside each other
      */
     public static int compareErrors(CodeError a, CodeError b)
     {
@@ -180,10 +180,7 @@ public abstract class CodeError
         
         final boolean overlap = a.overlaps(b);
         final boolean aIsSmallerOrEqual = a.getEndPosition() - a.getStartPosition() <= b.getEndPosition() - b.getStartPosition(); 
-        
-        if (!overlap) {
-            return 0; // No ordering if they don't overlap
-        }
+
         if (aIsCompile && !bIsCompile) {
             return 1;
         }

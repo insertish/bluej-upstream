@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 2014,2015,2016,2017,2019  Michael Kolling and John Rosenberg
+ Copyright (C) 2014,2015,2016,2017,2019,2020  Michael Kolling and John Rosenberg
 
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -24,19 +24,14 @@ package bluej.utility;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.net.MalformedURLException;
-import java.net.URISyntaxException;
-import java.net.URL;
 import java.net.URLClassLoader;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.stream.Collectors;
@@ -56,7 +51,7 @@ import bluej.Boot;
 import bluej.parser.ImportedTypeCompletion;
 import bluej.pkgmgr.JavadocResolver;
 import bluej.pkgmgr.Project;
-import bluej.stride.generic.AssistContentThreadSafe;
+import bluej.parser.AssistContentThreadSafe;
 import threadchecker.OnThread;
 import threadchecker.Tag;
 
@@ -310,15 +305,15 @@ public class ImportScanner
         // We hide bluej.* classes as users shouldn't be accessing them:
         ClassGraph userClassGraph = new ClassGraph()
                 .overrideClassLoaders(cl.toArray(new ClassLoader[0]))
-                .blacklistPackages("bluej.*");
+                .rejectPackages("bluej.*");
         
         // We have a separate class graph for system libraries (java.*, javafx.*), from which
         // we only take public packages, thus avoiding all the com.sun classes and so on:
         // This has to be separate because enableSystemPackages() doesn't work alongside 
         // overrideClassLoaders():
         ClassGraph systemClassGraph = new ClassGraph()
-            .enableSystemPackages()
-            .whitelistPackages("java.*", "javax.*", "javafx.*");
+            .enableSystemJarsAndModules()
+            .acceptPackages("java.*", "javax.*", "javafx.*");
 
         return List.of(
             userClassGraph.enableClassInfo(),
@@ -341,6 +336,9 @@ public class ImportScanner
         
         if (classGraphs != null)
         {
+            // Special case -- ClassGraph library (deliberately) doesn't return Object in its list
+            // so we must add it ourselves to avoid problems like "Unknown type: Object" messages.
+            r.addClass("java.lang.Object");
             final int threads = Math.max(1, Runtime.getRuntime().availableProcessors() - 1);
             for (ClassGraph classGraph : classGraphs)
             {

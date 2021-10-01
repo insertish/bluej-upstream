@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2011,2012,2013,2014,2015,2016,2017,2018,2019  Michael Kolling and John Rosenberg
+ Copyright (C) 1999-2009,2010,2011,2012,2013,2014,2015,2016,2017,2018,2019,2020,2021  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -30,6 +30,7 @@ import threadchecker.OnThread;
 import threadchecker.Tag;
 
 import java.io.File;
+import java.io.FileFilter;
 import java.lang.reflect.InvocationTargetException;
 import java.net.*;
 import java.util.ArrayList;
@@ -56,9 +57,9 @@ public class Boot
 
     // The version numbers for BlueJ are changed in the BlueJ build.xml
     // and then the update-version target should be executed.
-    public static final int BLUEJ_VERSION_MAJOR = 4;
-    public static final int BLUEJ_VERSION_MINOR = 2;
-    public static final int BLUEJ_VERSION_RELEASE = 2;
+    public static final int BLUEJ_VERSION_MAJOR = 5;
+    public static final int BLUEJ_VERSION_MINOR = 0;
+    public static final int BLUEJ_VERSION_RELEASE = 0;
     public static final String BLUEJ_VERSION_SUFFIX = "";
 
     // public static final int BLUEJ_VERSION_NUMBER = BLUEJ_VERSION_MAJOR * 1000 +
@@ -81,7 +82,7 @@ public class Boot
     // The second group are available to user code (and to bluej)
     // bluejcore.jar is necessary as it contains the support runtime
     // (bluej.runtime.* classes).
-    private static final String[] bluejUserJars = { "bluejcore.jar", "junit-4.11.jar", "hamcrest-core-1.3.jar", "lang-stride.jar" };
+    private static final String[] bluejUserJars = { "bluejcore.jar", "junit-*.jar", "hamcrest-core-1.3.jar", "hamcrest-library-1.3.jar", "lang-stride.jar" };
     // The number of jar files in the user jars which are built from the
     // BlueJ classes directory
     private static final int bluejUserBuildJars = 1;
@@ -91,47 +92,40 @@ public class Boot
     // Jars that should be included with exported scenarios
     public static final String[] GREENFOOT_EXPORT_JARS = {JLAYER_MP3_JAR, "lang-stride.jar"};
     private static final String[] greenfootUserJars = {"extensions" + File.separatorChar + "greenfoot.jar", 
-        "bluejcore.jar", "bluejeditor.jar", "bluejext.jar",
-        "junit-4.11.jar", "hamcrest-core-1.3.jar", "bluej.jar",
-        "classgraph-4.2.6.jar",
+        "bluejcore.jar", "bluejeditor.jar", "bluejext2.jar",
+        "junit-*.jar", "hamcrest-core-1.3.jar", "hamcrest-library-1.3.jar", "bluej.jar",
+        "classgraph-4.8.90.jar",
         "diffutils-1.2.1.jar", "commons-logging-api-1.1.2.jar",
         JLAYER_MP3_JAR, "opencsv-2.3.jar", "xom-1.2.9.jar",
         "lang-stride.jar",
-        "nsmenufx-2.1.4.jar", "richtextfx-fat-0.9.0.jar",
+        "nsmenufx-2.1.8.jar", "richtextfx-fat-0.9.0.jar",
         "guava-17.0.jar",
         "httpclient-4.1.1.jar", "httpcore-4.1.jar", "httpmime-4.1.1.jar"};
     private static final int greenfootUserBuildJars = 4;
-    public static String GREENFOOT_VERSION = "3.6.0";
+    public static String GREENFOOT_VERSION = "3.6.1";
     public static String GREENFOOT_API_VERSION = "3.0.0";
     // A singleton boot object so the rest of BlueJ can pick up args etc.
     private static Boot instance;
     // The jar files we expect in the BlueJ lib directory
     // The first lot are the ones to run BlueJ itself
-    private static final String[] bluejJars = { "bluejcore.jar", "bluejeditor.jar", "bluejext.jar",
-        "antlr-runtime-3.4.jar",
-        "classgraph-4.2.6.jar",
+    private static final String[] bluejJars = { "bluejcore.jar", "bluejeditor.jar", "bluejext2.jar",
+        "classgraph-4.8.90.jar",
         "commons-logging-api-1.1.2.jar",
         "diffutils-1.2.1.jar",
-        "eddsa-0.2.0.jar",
         "guava-17.0.jar",
         "hamcrest-core-1.3.jar",
+        "hamcrest-library-1.3.jar",
         "httpclient-4.1.1.jar",
         "httpcore-4.1.jar",
         "httpmime-4.1.1.jar",
-        "jbcrypt-1.0.0.jar",
         "jsch-0.1.53.jar",
-        "junit-4.11.jar",
+        "junit-*.jar",
         "lang-stride.jar",
-        "nsmenufx-2.1.4.jar",
+        "nsmenufx-2.1.8.jar",
         "org.eclipse.jgit-4.9.0.jar",
         "richtextfx-fat-0.9.0.jar",
-        "sequence-library-1.0.3.jar",
         "slf4j-api-1.7.2.jar",
         "slf4j-jdk14-1.7.2.jar",
-        "sqljet-1.1.10.jar",
-        "svnkit.jar",
-        "svnkit-javahl.jar",
-        "trilead-ssh2-build-217-jenkins-11.jar",
         "xom-1.2.9.jar" };
     // The variable form of the above
     private static String [] runtimeJars = bluejJars;
@@ -291,7 +285,7 @@ public class Boot
             @OnThread(Tag.FXPlatform)
             public Image get()
             {
-                URL url = getClass().getResource(isGreenfoot ? "gen-greenfoot-splash.png" : "gen-bluej-splash.png");
+                URL url = Boot.class.getResource(isGreenfoot ? "gen-greenfoot-splash.png" : "gen-bluej-splash.png");
                 if (url != null)
                     return new Image(url.toString());
                 else
@@ -632,17 +626,33 @@ public class Boot
             }
         }
 
-        for (int i=startJar; i < jars.length; i++) {
-            File toAdd = new File(libDir, jars[i]);
-            
-            // No need to throw exception at this point; we will get
-            // a ClassNotFoundException or similar if there is really a
-            // problem.
-            //if (!toAdd.canRead())
-            //    throw new IllegalStateException("required jar is missing or unreadable: " + toAdd);
+        for (int i = startJar; i < jars.length; i++)
+        {
+            // We may have more than 1 file if the jar name contains a wildcard *,
+            File[] filesToAdd;
+            if (!jars[i].contains("*"))
+            {
+                filesToAdd = new File[]{new File(libDir, jars[i])};
+            }
+            else
+            {
+                File dir = new File(libDir.getPath());
+                String[] beforeAfter = jars[i].split("\\*");
+                FileFilter fileFilter = f -> f.getName().startsWith(beforeAfter[0]) && f.getName().endsWith(beforeAfter[1]);
+                filesToAdd = dir.listFiles(fileFilter);
+            }
 
-            if (toAdd.canRead())
-                urlList.add(toAdd.toURI().toURL());
+            for (File toAdd : filesToAdd)
+            {
+                // No need to throw exception at this point; we will get
+                // a ClassNotFoundException or similar if there is really a
+                // problem.
+                //if (!toAdd.canRead())
+                //    throw new IllegalStateException("required jar is missing or unreadable: " + toAdd);
+
+                if (toAdd.canRead())
+                    urlList.add(toAdd.toURI().toURL());
+            }
         }
     
         if (isForUserVM)

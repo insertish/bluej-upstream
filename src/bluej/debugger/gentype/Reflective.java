@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2012,2014,2015,2018,2019  Michael Kolling and John Rosenberg
+ Copyright (C) 1999-2009,2012,2014,2015,2018,2019,2020  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -20,6 +20,9 @@
  LICENSE.txt file that accompanied this code.
  */
 package bluej.debugger.gentype;
+
+import threadchecker.OnThread;
+import threadchecker.Tag;
 
 import java.util.Iterator;
 import java.util.List;
@@ -60,6 +63,7 @@ public abstract class Reflective
      * 
      * @return  The parameters as a List of GenTypeDeclTpar
      */
+    @OnThread(Tag.FXPlatform)
     public abstract List<GenTypeDeclTpar> getTypeParams();
     
     /**
@@ -68,6 +72,7 @@ public abstract class Reflective
      * component type is a supertype of this array's component type.
      * @return A List of Reflectives
      */
+    @OnThread(Tag.FXPlatform)
     public abstract List<Reflective> getSuperTypesR();
     
     /**
@@ -75,6 +80,7 @@ public abstract class Reflective
      * parameter names will refer to the type parameters in the parent type.
      * @return A List of GenTypeClass.
      */
+    @OnThread(Tag.FXPlatform)
     public abstract List<GenTypeClass> getSuperTypes();
     
     /**
@@ -83,6 +89,7 @@ public abstract class Reflective
      * 
      * @return A reflective representing an array
      */
+    @OnThread(Tag.FXPlatform)
     public abstract Reflective getArrayOf();
     
     /**
@@ -93,6 +100,7 @@ public abstract class Reflective
      * @param r  The other reflective
      * @return   True if the other reflective type is assignable to this type
      */
+    @OnThread(Tag.FXPlatform)
     public abstract boolean isAssignableFrom(Reflective r);
     
     /**
@@ -100,6 +108,7 @@ public abstract class Reflective
      * a class type.
      * @return   True if this reflective represents an interface
      */
+    @OnThread(Tag.FXPlatform)
     public abstract boolean isInterface();
     
     /**
@@ -109,6 +118,7 @@ public abstract class Reflective
      * @param rawName   the name of the supertype to find
      * @return          the supertype as a GenTypeClass
      */
+    @OnThread(Tag.FXPlatform)
     public GenTypeClass superTypeByName(String rawName)
     {
         List<GenTypeClass> superTypes = getSuperTypes();
@@ -127,11 +137,13 @@ public abstract class Reflective
      * 
      * @param name  The name of the class to locate
      */
+    @OnThread(Tag.FXPlatform)
     abstract public Reflective getRelativeClass(String name);
     
     /**
      * Get the outer class of this one, if there is one.
      */
+    @OnThread(Tag.FXPlatform)
     public Reflective getOuterClass()
     {
         int dollarIndex = getName().lastIndexOf('$');
@@ -146,20 +158,30 @@ public abstract class Reflective
         }
         return null;
     }
-    
+
+    /**
+     * Get a reference to a named inner class of this class. Returns null If
+     * the named inner class doesn't exist.
+     */
+    @OnThread(Tag.FXPlatform)
+    abstract public Reflective getInnerClass(String name);
+
     /**
      * Determine whether this class is a static inner class.
      */
+    @OnThread(Tag.FXPlatform)
     abstract public boolean isStatic();
     
     /**
      * Determine whether this class is declared public.
      */
+    @OnThread(Tag.FXPlatform)
     abstract public boolean isPublic();
     
     /**
      * Determine whether this class is declared final.
      */
+    @OnThread(Tag.FXPlatform)
     abstract public boolean isFinal();
     
     /**
@@ -170,25 +192,21 @@ public abstract class Reflective
      * @return a map which maps method names to a set of methods
      *    (represented by MethodReflective objects) 
      */
+    @OnThread(Tag.FXPlatform)
     abstract public Map<String,Set<MethodReflective>> getDeclaredMethods();
 
     /**
      * Gets the constructors declared in the type represented by this Reflective.
      */
+    @OnThread(Tag.FXPlatform)
     abstract public List<ConstructorReflective> getDeclaredConstructors();
 
     /**
      * Get the fields declared in the type represented by this Reflective.
      * This does not include fields declared in the superclass(es).
      */
+    @OnThread(Tag.FXPlatform)
     abstract public Map<String,FieldReflective> getDeclaredFields();
-    
-    /**
-     * Get a reference to a named inner class of this class. Returns null If
-     * the named inner class doesn't exist.
-     */
-    abstract public Reflective getInnerClass(String name);
-
 
     /**
      * Get the module name of this type.  Returns null if not known or non-applicable.

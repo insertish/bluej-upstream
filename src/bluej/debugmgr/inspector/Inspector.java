@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2010,2011,2012,2014,2015,2016,2017,2018  Michael Kolling and John Rosenberg
+ Copyright (C) 1999-2010,2011,2012,2014,2015,2016,2017,2018,2019,2021  Michael Kolling and John Rosenberg
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -87,7 +87,6 @@ public abstract class Inspector extends Stage
 
     protected Button inspectButton;
     protected Button getButton;
-    protected AssertPanel assertPanel;
 
     protected DebuggerObject selectedField; // the object currently selected in
                                             // the list
@@ -211,12 +210,11 @@ public abstract class Inspector extends Stage
     /**
      * Initializes the list of fields. This creates the component that shows the
      * fields.
-     * @param valueFieldColor 
      */
     private void initFieldList()
     {
         fieldList = new FieldList();
-        JavaFXUtil.addChangeListenerPlatform(fieldList.getSelectionModel().selectedIndexProperty(), index -> listElementSelected(index.intValue()));
+        JavaFXUtil.addChangeListenerPlatform(fieldList.selectedIndexProperty(), index -> listElementSelected(index.intValue()));
         
         // add mouse listener to monitor for double clicks to inspect list
         // objects. assumption is made that valueChanged will have selected
@@ -231,11 +229,29 @@ public abstract class Inspector extends Stage
         // To make it possible to close dialogs with the keyboard (ENTER), we
         // grab the key event from the fieldlist which otherwise consumes it
         // as part of the edit action (even though it's not editable)
-        fieldList.addEventFilter(KeyEvent.KEY_PRESSED, e -> {
+        addEventFilter(KeyEvent.KEY_PRESSED, e -> {
             // Enter or escape?
-            if (e.getCode() == KeyCode.ENTER) {
+            if (e.getCode() == KeyCode.ESCAPE || e.getCode() == KeyCode.ENTER)
+            {
                 doClose(true);
+                e.consume();
+            }
+            else if (e.getCode() == KeyCode.SPACE && fieldList.isFocused())
+            {
+                doInspect();
                 e.consume();    
+            }
+            else if (e.getCode() == KeyCode.UP)
+            {
+                fieldList.requestFocus();
+                fieldList.up();
+                e.consume();
+            }
+            else if (e.getCode() == KeyCode.DOWN)
+            {
+                fieldList.requestFocus();
+                fieldList.down();
+                e.consume();
             }
         });
     }
@@ -289,14 +305,14 @@ public abstract class Inspector extends Stage
     {
         final List<FieldInfo> listData = getListData();
 
-        int prevSelection = fieldList.getSelectionModel().getSelectedIndex();
+        int prevSelection = fieldList.selectedIndexProperty().get();
         
         fieldList.setData(listData);
         //fieldList.setTableHeader(null);
 
         // Ensures that an element (if any exist) is always selected, preferably previously selected item:
         if (!listData.isEmpty())
-            fieldList.getSelectionModel().select(prevSelection == -1 || prevSelection >= listData.size() ? 0 : prevSelection);
+            fieldList.select(prevSelection == -1 || prevSelection >= listData.size() ? 0 : prevSelection);
     }
 
     /**
@@ -361,43 +377,11 @@ public abstract class Inspector extends Stage
     /**
      * Close this inspector. The caller should remove it from the list of open
      * inspectors.
-     * 
-     * @param handleAssertions   Whether assertions should be attached to the
-     *                           invoker record. If true, the user may be prompted
-     *                           to fill in assertion data. 
      */
     public void doClose(boolean handleAssertions)
     {
-        boolean closeOk = true;
-
-        if (handleAssertions) {
-            // handleAssertions may veto the close
-            closeOk = handleAssertions();
-        }
-
-        if (closeOk) {
-            hide();
-            remove();
-        }
-    }
-
-    protected boolean handleAssertions()
-    {
-        if (assertPanel != null && assertPanel.isAssertEnabled()) {
-            
-            if (! assertPanel.isAssertComplete()) {
-                int choice = DialogManager.askQuestionFX(this, "empty-assertion-text");
-                
-                if (choice == 0) {
-                    return false;
-                }
-            }
-            
-            ir.addAssertion(assertPanel.getAssertStatement());
-
-            assertPanel.recordAssertion(pkg, () -> Optional.ofNullable(PkgMgrFrame.findFrame(pkg)).map(PkgMgrFrame::getTestIdentifier), ir.getUniqueIdentifier());
-        }
-        return true;
+        hide();
+        remove();
     }
 
     protected Button createCloseButton()
@@ -498,8 +482,8 @@ public abstract class Inspector extends Stage
         double x = owner.getX() + (ownerScene.getWidth() / 2.0) - (dialogWidth / 2.0);
         double y = owner.getY() + titleBarHeight / 2.0 + (ownerScene.getHeight() / 2.0) - (dialogHeight / 2.0);
 
-        setX(x);
-        setY(y);
+        setX(Math.max(0, x));
+        setY(Math.max(0, y));
     }
 
     // Gets the content for the purposes of animation

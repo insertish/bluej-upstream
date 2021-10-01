@@ -31,16 +31,18 @@ import bluej.debugger.DebuggerField;
 import bluej.debugger.DebuggerObject;
 import bluej.debugger.DebuggerTerminal;
 import bluej.debugmgr.ExecutionEvent;
-import bluej.editor.moe.MoeEditor;
+import bluej.editor.flow.FlowEditor;
+import bluej.editor.flow.FlowEditor.OffScreenFlowEditorPaneListener;
+import bluej.editor.flow.FlowEditorPane.FlowEditorPaneListener;
+import bluej.editor.flow.FlowEditorPane.LineContainer;
+import bluej.editor.flow.LineDisplay;
+import bluej.editor.flow.TextLine;
 import bluej.pkgmgr.Package;
 import bluej.pkgmgr.Project;
+import bluej.pkgmgr.print.PrintProgressDialog;
 import bluej.prefmgr.PrefMgr;
 import bluej.testmgr.record.InvokerRecord;
-import bluej.utility.Debug;
-import bluej.utility.DialogManager;
-import bluej.utility.FileUtility;
-import bluej.utility.JavaNames;
-import bluej.utility.Utility;
+import bluej.utility.*;
 import bluej.utility.javafx.JavaFXUtil;
 
 import java.io.File;
@@ -48,6 +50,9 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.io.Reader;
 import java.io.Writer;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -57,20 +62,19 @@ import java.util.regex.Pattern;
 
 import javafx.application.Platform;
 import javafx.beans.binding.Bindings;
+import javafx.beans.binding.ObjectExpression;
 import javafx.beans.property.BooleanProperty;
+import javafx.beans.property.ReadOnlyDoubleWrapper;
+import javafx.beans.property.ReadOnlyStringWrapper;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.event.EventHandler;
 import javafx.print.PrinterJob;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
-import javafx.scene.input.KeyCode;
-import javafx.scene.input.KeyCodeCombination;
-import javafx.scene.input.KeyCombination;
-import javafx.scene.input.MouseButton;
-import javafx.scene.input.MouseEvent;
+import javafx.scene.input.*;
 import javafx.scene.layout.BorderPane;
+import javafx.scene.paint.Color;
 import javafx.stage.Stage;
-
 import org.fxmisc.flowless.VirtualFlow;
 import org.fxmisc.flowless.VirtualizedScrollPane;
 import org.fxmisc.richtext.CharacterHit;
@@ -79,14 +83,25 @@ import org.fxmisc.richtext.StyledTextArea;
 import org.fxmisc.richtext.TextExt;
 import org.fxmisc.richtext.model.EditableStyledDocument;
 import org.fxmisc.richtext.model.GenericEditableStyledDocument;
+import org.fxmisc.richtext.model.Paragraph;
 import org.fxmisc.richtext.model.ReadOnlyStyledDocument;
 import org.fxmisc.richtext.model.SegmentOps;
+import org.fxmisc.richtext.model.StyleSpan;
+import org.fxmisc.richtext.model.StyledDocument;
+import org.fxmisc.richtext.model.StyledSegment;
 import org.fxmisc.wellbehaved.event.EventPattern;
 import org.fxmisc.wellbehaved.event.InputMap;
 import org.fxmisc.wellbehaved.event.Nodes;
-
 import threadchecker.OnThread;
 import threadchecker.Tag;
+
+import java.io.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * The Frame part of the Terminal window used for I/O when running programs
@@ -441,28 +456,38 @@ public final class Terminal
         }
         else if (job.showPrintDialog(window))
         {
-            EditableStyledDocument<Void, String, StdoutStyle> doc = new GenericEditableStyledDocument<>(null, StdoutStyle.OUTPUT, SegmentOps.styledTextOps());
-            doc.replace(0, 0, ReadOnlyStyledDocument.from(text.getDocument()));
-            // Need to make a copy of the text pane for off-thread use:
-            StyledTextArea<Void, StdoutStyle> offScreenEditor = new StyledTextArea<Void, StdoutStyle>(
-                null, (t, v) -> {}, StdoutStyle.OUTPUT, this::applyStyle, doc);
-            Scene scene = new Scene(offScreenEditor);
+            List<List<TextLine.StyledSegment>> lines = new ArrayList<>();
+            StyledDocument<Void, String, StdoutStyle> src = text.getDocument();
+            for (Paragraph<Void, String, StdoutStyle> paragraph : src.getParagraphs())
+            {
+                int curPos = 0;
+                ArrayList<TextLine.StyledSegment> segs = new ArrayList<>();
+                for (StyleSpan<StdoutStyle> styleSpan : paragraph.getStyleSpans())
+                {
+                    segs.add(new TextLine.StyledSegment(List.of(styleSpan.getStyle().getCSSClass()), paragraph.substring(curPos, curPos + styleSpan.getLength())));
+                    curPos += styleSpan.getLength();
+                }
+                lines.add(segs);
+            }
+            
+            BorderPane root = new BorderPane();
+            Scene scene = new Scene(root);
             Config.addTerminalStylesheets(scene);
             // JavaFX seems to always print at 72 DPI, regardless of printer DPI:
             // This means that that the point width (1/72 of an inch) is actually the pixel width, too:
             double pixelWidth = job.getJobSettings().getPageLayout().getPrintableWidth();
             double pixelHeight = job.getJobSettings().getPageLayout().getPrintableHeight();
-            offScreenEditor.resize(pixelWidth, pixelHeight);
+            root.resize(pixelWidth, pixelHeight);
+            
+            LineDisplay lineDisplay = new LineDisplay(root.heightProperty()::get, new ReadOnlyDoubleWrapper(0), new ReadOnlyStringWrapper(""), new OffScreenFlowEditorPaneListener());
+            LineContainer lineContainer = new LineContainer(lineDisplay, true);
+            root.setCenter(lineContainer);
 
-            // We could make page size match screen size by scaling font size by difference in DPIs:
-            //editorPane.styleProperty().unbind();
-            //editorPane.setStyle("-fx-font-size: " + PrefMgr.getEditorFontSize().getValue().doubleValue() * 0.75 + "pt;");
-            offScreenEditor.setWrapText(true);
-            offScreenEditor.requestLayout();
-            offScreenEditor.layout();
-            offScreenEditor.applyCss();
+            root.requestLayout();
+            root.layout();
+            root.applyCss();
 
-            VirtualFlow<?, ?> virtualFlow = (VirtualFlow<?, ?>) offScreenEditor.lookup(".virtual-flow");
+            PrintProgressDialog printProgressDialog = new PrintProgressDialog(window, false);
             // Run in background thread:
             new Thread(new Runnable()
             {
@@ -470,10 +495,12 @@ public final class Terminal
                 @OnThread(value = Tag.FX, ignoreParent = true)
                 public void run()
                 {
-                    MoeEditor.printPages(job, offScreenEditor, n -> {}, offScreenEditor, virtualFlow);
+                    FlowEditor.printPages(job, root, n -> {}, lineContainer, lineDisplay, lines, false, printProgressDialog.getWithinFileUpdater());
                     job.endJob();
+                    printProgressDialog.finished();
                 }
             }).start();
+            printProgressDialog.showAndWait();
         }
     }
 

@@ -1,6 +1,6 @@
 /*
  This file is part of the BlueJ program. 
- Copyright (C) 1999-2009,2010,2011,2012,2013,2014,2015,2016,2017,2018,2019  Michael Kolling and John Rosenberg 
+ Copyright (C) 1999-2009,2010,2011,2012,2013,2014,2015,2016,2017,2018,2019,2020  Michael Kolling and John Rosenberg 
  
  This program is free software; you can redistribute it and/or 
  modify it under the terms of the GNU General Public License 
@@ -29,35 +29,23 @@ import bluej.classmgr.ClassMgrPrefPanel;
 import bluej.collect.DataCollector;
 import bluej.compiler.CompileReason;
 import bluej.compiler.CompileType;
-import bluej.debugger.Debugger;
-import bluej.debugger.DebuggerClass;
-import bluej.debugger.DebuggerEvent;
-import bluej.debugger.DebuggerListener;
-import bluej.debugger.DebuggerObject;
-import bluej.debugger.DebuggerThread;
-import bluej.debugger.DebuggerThreadListener;
-import bluej.debugger.RunOnThread;
+import bluej.debugger.*;
 import bluej.debugmgr.ExecControls;
 import bluej.debugmgr.ExpressionInformation;
-import bluej.debugmgr.inspector.ClassInspector;
-import bluej.debugmgr.inspector.Inspector;
-import bluej.debugmgr.inspector.InspectorManager;
-import bluej.debugmgr.inspector.ObjectInspector;
-import bluej.debugmgr.inspector.ResultInspector;
+import bluej.debugmgr.inspector.*;
 import bluej.debugmgr.objectbench.ObjectBench;
 import bluej.debugmgr.objectbench.ObjectWrapper;
 import bluej.editor.Editor;
+import bluej.editor.fixes.ProjectImportInformation;
 import bluej.editor.stride.FXTabbedEditor;
 import bluej.editor.stride.FrameShelfStorage;
-import bluej.extensions.BProject;
-import bluej.extensions.ExtensionBridge;
+import bluej.extensions2.BProject;
+import bluej.extensions2.ExtensionBridge;
 import bluej.extmgr.ExtensionsManager;
 import bluej.groupwork.Repository;
 import bluej.groupwork.TeamSettingsController;
 import bluej.groupwork.actions.TeamActionGroup;
 import bluej.groupwork.ui.CommitAndPushFrame;
-import bluej.groupwork.ui.CommitAndPushInterface;
-import bluej.groupwork.ui.CommitCommentsFrame;
 import bluej.groupwork.ui.StatusFrame;
 import bluej.groupwork.ui.TeamSettingsDialog;
 import bluej.groupwork.ui.UpdateFilesFrame;
@@ -68,13 +56,8 @@ import bluej.prefmgr.PrefMgr;
 import bluej.terminal.Terminal;
 import bluej.testmgr.record.ClassInspectInvokerRecord;
 import bluej.testmgr.record.InvokerRecord;
-import bluej.utility.Debug;
-import bluej.utility.DialogManager;
-import bluej.utility.FileUtility;
+import bluej.utility.*;
 import bluej.utility.FileUtility.WriteCapabilities;
-import bluej.utility.ImportScanner;
-import bluej.utility.JavaNames;
-import bluej.utility.Utility;
 import bluej.utility.javafx.JavaFXUtil;
 import bluej.views.View;
 import javafx.animation.Interpolator;
@@ -93,6 +76,7 @@ import javafx.scene.Node;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.scene.shape.Rectangle;
+import javafx.stage.Stage;
 import javafx.stage.Window;
 import javafx.util.Duration;
 import threadchecker.OnThread;
@@ -106,7 +90,7 @@ import java.nio.charset.Charset;
 import java.nio.charset.IllegalCharsetNameException;
 import java.nio.charset.UnsupportedCharsetException;
 import java.util.*;
-
+import java.util.concurrent.CompletableFuture;
 
 /**
  * A BlueJ Project.
@@ -177,13 +161,16 @@ public class Project implements DebuggerListener, DebuggerThreadListener, Inspec
     private List<URL> libraryUrls;
     // the TeamSettingsController for this project
     private TeamSettingsController teamSettingsController = null;
-    private CommitAndPushInterface commitCommentsFrame = null;
+    private CommitAndPushFrame commitCommentsFrame = null;
     private UpdateFilesFrame updateFilesFrame = null;
     private StatusFrame statusFrame = null;
     /** If true, this project is connected with a source repository */
     /** If empty, not checked yet */
     @OnThread(value = Tag.Any, requireSynchronized = true)
     private Optional<Boolean> isSharedProject = Optional.empty();
+
+    // Indicator of SVN shared project, which is no longer supported from BlueJ 5
+    private boolean isSharedSVNProject = false;
 
     // team actions
     private TeamActionGroup teamActions;
@@ -229,12 +216,13 @@ public class Project implements DebuggerListener, DebuggerThreadListener, Inspec
     private ImportScanner importScanner;
 
     /** check if the project is a dvcs project**/
-    private boolean isDVCS=false;
     private final FrameShelfStorage shelfStorage;
     private final BooleanProperty terminalShowing = new SimpleBooleanProperty(false);
     private final BooleanProperty debuggerShowing = new SimpleBooleanProperty(false);
     // Which thread to run on.  null means we have never asked the user about it.
     private RunOnThread runOnThread;
+    @OnThread(Tag.Any)
+    private final CompletableFuture<ProjectImportInformation> projectImportInformation = new CompletableFuture<>();
 
     /* ------------------- end of field declarations ------------------- */
 
@@ -314,16 +302,18 @@ public class Project implements DebuggerListener, DebuggerThreadListener, Inspec
         // Check whether this is a shared project
         File ccfFile = new File(projectDir.getAbsoluteFile(), "team.defs");
         isSharedProject = Optional.of(ccfFile.isFile());
-        isDVCS=false;
         if (isSharedProject.get()){
             TeamSettingsController tsc = new TeamSettingsController(this);
             isSharedProject = Optional.of(TeamSettingsController.isValidVCSfound(projectDir));
-            if (isSharedProject.get()){
-                isDVCS = tsc.isDVCS();
+
+            //SVN is no longer supported in BlueJ 5: if a SVN project is found, the user is notified.
+            if (!isSharedProject.get() && tsc.getPropString("bluej.teamsettings.vcs").equalsIgnoreCase("subversion"))
+            {
+               isSharedSVNProject=true;
             }
         }
 
-        teamActions = new TeamActionGroup(isSharedProject.get(), isDVCS);
+        teamActions = new TeamActionGroup(isSharedProject.get());
 
         JavaFXUtil.addChangeListenerPlatform(terminalShowing, showTerm -> {
             if (showTerm && !hasTerminal())
@@ -340,6 +330,9 @@ public class Project implements DebuggerListener, DebuggerThreadListener, Inspec
                 else
                     execControls.hide();
             }
+        });
+        Utility.runBackground(() -> {
+            projectImportInformation.complete(new ProjectImportInformation(this));
         });
     }
 
@@ -516,12 +509,6 @@ public class Project implements DebuggerListener, DebuggerThreadListener, Inspec
         if (proj == null) {
             try {
                 proj = new Project(projectDir);
-
-                //if is shared project, check for svn working copy version.
-                if (proj.isTeamProject() && !proj.getTeamSettingsController().isDVCS() && proj.getTeamSettingsController().getWorkingCopyVersion() != 1.6) {
-                    DialogManager.showMessageFX(null, "SVNWorkingCopyNot16");
-                }
-
                 projects.put(projectDir, proj);
             }
             catch (IOException ioe) {
@@ -984,7 +971,6 @@ public class Project implements DebuggerListener, DebuggerThreadListener, Inspec
 
     /**
      * Remove an inspector from the list of inspectors for this project
-     * @param obj the inspector. 
      */
     @OnThread(Tag.FXPlatform)
     public void removeInspector(DebuggerClass cls)
@@ -1028,10 +1014,6 @@ public class Project implements DebuggerListener, DebuggerThreadListener, Inspec
     /**
      * Return a ClassInspector for a class. The inspector is visible.
      *
-     * @param name
-     *            The name of this object or "null" if it is not on the object bench
-     * @param getEnabled
-     *            if false, the "get" button is permanently disabled
      * @param clss
      *            The class displayed by this viewer
      * @param pkg
@@ -1584,12 +1566,14 @@ public class Project implements DebuggerListener, DebuggerThreadListener, Inspec
         // if there is a breakpoint in a JavaFX class and we are restarting VM
         // before FX launch, then we set the breakpoints before launching the FX app:
         packages.values().forEach(Package::reInitBreakpoints);
+        // The debug VM application steals focus on Mac, so once it's launched, we reclaim the focus to the window in the main VM:
         if (Config.isMacOS())
         {
-            PkgMgrFrame frame = PkgMgrFrame.findFrame(getUnnamedPackage());
-            if (frame != null)
+            PackageUI packageUI = getUnnamedPackage().getUI();
+            Stage stage = packageUI == null ? null : packageUI.getStage();
+            if (stage != null)
             {
-                frame.bringToFront();
+                Utility.bringToFrontFX(stage);
             }
         }
 
@@ -1895,110 +1879,123 @@ public class Project implements DebuggerListener, DebuggerThreadListener, Inspec
      * A debugger event was fired. Analyse which event it was, and take
      * appropriate action.
      */
-    @OnThread(Tag.Any)
+    @OnThread(Tag.VMEventHandler)
     public void processDebuggerEvent(final DebuggerEvent event, boolean skipUpdate)
     {
         if (skipUpdate) {
             return;
         }
+        if (event.getID() == DebuggerEvent.DEBUGGER_STATECHANGED)
+        {
+            Platform.runLater(() -> {
+                int newState = event.getNewState();
+                int oldState = event.getOldState();
 
-        Platform.runLater(new Runnable() {
-            public void run()
-            {
-                if (event.getID() == DebuggerEvent.DEBUGGER_STATECHANGED)
+                if (newState == Debugger.RUNNING)
                 {
-                    int newState = event.getNewState();
-                    int oldState = event.getOldState();
-                    
-                    if (newState == Debugger.RUNNING)
-                    {
-                        getTerminal().activate(true);
-                    }
-                    else if (newState == Debugger.IDLE)
-                    {
-                        getTerminal().activate(false);
-                    }
-                    
-                    PkgMgrFrame[] frames = PkgMgrFrame.getAllProjectFrames(Project.this);
-
-                    if (frames != null)
-                    {
-                        for (int i = 0; i < frames.length; i++)
-                        {
-                            frames[i].setDebuggerState(newState);
-                        }
-                    }
-
-                    // check whether we just got a freshly created VM
-                    if ((oldState == Debugger.NOTREADY) &&
-                            (newState == Debugger.IDLE)) {
-                        vmReady();
-                    }
-
-                    // check whether a good VM just disappeared
-                    if ((oldState == Debugger.IDLE) &&
-                            (newState == Debugger.NOTREADY)) {
-                        removeStepMarks();
-                        vmClosed();
-                    }
-
-                    // check whether we failed to create the VM
-                    if (newState == Debugger.LAUNCH_FAILED) {
-                        BlueJEvent.raiseEvent(BlueJEvent.CREATE_VM_FAILED, null);
-                    }
-
-                    return;
+                    getTerminal().activate(true);
+                }
+                else if (newState == Debugger.IDLE)
+                {
+                    getTerminal().activate(false);
                 }
 
-                DebuggerThread thr = event.getThread();
-                if (thr == null) {
-                    return; // Not a thread event
-                }
-                String packageName = JavaNames.getPrefix(thr.getClass(0));
-                Package pkg = getPackage(packageName);
 
-                if (pkg != null) {
-                    switch (event.getID()) {
-                        case DebuggerEvent.THREAD_BREAKPOINT:
-                            pkg.hitBreakpoint(thr);
-                            break;
+                PkgMgrFrame[] frames = PkgMgrFrame.getAllProjectFrames(Project.this);
 
-                        case DebuggerEvent.THREAD_HALT_UNKNOWN:
-                        case DebuggerEvent.THREAD_HALT_STEP_INTO:
-                        case DebuggerEvent.THREAD_HALT_STEP_OVER:
-                            pkg.hitHalt(thr);
-                            break;
+                if (frames != null)
+                {
+                    for (int i = 0; i < frames.length; i++)
+                    {
+                        frames[i].setDebuggerState(newState);
                     }
                 }
 
+                // check whether we just got a freshly created VM
+                if ((oldState == Debugger.NOTREADY) &&
+                        (newState == Debugger.IDLE))
+                {
+                    vmReady();
+                }
+
+                // check whether a good VM just disappeared
+                if ((oldState == Debugger.IDLE) &&
+                        (newState == Debugger.NOTREADY))
+                {
+                    removeStepMarks();
+                    vmClosed();
+                }
+
+                // check whether we failed to create the VM
+                if (newState == Debugger.LAUNCH_FAILED)
+                {
+                    BlueJEvent.raiseEvent(BlueJEvent.CREATE_VM_FAILED, null);
+                }
+
+            });
+            return;
+        }
+
+        DebuggerThread thr = event.getThread();
+        if (thr == null) {
+            return; // Not a thread event
+        }
+        // Variables which must be fetched from this thread:
+        String packageName = JavaNames.getPrefix(thr.getClass(0));
+        SourceLocation[] filteredStack = ExecControls.getFilteredStack(thr.getStack());
+        String classSourceName = thr.getClassSourceName(0);
+        int lineNumber = thr.getLineNumber(0);
+        DebuggerObject currentObject = thr.getCurrentObject(0);
+        boolean atBreakpoint = thr.isAtBreakpoint();
+        
+        Platform.runLater(() -> {
+            Package pkg = getPackage(packageName);
+
+            if (pkg != null)
+            {
                 switch (event.getID())
                 {
-                    case DebuggerEvent.THREAD_HALT_UNKNOWN:
-                        DataCollector.debuggerHalt(Project.this, thr.getName(), ExecControls.getFilteredStack(thr.getStack()));
-                        break;
-                    case DebuggerEvent.THREAD_HALT_STEP_INTO:
-                        DataCollector.debuggerStepInto(Project.this, thr.getName(), ExecControls.getFilteredStack(thr.getStack()));
-                        break;
-                    case DebuggerEvent.THREAD_HALT_STEP_OVER:
-                        DataCollector.debuggerStepOver(Project.this, thr.getName(), ExecControls.getFilteredStack(thr.getStack()));
-                        break;
                     case DebuggerEvent.THREAD_BREAKPOINT:
-                        DataCollector.debuggerHitBreakpoint(Project.this, thr.getName(), ExecControls.getFilteredStack(thr.getStack()));
+                        pkg.hitBreakpoint(thr, classSourceName, lineNumber, currentObject);
+                        break;
+
+                    case DebuggerEvent.THREAD_HALT_UNKNOWN:
+                    case DebuggerEvent.THREAD_HALT_STEP_INTO:
+                    case DebuggerEvent.THREAD_HALT_STEP_OVER:
+                        pkg.hitHalt(thr, classSourceName, lineNumber, currentObject, atBreakpoint);
                         break;
                 }
             }
+            
+            switch (event.getID())
+            {
+                case DebuggerEvent.THREAD_HALT_UNKNOWN:
+                    DataCollector.debuggerHalt(Project.this, thr.getName(), filteredStack);
+                    break;
+                case DebuggerEvent.THREAD_HALT_STEP_INTO:
+                    DataCollector.debuggerStepInto(Project.this, thr.getName(), filteredStack);
+                    break;
+                case DebuggerEvent.THREAD_HALT_STEP_OVER:
+                    DataCollector.debuggerStepOver(Project.this, thr.getName(), filteredStack);
+                    break;
+                case DebuggerEvent.THREAD_BREAKPOINT:
+                    DataCollector.debuggerHitBreakpoint(Project.this, thr.getName(), filteredStack);
+                    break;
+            }
+
         });
     }
 
     /**
      * Show the source code at a particular position
      */
-    public void showSource(DebuggerThread thread, String className, String sourceName, int lineNumber)
+    @OnThread(Tag.FXPlatform)
+    public void showSource(DebuggerThread thread, String className, String sourceName, int lineNumber, DebuggerObject currentObject)
     {
         String packageName = JavaNames.getPrefix(className);
         Package pkg = getPackage(packageName);
         if (pkg != null) {
-            pkg.showSourcePosition(thread, sourceName, lineNumber);
+            pkg.showSourcePosition(thread, sourceName, lineNumber, currentObject);
         }
     }
 
@@ -2125,7 +2122,7 @@ public class Project implements DebuggerListener, DebuggerThreadListener, Inspec
                                       boolean includeDirs)
     {
         TeamSettingsController teamSettingsController = getTeamSettingsController();
-        File[] files = dir.listFiles(teamSettingsController == null ? null : teamSettingsController.getFileFilter(includePkgFiles, true));
+        File[] files = dir.listFiles(teamSettingsController == null ? null : teamSettingsController.getFileFilter(true));
         if (files == null) {
             return;
         }
@@ -2153,16 +2150,11 @@ public class Project implements DebuggerListener, DebuggerThreadListener, Inspec
     /**
      * Get the commit dialog for this project
      */
-    public CommitAndPushInterface getCommitCommentsDialog()
+    public CommitAndPushFrame getCommitCommentsDialog()
     {
         // lazy instantiation of commit comments frame
         if (commitCommentsFrame == null) {
-            if (this.teamSettingsController.isDVCS()) {
-                //a dcvs repository uses a different window.
-                commitCommentsFrame = new CommitAndPushFrame(this);
-            } else {
-                commitCommentsFrame = new CommitCommentsFrame(this);
-            }
+            commitCommentsFrame = new CommitAndPushFrame(this);
         }
         return commitCommentsFrame;
     }
@@ -2191,9 +2183,8 @@ public class Project implements DebuggerListener, DebuggerThreadListener, Inspec
         //check if it is a dcvs.
         if (shared){
             TeamSettingsController tsc = new TeamSettingsController(this);
-            isDVCS = tsc.isDVCS();
         }
-        teamActions.setTeamMode(shared, isDVCS);
+        teamActions.setTeamMode(shared);
 
         PkgMgrFrame[] frames = PkgMgrFrame.getAllProjectFrames(this);
         if (frames != null) {
@@ -2277,6 +2268,21 @@ public class Project implements DebuggerListener, DebuggerThreadListener, Inspec
         TeamSettingsController tsc = getTeamSettingsController();
         if (tsc != null) {
             tsc.prepareCreateDir(dir);
+        }
+    }
+
+    public boolean isSharedSVNProject()
+    {
+        return isSharedSVNProject;
+    };
+
+    public void removeSVNInfos(){
+        // Remove the team.defs file that hosts the SVN properties of the project,
+        // the ".svn" folder and content are kept on the disk if the users needed to use them again.
+        File teamdefsFile = new File(getProjectDir(), "team.defs");
+        if (teamdefsFile != null && teamdefsFile.exists())
+        {
+            teamdefsFile.delete();
         }
     }
 
@@ -2523,25 +2529,27 @@ public class Project implements DebuggerListener, DebuggerThreadListener, Inspec
 
 
     @Override
-    @OnThread(Tag.Any)
+    @OnThread(Tag.VMEventHandler)
     public void threadStateChanged(DebuggerThread thread, boolean shouldDisplay)
     {
         Platform.runLater(() -> {
             for (int i = 0; i < threadListContents.size(); i++)
             {
-                if (threadListContents.get(i).isThread(thread))
+                DebuggerThreadDetails details = threadListContents.get(i);
+                if (details.isThread(thread))
                 {
-                    threadListContents.get(i).update();
+                    getDebugger().runOnEventHandler(() -> details.update());
                     break;
                 }
             }
 
             if (hasExecControls())
             {
-                getExecControls().updateThreadDetails(thread);
+                ExecControls controls = getExecControls();
+                getDebugger().runOnEventHandler(() -> controls.updateThreadDetails(thread));
                 if (shouldDisplay)
                 {
-                    getExecControls().selectThread(thread);
+                    controls.selectThread(thread);
                 }
             }
         });
@@ -2557,7 +2565,7 @@ public class Project implements DebuggerListener, DebuggerThreadListener, Inspec
     }
 
     @Override
-    @OnThread(Tag.Any)
+    @OnThread(Tag.VMEventHandler)
     public void addThread(DebuggerThread thread)
     {
         DebuggerThreadDetails details = new DebuggerThreadDetails(thread);
@@ -2567,7 +2575,7 @@ public class Project implements DebuggerListener, DebuggerThreadListener, Inspec
     }
 
     @Override
-    @OnThread(Tag.Any)
+    @OnThread(Tag.VMEventHandler)
     public void removeThread(DebuggerThread thread)
     {
         DebuggerThreadDetails details = new DebuggerThreadDetails(thread);
@@ -2595,6 +2603,12 @@ public class Project implements DebuggerListener, DebuggerThreadListener, Inspec
         debugger.setRunOnThread(runOnThread == null ? RunOnThread.DEFAULT : runOnThread);
     }
 
+    @OnThread(Tag.Any)
+    public CompletableFuture<ProjectImportInformation> getImports()
+    {
+        return projectImportInformation;
+    }
+
     /**
      * We fetch the display details on the debugger thread,
      * not from the FX thread, and this object allows us to capture some
@@ -2608,9 +2622,10 @@ public class Project implements DebuggerListener, DebuggerThreadListener, Inspec
     {
         private final DebuggerThread debuggerThread;
         private String debuggerThreadDisplay;
+        @OnThread(value = Tag.Any, requireSynchronized = true)
         private boolean suspended;
 
-        @OnThread(Tag.Any)
+        @OnThread(Tag.VMEventHandler)
         public DebuggerThreadDetails(DebuggerThread dt)
         {
             this.debuggerThread = dt;
@@ -2620,8 +2635,8 @@ public class Project implements DebuggerListener, DebuggerThreadListener, Inspec
         /**
          * Update details based on the current state of the thread.
          */
-        @OnThread(Tag.Any)
-        public void update()
+        @OnThread(Tag.VMEventHandler)
+        public synchronized void update()
         {
             this.debuggerThreadDisplay = debuggerThread.toString();
             this.suspended = debuggerThread.isSuspended();
@@ -2651,6 +2666,7 @@ public class Project implements DebuggerListener, DebuggerThreadListener, Inspec
             return debuggerThreadDisplay;
         }
 
+        @OnThread(Tag.Any)
         public boolean isThread(DebuggerThread dt)
         {
             return debuggerThread.equals(dt);
@@ -2659,16 +2675,18 @@ public class Project implements DebuggerListener, DebuggerThreadListener, Inspec
         /**
          * Gets whether the thread was suspended when this DebuggerThreadDetails
          * object was created.  Should be used in preference to getThread().isSuspended()
-         * because it is set once and will not change, whereas getThread().isSuspended()
+         * because it is set in a controlled manner by update(), whereas getThread().isSuspended()
          * is live and may return in effect a "future" value (i.e. one which has
          * occurred in the debugger but not yet reached the GUI, and is queued
          * to be processed after this event).
          */
-        public boolean isSuspended()
+        @OnThread(Tag.Any)
+        public synchronized boolean isSuspended()
         {
             return suspended;
         }
 
+        @OnThread(Tag.Any)
         public DebuggerThread getThread()
         {
             return debuggerThread;
