@@ -281,6 +281,7 @@ class VMReference
                     // Synchronize to prevent problems.
                     synchronized (connector) {
                         String address = connector.startListening(arguments);
+                        Debug.log("Listening for JDWP connection on address: " + address);
                         paramList.add(transportIndex, "-Xrunjdwp:transport=" + connector.transport().name()
                                 + ",address=" + address);
                         launchParams = paramList.toArray(new String[paramList.size()]);
@@ -309,7 +310,7 @@ class VMReference
                         }
                     }
                     
-                    Debug.log("Connected to debug VM via dt_socket transport...");
+                    Debug.log("Connected to debug VM via " + connector.transport().name() + " transport...");
                     setupEventHandling();
                     if (waitForStartup()) {
                         Debug.log("Communication with debug VM fully established.");
@@ -336,8 +337,12 @@ class VMReference
         Debug.message("Failed to connect to debug VM. Reasons follow:");
         for (int i = 0; i < connectors.size(); i++) {
             Debug.message(connectors.get(i).transport().name() + " transport:");
-            failureReasons[i].printStackTrace(new PrintWriter(Debug.getDebugStream()));
+            PrintWriter pw = new PrintWriter(Debug.getDebugStream());
+            failureReasons[i].printStackTrace(pw);
+            pw.flush();
         }
+
+        NetworkTest.doTest();
         
         return null;
     }

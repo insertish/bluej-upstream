@@ -334,13 +334,9 @@ bool launchVM(string jdkLocation)
 	// automatically. The simplest way to resolve this is to set the current working directory.
 
 	// First we save the current working directory:
-	LPTSTR curDir = (LPTSTR) malloc(100);
-	DWORD curDirLen =  GetCurrentDirectory(100, curDir);
-	if (curDirLen > 100) {
-		free(curDir);
-		curDir = (LPTSTR) malloc(curDirLen);
-		GetCurrentDirectory(curDirLen, curDir);
-	}
+	DWORD curDirLen =  GetCurrentDirectory(0, NULL);
+	LPTSTR curDir = (LPTSTR) malloc(curDirLen * sizeof(TCHAR));
+	GetCurrentDirectory(curDirLen, curDir);
 
 	// Now set the directory:
 	string jvmDllPath = jdkLocation + TEXT("\\jre\\bin");
@@ -666,17 +662,6 @@ int WINAPI WinMain
 			}
 		}
 	}
-
-  	// Check to see if there's a currently selected VM
-	checkCurrentVM();
-	
-	if (!forceVMselect && !goodVMs.empty()) {
-		const string &jdkLocation = *(goodVMs.begin());
-		if (launchVM(jdkLocation)) {
-			return 0;
-		}
-	}
-	
 	
 	// Check for VM in bluej.defs
 	string defsVm = getBlueJProperty("bluej.windows.vm");
@@ -691,7 +676,17 @@ int WINAPI WinMain
 			goodVMs.insert(defsVm);
 		}
 	}
+
+  	// Check to see if there's a currently selected VM
+	checkCurrentVM();
 	
+	if (!forceVMselect && !goodVMs.empty()) {
+		const string &jdkLocation = *(goodVMs.begin());
+		if (launchVM(jdkLocation)) {
+			return 0;
+		}
+	}
+
 	// Locate other VMs
 	findRegistryVMs();
 	if (!forceVMselect && goodVMs.size() == 1) {
@@ -727,7 +722,7 @@ int WINAPI WinMain
 					"Please also note, the Java Runtime Environment (JRE) is not sufficient.\n"
 					"You must have a JDK to run " APPNAME ".\n\n"
 					"The launcher will continue to run - if you have a JDK installed, "
-					"you can browse\nfor it (use the browser button)."),
+					"you can browse\nfor it (use the browse button)."),
 				TEXT(APPNAME), MB_ICONEXCLAMATION | MB_OK);
 	}
 
@@ -756,5 +751,5 @@ int WINAPI WinMain
     }
 
 	// We've received WM_QUIT
-    return msg.wParam;
+	return msg.wParam;
 }

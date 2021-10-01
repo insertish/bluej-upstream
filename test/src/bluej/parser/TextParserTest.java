@@ -151,6 +151,28 @@ public class TextParserTest extends TestCase
         assertEquals("double", r);
     }
     
+    /**
+     * Test casting of negative numeric values.
+     */
+    public void testCasting5()
+    {
+        TextAnalyzer tp = new TextAnalyzer(resolver, "", objectBench);
+        String r = tp.parseCommand("(char) -4");
+        assertEquals("char", r);
+        r = tp.parseCommand("(byte) -4");
+        assertEquals("byte", r);        
+        r = tp.parseCommand("(short) -4");
+        assertEquals("short", r);
+        r = tp.parseCommand("(int) -4");
+        assertEquals("int", r);
+        r = tp.parseCommand("(long) -4");
+        assertEquals("long", r);
+        r = tp.parseCommand("(float) -4");
+        assertEquals("float", r);
+        r = tp.parseCommand("(double) -4");
+        assertEquals("double", r);
+    }
+    
     public void testStaticMethodCall()
     {
         TextAnalyzer tp = new TextAnalyzer(resolver, "", objectBench);
@@ -716,6 +738,52 @@ public class TextParserTest extends TestCase
         assertTrue(parser.atEnd());
         exprType = parser.getExpressionType();
         checkConstInt(exprType, 'a');
+    }
+    
+    public void testConstantExpressions3()
+    {
+        // Division by 0 yields a 'non-constant' int
+        TextParser parser = new TextParser(resolver, "4 / 0", null, true);
+        parser.parseExpression();
+        assertTrue(parser.atEnd());
+        JavaEntity exprType = parser.getExpressionType();
+        assertNotNull(exprType);
+        assertEquals("int", exprType.getType().toString());
+        
+        // Division by floating-point 0 yields a constant infinity
+        parser = new TextParser(resolver, "4.0 / 0.0", null, true);
+        parser.parseExpression();
+        assertTrue(parser.atEnd());
+        exprType = parser.getExpressionType();
+        assertNotNull(exprType);
+        assertEquals("double", exprType.getType().toString());
+        
+        parser = new TextParser(resolver, "(int)(4.0 / 0.0)", null, true);
+        parser.parseExpression();
+        assertTrue(parser.atEnd());
+        exprType = parser.getExpressionType();
+        checkConstInt(exprType, Integer.MAX_VALUE);
+
+        parser = new TextParser(resolver, "4.0f / 0.0f", null, true);
+        parser.parseExpression();
+        assertTrue(parser.atEnd());
+        exprType = parser.getExpressionType();
+        assertNotNull(exprType);
+        assertEquals("float", exprType.toString());
+        
+        parser = new TextParser(resolver, "(int)(4.0f / 0.0f)", null, true);
+        parser.parseExpression();
+        assertTrue(parser.atEnd());
+        exprType = parser.getExpressionType();
+        checkConstInt(exprType, Integer.MAX_VALUE);
+
+        // Modulo implies division
+        parser = new TextParser(resolver, "4 % 0", null, true);
+        parser.parseExpression();
+        assertTrue(parser.atEnd());
+        exprType = parser.getExpressionType();
+        assertNotNull(exprType);
+        assertEquals("int", exprType.toString());
     }
     
     public void testConstantStrings()

@@ -1,5 +1,5 @@
 
-BlueJ version 3.0.5       --        README.TXT
+BlueJ version 3.0.6       --        README.TXT
 
 Information about BlueJ
 -----------------------
@@ -21,11 +21,19 @@ A history of changes in this and earlier BlueJ versions is at
 
   http://www.bluej.org/help/changes.html
 
+BlueJ usage data
+----------------
+When you use BlueJ, some anonymous non-personal information (BlueJ 
+version, Java version, Operating System, interface language, etc) is 
+sent to the BlueJ maintainers, to help with development planning. 
+This can be disabled by adding a "bluej.uid=private" setting to your 
+bluej.properties file. 
+
 The BlueJ Team
 --------------
 BlueJ is being developed by:
 La Trobe University: John Rosenberg, Davin McCall, Marion Zalk
-University of Kent at Canterbury: Ian Utting, Michael Kolling, Neil Brown, Phil Stevens
+University of Kent at Canterbury: Ian Utting, Michael Kölling, Neil Brown, Phil Stevens
 
 The BlueJ License
 -----------------

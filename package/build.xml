@@ -11,6 +11,7 @@
     
     <property name="bluej.source.zip" value="BlueJ-source-${bluej.version.nodots}.zip"/>
     
+	<!-- Library files to be installed as part of BlueJ -->
     <patternset id="bluej.libfiles">
         <exclude name="**/.#*" />
         <include name="lib/bluej.jar" />
@@ -25,6 +26,7 @@
         <include name="lib/svnkit.jar" />
         <include name="lib/svnkit-javahl.jar" />
         <include name="lib/trilead.jar" />
+    	<include name="lib/bjdoclet.jar" />
         <include name="lib/bluej.defs" />
         <include name="lib/moe.defs" />
         <include name="lib/userlib/README.TXT" />
@@ -270,10 +272,6 @@
 		<unzip src="${dist.jar}" dest="winsetup/SourceDir" />
 					
 		<exec dir="winsetup" executable="${wix_bin}/candle.exe">
-			<arg line="registry.wxs"/>
-		</exec>
-			
-		<exec dir="winsetup" executable="${wix_bin}/candle.exe">
 			<arg line="JDKDlg.wxs"/>
 		</exec>
 			
@@ -299,7 +297,7 @@
 		</exec>
 			
 		<exec dir="winsetup" executable="${wix_bin}/light.exe">
-			<arg line="-ext WixUIExtension -loc bluej.wxl bluej.wixobj registry.wixobj CheckboxExtrasDlg.wixobj JDKDlg.wixobj ui.wixobj bluej-install-files.wixobj -o bluej-${bluej.version}.msi"/>
+			<arg line="-ext WixUIExtension -loc bluej.wxl bluej.wixobj CheckboxExtrasDlg.wixobj JDKDlg.wixobj ui.wixobj bluej-install-files.wixobj -o bluej-${bluej.version}.msi"/>
 		</exec>
 		<delete dir="winsetup/SourceDir" />
 	</target>
@@ -434,9 +432,12 @@
 	            <include name="src/**/*.java" />       
 	            <include name="boot/src/**/*.java" />       
 	            <include name="boot/src/bluej/splash.jpg" />
+            	<include name="bjdoclet/**" />
 	            <include name="doc/HOWTO.*" />    
 	            <include name="doc/THIRDPARTYLICENSE.txt" />
-	            <include name="doc/LICENSE.txt" />  
+	            <include name="doc/LICENSE.txt" />
+            	<include name="doc/BlueJ-parser.txt" />
+            	<include name="doc/threading-issues.txt" />
 	            <include name="examples/**/*" />          
 	            <include name="icons/**/*" />           
 	            <include name="lib/**/*" />     
