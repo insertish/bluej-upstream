@@ -25,6 +25,7 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
+import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.Reader;
 import java.util.Iterator;
@@ -36,6 +37,7 @@ import bluej.debugger.gentype.GenTypeParameter;
 import bluej.debugger.gentype.GenTypeSolid;
 import bluej.debugger.gentype.JavaType;
 import bluej.debugger.gentype.Reflective;
+import bluej.parser.entity.ClassLoaderResolver;
 import bluej.parser.entity.EntityResolver;
 import bluej.parser.entity.JavaEntity;
 import bluej.parser.entity.PackageResolver;
@@ -123,14 +125,18 @@ public class InfoParser extends EditorParser
 
     public static ClassInfo parse(File f) throws FileNotFoundException
     {
-        FileInputStream fis = new FileInputStream(f);
-        return parse(new InputStreamReader(fis), null, null);
+        return parse(f, new ClassLoaderResolver(InfoParser.class.getClassLoader()));
     }
     
     public static ClassInfo parse(File f, EntityResolver resolver) throws FileNotFoundException
     {
         FileInputStream fis = new FileInputStream(f);
-        return parse(new BufferedReader(new InputStreamReader(fis)), resolver, null);
+        ClassInfo info = parse(new BufferedReader(new InputStreamReader(fis)), resolver, null);
+        try {
+            fis.close();
+        }
+        catch (IOException ioe) {}
+        return info;
     }
     
     public static ClassInfo parse(File f, Package pkg) throws FileNotFoundException
@@ -138,7 +144,12 @@ public class InfoParser extends EditorParser
         FileInputStream fis = new FileInputStream(f);
         EntityResolver resolver = new PackageResolver(pkg.getProject().getEntityResolver(),
                 pkg.getQualifiedName());
-        return parse(new BufferedReader(new InputStreamReader(fis)), resolver, pkg.getQualifiedName());
+        ClassInfo info = parse(new BufferedReader(new InputStreamReader(fis)), resolver, pkg.getQualifiedName());
+        try {
+            fis.close();
+        }
+        catch (IOException ioe) {}
+        return info;
     }
 
     public static ClassInfo parse(Reader r, EntityResolver resolver, String targetPkg)
@@ -333,6 +344,8 @@ public class InfoParser extends EditorParser
     {
         super.beginTypeBody(token);
         classLevel++;
+        gotExtends = false;
+        gotImplements = false;
     }
     
     @Override
@@ -353,8 +366,12 @@ public class InfoParser extends EditorParser
         if (tentity != null && ! gotExtends && ! gotImplements) {
             typeReferences.add(tentity);
         }
+        
+        boolean isSuper = storeCurrentClassInfo && gotExtends && !info.isInterface();
+        boolean isInterface = storeCurrentClassInfo && (gotImplements ||
+                (info.isInterface() && gotExtends));
 
-        if (gotExtends && storeCurrentClassInfo) {
+        if (isSuper) {
             // The list of tokens gives us the name of the class that we extend
             superclassEntity = ParseUtils.getTypeEntity(scopeStack.get(0), null, tokens);
             info.setSuperclass(""); // this will be corrected when the type is resolved
@@ -362,9 +379,8 @@ public class InfoParser extends EditorParser
             info.setSuperReplaceSelection(superClassSelection);
             info.setImplementsInsertSelection(new Selection(superClassSelection.getEndLine(),
                     superClassSelection.getEndColumn()));
-            gotExtends = false;
         }
-        else if (gotImplements && storeCurrentClassInfo) {
+        else if (isInterface) {
             Selection interfaceSel = getSelection(tokens);
             if (lastCommaSelection != null) {
                 lastCommaSelection.extendEnd(interfaceSel.getLine(), interfaceSel.getColumn());
@@ -543,7 +559,6 @@ public class InfoParser extends EditorParser
     {
         super.gotTypeDefExtends(extendsToken);
         if (classLevel == 0 && storeCurrentClassInfo) {
-            // info.setExtendsReplaceSelection(s)
             gotExtends = true;
             SourceLocation extendsStart = info.getExtendsInsertSelection().getStartLocation();
             int extendsEndCol = tokenStream.LA(1).getColumn();
@@ -555,6 +570,12 @@ public class InfoParser extends EditorParser
                 info.setExtendsReplaceSelection(new Selection(extendsEndLine, extendsStart.getColumn(), extendsToken.getEndColumn() - extendsStart.getColumn()));
             }
             info.setExtendsInsertSelection(null);
+            
+            if (info.isInterface()) {
+                interfaceSelections = new LinkedList<Selection>();
+                interfaceSelections.add(getSelection(extendsToken));
+                interfaceEntities = new LinkedList<JavaEntity>();
+            }
         }
     }
 
@@ -562,6 +583,7 @@ public class InfoParser extends EditorParser
     {
         super.gotTypeDefImplements(implementsToken);
         if (classLevel == 0 && storeCurrentClassInfo) {
+            gotExtends = false;
             gotImplements = true;
             interfaceSelections = new LinkedList<Selection>();
             interfaceSelections.add(getSelection(implementsToken));

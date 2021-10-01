@@ -87,16 +87,18 @@
     </fileset>
 
     <!-- These are files which should be made to have system line endings -->
-    <patternset id="bluej.textfiles">
+    <patternset id="bluej.textfiles.utf8">
         <include name="examples/**/*.java" />
         <include name="examples/**/README.*" />
         <include name="lib/bluej.defs" />
         <include name="lib/moe.defs" />
+        <include name="lib/*/templates/**" />
+    </patternset>
+	<patternset id="bluej.textfiles.iso88591">
         <include name="lib/*/labels" />
         <include name="lib/*/dialogues" />
         <include name="lib/*/*.help" />
-        <include name="lib/*/templates/**" />
-    </patternset>
+	</patternset>
     
     <target name="dist">
         <delete dir="install_tmp" />
@@ -122,8 +124,11 @@
         </touch>
 
         <!-- make sure line endings are in unix format -->
-        <fixcrlf srcdir="install_tmp" eol="lf">
-            <patternset refid="bluej.textfiles" />
+        <fixcrlf srcdir="install_tmp" eol="lf" encoding="ISO-8859-1">
+            <patternset refid="bluej.textfiles.iso88591" />
+        </fixcrlf>
+        <fixcrlf srcdir="install_tmp" eol="lf" encoding="UTF-8">
+            <patternset refid="bluej.textfiles.utf8" />
         </fixcrlf>
         
         <chmod dir="install_tmp" perm="a+r"/>
@@ -271,7 +276,7 @@
 		<chmod perm="ugo+x" file="bluejdeb/usr/bin/bluej" verbose="true" />
 		
 		<!-- lib files -->
-		<mkdir dir="bluejdeb/usr/bin/bluejlib" />
+		<mkdir dir="bluejdeb/usr/share/bluej" />
 		<mkdir dir="bluejdeb-lib-tmp" />
         <copy todir="bluejdeb-lib-tmp">
             <fileset dir="${bluej_home}">
@@ -279,7 +284,7 @@
             	<patternset refid="bluej.libfiles" />
             </fileset>
         </copy>
-		<move todir="bluejdeb/usr/bin/bluejlib">
+		<move todir="bluejdeb/usr/share/bluej">
 			<fileset dir="bluejdeb-lib-tmp/lib">
 				<patternset includes="**" />
 			</fileset>
@@ -339,32 +344,20 @@
 		
 		<delete dir="bluejdeb" />
 	</target>
-    
-     <!-- windows-launcher builds the Delphi launcher for BlueJ. 
-          It is not yet functional-->
-    <target name="windows-launcher">
         
-        <!-- update registry version number in launcher Delphi src to bluej version -->
-        <replaceregexp byline="true">
-            <regexp pattern="bluejregkey : string = .*" />
-            <substitution expression="bluejregkey : string = '\\\\Software\\\\BlueJ\\\\BlueJ\\\\${bluej.version}';" />
-            <fileset dir="winlaunch" includes="main.pas" />
-        </replaceregexp>
-        
-        <!-- here is where we should call the delphi command-line compiler -->
-            
-    </target>
-    
     <!-- windows-dist requires that a bluej-dist.jar file is placed into
          the package directory. This is unjarred and then rebuilt into
          the windows installer package (left as winsetup/bluejsetup.exe)-->
-    <target name="windows-dist" depends="windows-launcher">
+    <target name="windows-dist">
         <delete dir="install_tmp" />
         <unzip src="${dist.jar}" dest="install_tmp" />
 
         <!-- make sure line endings are in windows format -->
-        <fixcrlf srcdir="install_tmp" eol="crlf">
-            <patternset refid="bluej.textfiles" />
+        <fixcrlf srcdir="install_tmp" eol="crlf" encoding="ISO-8859-1">
+            <patternset refid="bluej.textfiles.iso88591" />
+        </fixcrlf>
+        <fixcrlf srcdir="install_tmp" eol="crlf" encoding="UTF-8">
+            <patternset refid="bluej.textfiles.utf8" />
         </fixcrlf>
         
         <!-- update version number in innosetup config file -->

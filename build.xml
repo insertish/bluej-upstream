@@ -15,14 +15,14 @@
      After changing the version number the target "update-version-number" should be run -->
     <property name="bluej.version.major" value="3" />
     <property name="bluej.version.minor" value="0" />
-    <property name="bluej.version.release" value="0" />
+    <property name="bluej.version.release" value="1" />
     <property name="bluej.version.suffix" value="" />
 	<!-- suffix with no spaces, eg "pre2" -->
 	<property name="bluej.version.nonspace.suffix" value="" />
     
 	<property name="bluej.version" value="${bluej.version.major}.${bluej.version.minor}.${bluej.version.release}${bluej.version.suffix}" />
     <property name="bluej.version.nodots" value="${bluej.version.major}${bluej.version.minor}${bluej.version.release}${bluej.version.suffix}" />
-	<property name="bluej.version.debian" value="${bluej.version.major}.${bluej.version.minor}${bluej.version.release}.${bluej.version.nonspace.suffix}" />
+	<property name="bluej.version.debian" value="${bluej.version.major}.${bluej.version.minor}.${bluej.version.release}${bluej.version.nonspace.suffix}" />
 
     <!-- user specific properties that are edited to match local build environment-->
     <property file="build.properties"/>
@@ -300,6 +300,7 @@ LICENSE.txt file that accompanied this code.${line.separator}
                 <pathelement location="${core.jar}"/>
                 <pathelement location="${extension.jar}"/>
                 <pathelement location="${run_java_home}/lib/tools.jar"/>
+            	<pathelement location="${editor.jar}"/>
                 <pathelement location="${test.build}"/>
             </classpath>
 
@@ -308,6 +309,7 @@ LICENSE.txt file that accompanied this code.${line.separator}
             <batchtest fork="yes" todir="${test.report}">
                 <fileset dir="${test.src}">
                     <include name="**/*Test*.java"/>
+                	<exclude name="bluej/debugger/gentype/TestReflective.java"/>
                     <exclude name="**/AllTests.java"/>
                 </fileset>
             </batchtest>

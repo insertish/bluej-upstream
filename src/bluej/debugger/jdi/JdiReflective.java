@@ -270,13 +270,16 @@ public class JdiReflective extends Reflective
                 ClassType ctClass = (ClassType) rclass;
 
                 // superclass
-                Reflective r = new JdiReflective(ctClass.superclass());
-                rlist.add(new GenTypeClass(r));
+                ClassType superclass = ctClass.superclass();
+                if (superclass != null) {
+                    Reflective r = new JdiReflective(ctClass.superclass());
+                    rlist.add(new GenTypeClass(r));
+                }
 
                 // interfaces
                 List<InterfaceType> interfaces = ctClass.interfaces();
                 for (Iterator<InterfaceType> i = interfaces.iterator(); i.hasNext();) {
-                    r = new JdiReflective(i.next());
+                    Reflective r = new JdiReflective(i.next());
                     rlist.add(new GenTypeClass(r));
                 }
                 return rlist;
@@ -349,7 +352,7 @@ public class JdiReflective extends Reflective
         {
             if (a instanceof ClassType) {
                 if (b instanceof InterfaceType) {
-                    List l = ((ClassType)a).allInterfaces();
+                    List<InterfaceType> l = ((ClassType)a).allInterfaces();
                     return l.contains(b);
                 }
                 else if (b instanceof ClassType) {
@@ -367,7 +370,7 @@ public class JdiReflective extends Reflective
                 if (! (b instanceof InterfaceType))
                     return false;
                 
-                List l = new LinkedList(); 
+                List<InterfaceType> l = new LinkedList<InterfaceType>(); 
                 l.addAll(((InterfaceType) a).superinterfaces());
                 while (! l.isEmpty()) {
                     // get the first superinterface in the list
@@ -417,11 +420,9 @@ public class JdiReflective extends Reflective
      */
     private static ReferenceType findClass(String name, ClassLoaderReference cl, VirtualMachine vm)
     {
-        Iterator i;
-
         if (cl != null) {
             // See if the desired class was initiated by our class loader.
-            i = cl.visibleClasses().iterator();
+            Iterator<ReferenceType> i = cl.visibleClasses().iterator();
             while (i.hasNext()) {
                 ReferenceType ct = (ReferenceType) i.next();
                 if (ct.name().equals(name))
@@ -432,7 +433,7 @@ public class JdiReflective extends Reflective
             // A null classloader means the bootstrap class loader was used.
             // So look for the class with the correct name which was loaded
             // by the bootstrap loader.
-            i = vm.classesByName(name).iterator();
+            Iterator<ReferenceType> i = vm.classesByName(name).iterator();
             while (i.hasNext()) {
                 ReferenceType ct = (ReferenceType) i.next();
                 if (ct.classLoader() == null)
@@ -478,7 +479,8 @@ public class JdiReflective extends Reflective
      *            loader of this type is used to locate embedded types.
      * @return The GenType structure determined from the signature.
      */
-    private static GenTypeParameter fromSignature(StringIterator i, Map tparams, ReferenceType parent)
+    private static GenTypeParameter fromSignature(StringIterator i,
+            Map<String,? extends GenTypeParameter> tparams, ReferenceType parent)
     {
         char c = i.next();
         if (c == '*') {
@@ -491,23 +493,27 @@ public class JdiReflective extends Reflective
             // The bound must be a solid, but it's possible that tparams map
             // a type parameter (solid) to a wildcard (non-solid).
             GenTypeSolid t = (GenTypeSolid) fromSignature(i, null, parent);
-            if (tparams != null)
+            if (tparams != null) {
                 return new GenTypeExtends(t).mapTparsToTypes(tparams);
-            else
+            }
+            else {
                 return new GenTypeExtends(t);
+            }
         }
         if (c == '-') {
             // ? super ...
             // Likewise as for extends.
             GenTypeSolid t = (GenTypeSolid) fromSignature(i, null, parent);
-            if (tparams != null)
+            if (tparams != null) {
                 return new GenTypeSuper(t).mapTparsToTypes(tparams);
-            else
+            }
+            else {
                 return new GenTypeSuper(t);
+            }
         }
         if (c == '[') {
             // array
-            JavaType t = (JavaType) fromSignature(i, tparams, parent);
+            GenTypeParameter t = fromSignature(i, tparams, parent);
             t = new GenTypeArray(t);
             return t;
         }
@@ -515,7 +521,7 @@ public class JdiReflective extends Reflective
             // type parameter
             String tname = readClassName(i);
             if (tparams != null && tparams.get(tname) != null)
-                return (JavaType) tparams.get(tname);
+                return tparams.get(tname);
             else
                 return new GenTypeTpar(tname);
         }
@@ -551,6 +557,9 @@ public class JdiReflective extends Reflective
             // double
             return JavaPrimitiveType.getDouble();
         }
+        if (c == 'V') {
+            return JavaPrimitiveType.getVoid();
+        }
 
         if (c != 'L')
             Debug.message("Generic signature begins without 'L'?? (got " + c + ")");
@@ -559,18 +568,19 @@ public class JdiReflective extends Reflective
         Reflective reflective = new JdiReflective(basename, parent);
         c = i.current();
         if (c == ';')
-            return new GenTypeClass(reflective, (List) null);
+            return new GenTypeClass(reflective, (List<GenTypeParameter>) null);
 
         if (c != '<') {
             Debug.message("Generic signature: expected '<', got '" + c + "' ??");
             return null;
         }
 
-        List params = new ArrayList();
+        List<GenTypeParameter> params = new ArrayList<GenTypeParameter>();
         do {
-            JavaType ptype = (JavaType) fromSignature(i, tparams, parent);
-            if (ptype == null)
+            GenTypeParameter ptype = fromSignature(i, tparams, parent);
+            if (ptype == null) {
                 return null;
+            }
             params.add(ptype);
         } while (i.peek() != '>');
         i.next(); // fetch the '>'
@@ -579,14 +589,16 @@ public class JdiReflective extends Reflective
         GenTypeClass result = new GenTypeClass(reflective, params);
 
         // if c is now '.', we have an inner class
-        if (c == '.')
+        if (c == '.') {
             return innerFromSignature(i, basename, result, tparams, parent);
+        }
         
         // otherwise assume we have ';'
         return result;
     }
     
-    private static GenTypeClass innerFromSignature(StringIterator i, String outerName, GenTypeClass outer, Map tparams, ReferenceType parent)
+    private static GenTypeClass innerFromSignature(StringIterator i, String outerName, GenTypeClass outer,
+            Map<String,? extends GenTypeParameter> tparams, ReferenceType parent)
     {
         String basename = readClassName(i);
         String innerName = outerName + '$' + basename;
@@ -594,14 +606,15 @@ public class JdiReflective extends Reflective
             
         char c = i.current();
         if (c == ';')
-            return new GenTypeClass(reflective, (List) null, outer);
+            return new GenTypeClass(reflective, (List<GenTypeParameter>) null, outer);
         
         if (c == '<') {
-            List params = new ArrayList();
+            List<GenTypeParameter> params = new ArrayList<GenTypeParameter>();
             do {
-                JavaType ptype = (JavaType) fromSignature(i, tparams, parent);
-                if (ptype == null)
+                GenTypeParameter ptype = fromSignature(i, tparams, parent);
+                if (ptype == null) {
                     return null;
+                }
                 params.add(ptype);
             } while (i.peek() != '>');
             i.next(); // fetch the '>'
@@ -643,7 +656,7 @@ public class JdiReflective extends Reflective
             // The class may or may not be loaded.
             Reflective ref;
             ref = new JdiReflective(typeName, clr, vm);
-            return new GenTypeClass(ref, (List) null);
+            return new GenTypeClass(ref, (List<GenTypeParameter>) null);
         }
     }
 
@@ -686,16 +699,17 @@ public class JdiReflective extends Reflective
 
         // check for primitive type, or raw type
         //if (gensig == null && (rt == null || rt.genericSignature() != null))
-        if (gensig == null)
+        if (gensig == null) {
             return getNonGenericType(f.typeName(), t, parent.obj.referenceType().classLoader(), parent.obj
                     .virtualMachine());
+        }
 
         // generic version.
         GenTypeClass genType = parent.getGenType();
         
         // Map from containing object type to the type in which the field was
         // declared. Then extract the type parameter mappings.
-        Map tparams = genType.mapToSuper(f.declaringType().name()).getMap();
+        Map<String,GenTypeParameter> tparams = genType.mapToSuper(f.declaringType().name()).getMap();
         if (tparams == null) {
             // raw parent
             Reflective r = new JdiReflective(f.typeName(), parent.obj.referenceType());
@@ -776,8 +790,9 @@ public class JdiReflective extends Reflective
         catch (ClassNotLoadedException cnle) {
             // Debug.message("ClassNotLoadedException, name = " + f.typeName());
             t = findClass(var.typeName(), declType.classLoader(), declType.virtualMachine());
-            if (t == null && v != null)
+            if (t == null && v != null) {
                 t = v.type();
+            }
         }
 
         final String gensig = JdiUtils.getJdiUtils().genericSignature(var);
@@ -787,7 +802,7 @@ public class JdiReflective extends Reflective
 
         // if the generic signature wasn't null, get the type from it.
         StringIterator iterator = new StringIterator(gensig);
-        Map tparams = new HashMap();
+        Map<String,GenTypeParameter> tparams = new HashMap<String,GenTypeParameter>();
         addDefaultParamBases(tparams, new JdiReflective(declType));
         return (JavaType) fromSignature(iterator, tparams, declType);
     }
@@ -799,13 +814,14 @@ public class JdiReflective extends Reflective
      * @param tparams       The map (String -> GenTypeClass)
      * @param declaringType the type for which to add default mappings
      */
-    private static void addDefaultParamBases(Map tparams, JdiReflective declaringType)
+    private static void addDefaultParamBases(Map<String,GenTypeParameter> tparams,
+            JdiReflective declaringType)
     {
         while (declaringType != null) {
-            Iterator i = declaringType.getTypeParams().iterator();
+            Iterator<GenTypeDeclTpar> i = declaringType.getTypeParams().iterator();
             
             while( i.hasNext() ) {
-                GenTypeDeclTpar tpar = (GenTypeDeclTpar) i.next();
+                GenTypeDeclTpar tpar = i.next();
                 
                 String paramName = tpar.getTparName();
                 
@@ -839,13 +855,71 @@ public class JdiReflective extends Reflective
     @Override
     public Map<String,JavaType> getDeclaredFields()
     {
-        return Collections.emptyMap(); // not implemented
+        checkLoaded();
+        List<Field> fields = rclass.fields();
+        Map<String,JavaType> rfields = new HashMap<String,JavaType>();
+        
+        for (Field field : fields) {
+            String genSig = field.genericSignature();
+            if (genSig == null) {
+                genSig = field.signature();
+            }
+            
+            StringIterator i = new StringIterator(genSig);
+            JavaType ftype = (JavaType) fromSignature(i, null, rclass);
+            rfields.put(field.name(), ftype);
+        }
+        
+        return rfields;
     }
     
     @Override
     public Map<String,Set<MethodReflective>> getDeclaredMethods()
     {
-        return Collections.emptyMap(); // not implemented
+        checkLoaded();
+        List<Method> methods = rclass.methods();
+        Map<String,Set<MethodReflective>> methodMap = new HashMap<String,Set<MethodReflective>>();
+        
+        for (Method method : methods) {
+            // Process the string signature to determine return and param types
+            String genSig = method.genericSignature();
+            if (genSig == null) {
+                genSig = method.signature();
+            }
+            
+            StringIterator i = new StringIterator(genSig);
+            List<GenTypeDeclTpar> tparTypes = getTypeParams(i);
+
+            char c = i.next();
+            if (c != '(') {
+                continue;
+            }
+            
+            List<JavaType> paramTypes = new ArrayList<JavaType>();
+            while (i.peek() != ')') {
+                GenTypeParameter gtp = fromSignature(i, null, rclass);
+                paramTypes.add((JavaType) gtp);
+            }
+            
+            i.next(); // skip ')'
+            JavaType returnType = (JavaType) fromSignature(i, null, rclass);
+            
+            boolean isVarArgs = method.isVarArgs();
+            int modifiers = method.modifiers();
+            
+            MethodReflective mr = new MethodReflective(method.name(), returnType, tparTypes,
+                    paramTypes, this, isVarArgs, modifiers);
+            
+            Set<MethodReflective> mset = methodMap.get(mr.getName());
+            if (mset == null) {
+                mset = new HashSet<MethodReflective>();
+                methodMap.put(mr.getName(), mset);
+            }
+            
+            mset.add(mr);
+        }
+        
+        return methodMap;
     }
     
     @Override

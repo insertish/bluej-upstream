@@ -19,7 +19,7 @@
  This file is subject to the Classpath exception as provided in the  
  LICENSE.txt file that accompanied this code.
  */
-package bluej.editor.moe;
+package bluej.parser;
 
 /**
  * Describes a possible code completion.
@@ -34,10 +34,7 @@ public abstract class AssistContent
     public abstract String getDisplayMethodParams();
     
     /** Get the text to display in the code completion box for this completion */
-    public String getDisplayName()
-    {
-        return getDisplayMethodName() + getDisplayMethodParams();
-    }
+    public abstract String getDisplayName();
     
     /** Get the completion text (to appear in front of the cursor/selection) */
     public abstract String getCompletionText();

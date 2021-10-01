@@ -148,6 +148,7 @@ public final class EscapedUnicodeReader extends Reader
         
         int val = Character.digit((char) uc, 16);
         if (val == -1) {
+            putBuffer(uc);
             return 0xFFFF;
         }
         processChar((char)uc);

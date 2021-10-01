@@ -350,14 +350,29 @@ public class BasicParseTest extends junit.framework.TestCase
         String aSrc = "class A {\n"
             + "  void method1(int [] a) { }\n"
             + "  void method2(int a[]) { }\n"
+            + "  void method3(String [] a) { }\n"
             + "}\n";
         
-        ClassInfo info = InfoParser.parse(new StringReader(aSrc), null, null);
+        ClassInfo info = InfoParser.parse(new StringReader(aSrc), new ClassLoaderResolver(getClass().getClassLoader()), null);
         Properties comments = info.getComments();
         assertTrue(findTarget(comments, "void method1(int[])") != -1);
         assertTrue(findTarget(comments, "void method2(int[])") != -1);
+        assertTrue(findTarget(comments, "void method3(java.lang.String[])") != -1);
     }
-    
+
+    public void testCommentExtraction2() throws Exception
+    {
+        String aSrc = "class A<T> {\n"
+            + "  void method1(T [] a) { }\n"
+            + "  <U> void method2(U a[]) { }\n"
+            + "}\n";
+        
+        ClassInfo info = InfoParser.parse(new StringReader(aSrc), new ClassLoaderResolver(getClass().getClassLoader()), null);
+        Properties comments = info.getComments();
+        assertTrue(findTarget(comments, "void method1(java.lang.Object[])") != -1);
+        assertTrue(findTarget(comments, "void method2(java.lang.Object[])") != -1);
+    }
+
     public void testMultipleInterfaceExtends() throws Exception
     {
         String aSrc = "interface A extends B, C { }";
@@ -375,6 +390,36 @@ public class BasicParseTest extends junit.framework.TestCase
         }
         catch (BadLocationException ble) {}
         return document.getParser();
+    }
+    
+    public void testInterfaceSelections()
+    {
+        InitConfig.init();
+        TestEntityResolver ter = new TestEntityResolver(
+                new ClassLoaderResolver(this.getClass().getClassLoader())
+                );
+        PackageResolver pkgr = new PackageResolver(ter, "");
+        ter.addCompilationUnit("", cuForSource("interface I {}", pkgr));
+        //ter.addCompilationUnit("", cuForSource("interface II extends I {}", pkgr));
+        ter.addCompilationUnit("", cuForSource("interface J {}", pkgr));
+        //ter.addCompilationUnit("", cuForSource("interface JJ extends I, J {}", pkgr));
+
+        String IIsrc = "interface II extends I { public void sampleMethod(); }";
+        ClassInfo info = InfoParser.parse(new StringReader(IIsrc), pkgr, "");
+        
+        List<Selection> isels = info.getInterfaceSelections();
+        assertEquals(2, isels.size());
+        assertEquals(14, isels.get(0).getColumn());
+        assertEquals(22, isels.get(1).getColumn());
+        
+        String JJsrc = "interface JJ extends I, J { public void sampleMethod(); }";
+        info = InfoParser.parse(new StringReader(JJsrc), pkgr, "");
+        isels = info.getInterfaceSelections();
+        assertEquals(4, isels.size());
+        assertEquals(14, isels.get(0).getColumn());  // "extends"
+        assertEquals(22, isels.get(1).getColumn());  // "I"
+        assertEquals(23, isels.get(2).getColumn());  // ","
+        assertEquals(25, isels.get(3).getColumn());  // "J"
     }
     
     public void testDependencyAnalysis()

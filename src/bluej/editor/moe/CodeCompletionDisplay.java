@@ -22,7 +22,6 @@
 package bluej.editor.moe;
 
 
-import bluej.Config;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
@@ -32,7 +31,7 @@ import java.awt.GradientPaint;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.GridLayout;
-import java.awt.Insets;
+import java.awt.Paint;
 import java.awt.event.ActionEvent;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseEvent;
@@ -60,6 +59,8 @@ import javax.swing.event.ListSelectionEvent;
 import javax.swing.event.ListSelectionListener;
 import javax.swing.text.html.HTMLEditorKit;
 
+import bluej.Config;
+import bluej.parser.AssistContent;
 import bluej.parser.SourceLocation;
 import bluej.parser.lexer.LocatableToken;
 import bluej.utility.JavaUtils;
@@ -145,7 +146,9 @@ public class CodeCompletionDisplay extends JFrame
 
         // create function description area     
         methodDescription = new JEditorPane();
-        methodDescription.setBorder(new BorderCustomMargin(BorderFactory.createLineBorder(Color.BLACK)));
+        Border mdBorder = BorderFactory.createCompoundBorder(BorderFactory.createLineBorder(Color.BLACK),
+                BorderFactory.createEmptyBorder(0, 10, 5, 10));
+        methodDescription.setBorder(mdBorder);
         methodDescription.setEditable(false);
         methodDescription.setOpaque(false);
         
@@ -405,42 +408,6 @@ public class CodeCompletionDisplay extends JFrame
     {
         return sig.replace("<", "&lt;").replace(">", "&gt;");
     }
-    
-    /**
-     * A wrapper class for a border that adjusts the insets (margin) of the border
-     * 
-     * We get the border from a Swing helper as a Border, so hence we must wrap rather
-     * than inherit+override.
-     */
-    private static class BorderCustomMargin implements Border
-    {
-        private Border wrappedBorder;
-        public BorderCustomMargin(Border border)
-        {
-            wrappedBorder = border;
-        }
-
-        public Insets getBorderInsets(Component c)
-        {
-            Insets insets = wrappedBorder.getBorderInsets(c);
-            insets.left += 10;
-            insets.right += 5;
-            insets.bottom += 10;
-            return insets;
-        }
-
-        public boolean isBorderOpaque()
-        {
-            return wrappedBorder.isBorderOpaque();
-        }
-
-        public void paintBorder(Component c, Graphics g, int x,
-                int y, int width, int height)
-        {
-            wrappedBorder.paintBorder(c, g, x, y, width, height);
-        }
-
-    }
 
     /**
      * A JScrollPane variant that paints a gradient fill as the background.
@@ -476,8 +443,10 @@ public class CodeCompletionDisplay extends JFrame
                     0, 0, topColor,
                     0, h, bottomColor);
    
+                Paint origPaint = g2d.getPaint();
                 g2d.setPaint(gp);
                 g2d.fillRect(0, 0, w, h);
+                g2d.setPaint(origPaint);
             }
         }
     }    
@@ -495,16 +464,20 @@ public class CodeCompletionDisplay extends JFrame
     }
 
     /**
-     * We have to provide our own glass pane so that it can paint the dragged object.
+     * A glass pane which displays a "no matching completions" message. 
      */
     class CodeCompleteGlassPane extends JComponent
     {
         @Override
         protected void paintComponent(Graphics g)
         {
+            Color origColor = g.getColor();
+            Font origFont = g.getFont();
             g.setColor(msgTextColor);
-            g.setFont(g.getFont().deriveFont(20f));
+            g.setFont(origFont.deriveFont(20f));
             g.drawString(Config.getString("editor.completion.noMatch"), 30, 60);
+            g.setColor(origColor);
+            g.setFont(origFont);
         }
     }
 }
