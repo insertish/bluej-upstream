@@ -1,0 +1,11 @@
+# Built files
+classes
+boot/classes
+threadchecker/classes
+threadchecker/pluginclasses
+
+# Configuration
+build.properties
+
+# Packages
+javafx17.0

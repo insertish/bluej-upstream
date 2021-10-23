@@ -14,7 +14,10 @@
 # compilation should be done on the minimum supported JDK for
 # BlueJ.
 #####################################################################
-build_java_home=/Library/Java/JavaVirtualMachines/jdk11.jdk/Contents/Home
+build_java_home=/usr/lib/jvm/default
+
+## Example for Mac OS:
+#build_java_home=/Library/Java/JavaVirtualMachines/jdk11.jdk/Contents/Home
 
 ## Example for Windows:
 #build_java_home=c:/Program Files/Java/jdk11
@@ -27,7 +30,7 @@ java_command_dir_name=bin
 # for JavaFX. This is used for building/running and is also bundled
 # into Mac/Windows distributable packages.
 #####################################################################
-openjfx_path=/Users/me/opt/javafx11.0
+openjfx_path=./javafx17.0
 
 #####################################################################
 # the run_java_home is used to find the jvm to run and the 
