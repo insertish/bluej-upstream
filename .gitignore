@@ -8,6 +8,9 @@ boot/classes
 threadchecker/classes
 threadchecker/pluginclasses
 
+# persistent mf
+/lib/userlib/bluej-junit-ext.jar
+
 # Configuration
 build.properties
 
