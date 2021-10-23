@@ -1,5 +1,9 @@
 # Built files
+# We need to pull in existing libraries from
+# upstream but don't include any changes to these.
+package
 classes
+lib/*.jar
 boot/classes
 threadchecker/classes
 threadchecker/pluginclasses
